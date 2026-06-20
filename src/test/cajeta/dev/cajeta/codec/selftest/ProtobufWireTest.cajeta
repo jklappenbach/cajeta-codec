@@ -1,0 +1,71 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.protobuf.ProtobufWire;
+
+/**
+ * Phase 2.1 — protobuf wire primitives. Varint decode (1/2/multi-byte, at an
+ * offset) + tag field-number/wire-type extraction, against hand-encoded byte
+ * vectors from the protobuf spec.
+ */
+public class ProtobufWireTest {
+
+    public ProtobufWireTest() {
+        return;
+    }
+
+    @Test
+    public void varintSingleByte() {
+        int8[] b = {(int8) 0x01};
+        Assert.that(ProtobufWire.decodeVarint(b, (int64) 0)).isEqualTo((int64) 1);
+        Assert.that(ProtobufWire.varintLen(b, (int64) 0)).isEqualTo((int64) 1);
+        return;
+    }
+
+    @Test
+    public void varint150TwoBytes() {
+        // 150 = 0x96 0x01 (the canonical protobuf varint example)
+        int8[] b = {(int8) 0x96, (int8) 0x01};
+        Assert.that(ProtobufWire.decodeVarint(b, (int64) 0)).isEqualTo((int64) 150);
+        Assert.that(ProtobufWire.varintLen(b, (int64) 0)).isEqualTo((int64) 2);
+        return;
+    }
+
+    @Test
+    public void varint300() {
+        int8[] b = {(int8) 0xAC, (int8) 0x02};
+        Assert.that(ProtobufWire.decodeVarint(b, (int64) 0)).isEqualTo((int64) 300);
+        return;
+    }
+
+    @Test
+    public void tagDecodeLenField1() {
+        // tag 0x0A = (field 1 << 3) | wire 2 (LEN)
+        int8[] b = {(int8) 0x0A};
+        int64 tag = ProtobufWire.decodeVarint(b, (int64) 0);
+        Assert.that(tag).isEqualTo((int64) 10);
+        Assert.that((int64) ProtobufWire.tagFieldNumber(tag)).isEqualTo((int64) 1);
+        Assert.that((int64) ProtobufWire.tagWireType(tag)).isEqualTo((int64) 2);
+        return;
+    }
+
+    @Test
+    public void tagDecodeField16Varint() {
+        // field 16, wire 0 → tag = 128 → two-byte varint 0x80 0x01
+        int8[] b = {(int8) 0x80, (int8) 0x01};
+        int64 tag = ProtobufWire.decodeVarint(b, (int64) 0);
+        Assert.that(tag).isEqualTo((int64) 128);
+        Assert.that((int64) ProtobufWire.tagFieldNumber(tag)).isEqualTo((int64) 16);
+        Assert.that((int64) ProtobufWire.tagWireType(tag)).isEqualTo((int64) 0);
+        return;
+    }
+
+    @Test
+    public void varintAtOffset() {
+        // [0x0A, 0x96, 0x01] — the varint at pos 1 is 150 (len 2)
+        int8[] b = {(int8) 0x0A, (int8) 0x96, (int8) 0x01};
+        Assert.that(ProtobufWire.decodeVarint(b, (int64) 1)).isEqualTo((int64) 150);
+        Assert.that(ProtobufWire.varintLen(b, (int64) 1)).isEqualTo((int64) 2);
+        return;
+    }
+}

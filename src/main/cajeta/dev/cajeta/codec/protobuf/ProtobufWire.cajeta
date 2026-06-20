@@ -1,0 +1,72 @@
+package dev.cajeta.codec.protobuf;
+
+/**
+ * Protocol Buffers wire-format primitives — the base-128 varint and tag
+ * decoders that the structural scan (`ProtobufIndex`, 2.1) and the lazy cursor
+ * (`ProtobufCursor`, 2.2) build on.
+ *
+ * A protobuf message is a flat sequence of `(tag, value)` records. The **tag**
+ * is a varint whose low 3 bits are the **wire type** and whose remaining bits
+ * are the **field number**: `tag = (field_number << 3) | wire_type`. A
+ * **varint** is little-endian base-128: each byte contributes its low 7 bits,
+ * the high bit (0x80) is a continuation flag.
+ *
+ * Wire types: 0 VARINT · 1 I64 (fixed64) · 2 LEN (length-delimited) · 5 I32
+ * (fixed32). Types 3/4 (groups) are deprecated — the index fails loud on them.
+ */
+public final class ProtobufWire {
+    /** Wire type for base-128 varint fields. */
+    public static int32 wireVarint() { return 0; }
+    /** Wire type for fixed 64-bit fields. */
+    public static int32 wireI64()    { return 1; }
+    /** Wire type for length-delimited fields. */
+    public static int32 wireLen()    { return 2; }
+    /** Wire type for fixed 32-bit fields. */
+    public static int32 wireI32()    { return 5; }
+
+    /**
+     * Byte length of the base-128 varint starting at `pos` — the count of bytes
+     * up to and including the first whose continuation bit (0x80) is clear.
+     */
+    public static int64 varintLen(int8[] b, int64 pos) {
+        int64 i = pos;
+        boolean go = true;
+        while (go) {
+            int8 c = b[i];
+            i = i + 1;
+            if ((((int32) c) & 0x80) == 0) { go = false; }
+        }
+        return i - pos;
+    }
+
+    /**
+     * Decode the base-128 varint at `pos` into an int64 (the raw bit pattern;
+     * a uint64 wire value with the high bit set returns as a negative int64).
+     * Low-order 7-bit group first.
+     */
+    public static int64 decodeVarint(int8[] b, int64 pos) {
+        int64 result = (int64) 0;
+        int32 shift = 0;
+        int64 i = pos;
+        boolean go = true;
+        while (go) {
+            int8 c = b[i];
+            int64 lo7 = (int64) (((int32) c) & 0x7F);
+            result = result | (lo7 << shift);
+            shift = shift + 7;
+            i = i + 1;
+            if ((((int32) c) & 0x80) == 0) { go = false; }
+        }
+        return result;
+    }
+
+    /** Field number carried by a decoded tag varint (`tag >> 3`). */
+    public static int32 tagFieldNumber(int64 tag) {
+        return (int32) (tag >> 3);
+    }
+
+    /** Wire type carried by a decoded tag varint (`tag & 7`). */
+    public static int32 tagWireType(int64 tag) {
+        return (int32) (tag & (int64) 7);
+    }
+}
