@@ -1,0 +1,121 @@
+package dev.cajeta.codec.protobuf;
+
+/**
+ * Low-level protobuf wire writer (Phase 2.4) — the encode counterpart of
+ * `ProtobufWire` / `ProtobufIndex`. Appends tag-length-value records into a
+ * growable buffer; `toBytes()` hands back the encoded message. The typed
+ * `ProtobufEncoder<T>` (2.3/2.4) drives this once the per-T synthesizer lands.
+ *
+ * `writeVarint` emits the minimal little-endian base-128 form (matches
+ * `ProtobufWire.decodeVarint`); `write*Field` prepend the field's tag.
+ */
+public final class ProtobufWriter {
+    int8[] buf;
+    int32 len;
+    int32 cap;
+
+    public ProtobufWriter() {
+        this.cap = 64;
+        this.buf = heap int8[64];
+        this.len = 0;
+    }
+
+    void ensure(int32 extra) {
+        int32 need = this.len + extra;
+        if (need <= this.cap) { return; }
+        int32 newCap = this.cap * 2;
+        while (newCap < need) { newCap = newCap * 2; }
+        int8[] nb = heap int8[newCap];
+        int8[] ob = this.buf;
+        int32 n = this.len;
+        int32 i = 0;
+        while (i < n) { nb[i] = ob[i]; i = i + 1; }
+        // NOTE: drop-on-reassign gap leaks `ob` (same parked compiler gap as
+        // CsvWriter's buffer grow).
+        this.buf = nb;
+        this.cap = newCap;
+    }
+
+    void putByte(int8 v) {
+        this.ensure(1);
+        int8[] bb = this.buf;
+        bb[this.len] = v;
+        this.len = this.len + 1;
+    }
+
+    /** Emit a base-128 varint (minimal, low 7-bit group first). */
+    public void writeVarint(int64 v) {
+        uint64 x = (uint64) v;
+        boolean go = true;
+        while (go) {
+            int32 b7 = (int32) (x & (uint64) 0x7F);
+            x = x >> 7;
+            if (x != (uint64) 0) {
+                this.putByte((int8) (b7 | 0x80));
+            } else {
+                this.putByte((int8) b7);
+                go = false;
+            }
+        }
+    }
+
+    /** Emit a field tag: (fieldNumber << 3) | wireType. */
+    public void writeTag(int32 fieldNumber, int32 wireType) {
+        this.writeVarint((int64) ((fieldNumber << 3) | wireType));
+    }
+
+    /** VARINT field. */
+    public void writeVarintField(int32 fieldNumber, int64 v) {
+        this.writeTag(fieldNumber, 0);
+        this.writeVarint(v);
+    }
+
+    /** LEN field: tag + length prefix + `dataLen` payload bytes. */
+    public void writeLenField(int32 fieldNumber, int8[] data, int32 dataLen) {
+        this.writeTag(fieldNumber, 2);
+        this.writeVarint((int64) dataLen);
+        int8[] d = data;
+        int32 i = 0;
+        while (i < dataLen) {
+            // hoist the array-element load to a local before the call — passing
+            // `d[i]` straight to a method miscompiles (the FileWriter gotcha).
+            int8 db = d[i];
+            this.putByte(db);
+            i = i + 1;
+        }
+    }
+
+    /** I32 (fixed32) field, little-endian. */
+    public void writeFixed32Field(int32 fieldNumber, int32 v) {
+        this.writeTag(fieldNumber, 5);
+        this.putByte((int8) (v & 0xFF));
+        this.putByte((int8) ((v >> 8) & 0xFF));
+        this.putByte((int8) ((v >> 16) & 0xFF));
+        this.putByte((int8) ((v >> 24) & 0xFF));
+    }
+
+    /** I64 (fixed64) field, little-endian. */
+    public void writeFixed64Field(int32 fieldNumber, int64 v) {
+        this.writeTag(fieldNumber, 1);
+        int64 x = v;
+        int32 i = 0;
+        while (i < 8) {
+            this.putByte((int8) (x & (int64) 0xFF));
+            x = x >> 8;
+            i = i + 1;
+        }
+    }
+
+    /** Bytes written so far. */
+    public int32 size() { return this.len; }
+
+    /** A fresh copy of the encoded message (caller owns it). */
+    public #int8[] toBytes() {
+        int32 n = this.len;
+        int8[] out = heap int8[n];
+        int8[] bb = this.buf;
+        int32 i = 0;
+        while (i < n) { out[i] = bb[i]; i = i + 1; }
+        return out;
+    }
+}
