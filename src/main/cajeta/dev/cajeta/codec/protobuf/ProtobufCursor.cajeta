@@ -1,0 +1,99 @@
+package dev.cajeta.codec.protobuf;
+
+/**
+ * Lazy cursor over a protobuf message (Phase 2.2). Builds the structural index
+ * once (`ProtobufIndex`), then decodes only the fields you ask for —
+ * **projection**: reading two fields of a large message decodes only those two,
+ * the rest are skipped (the index already holds every field's bounds, so the
+ * skip is pure offset arithmetic). The eager typed bind (2.3) drives this for
+ * `Protobuf.parse<T>`.
+ *
+ * Look up a field by number (`slotOf` / `has`), then decode its value by wire
+ * type: `readVarint` (VARINT), `readBytes` (LEN payload), `readFixed32` /
+ * `readFixed64` (I32 / I64, little-endian). `slotOf` returns the FIRST
+ * occurrence; repeated fields are walked by their successive index slots.
+ */
+public final class ProtobufCursor {
+    int8[] b;
+    ProtobufIndex idx;
+
+    public ProtobufCursor(int8[] b, int64 n) {
+        this.b = b;
+        this.idx = ProtobufIndex.build(b, n);
+    }
+
+    /** Number of top-level fields. */
+    public int32 fieldCount() {
+        return this.idx.fieldCount();
+    }
+
+    /** Field number of the field at index slot `i`. */
+    public int32 fieldNumberAt(int32 i) {
+        return this.idx.fieldNumber(i);
+    }
+
+    /** Index slot of the FIRST field with number `fnum`, or -1 if absent. */
+    public int32 slotOf(int32 fnum) {
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    /** True iff the message has at least one field with number `fnum`. */
+    public boolean has(int32 fnum) {
+        return this.slotOf(fnum) >= 0;
+    }
+
+    /** Decode the VARINT value of the field at `slot` as int64. */
+    public int64 readVarint(int32 slot) {
+        return ProtobufWire.decodeVarint(this.b, this.idx.valueStart(slot));
+    }
+
+    /** Copy the LEN payload bytes of the field at `slot` (caller owns them). */
+    public #int8[] readBytes(int32 slot) {
+        int8[] bb = this.b;
+        int64 s = this.idx.valueStart(slot);
+        int64 e = this.idx.valueEnd(slot);
+        int32 len = (int32) (e - s);
+        int8[] out = heap int8[len];
+        int32 k = 0;
+        while (k < len) {
+            out[k] = bb[s + (int64) k];
+            k = k + 1;
+        }
+        return out;
+    }
+
+    /** Decode the I32 (fixed32) value of the field at `slot`, little-endian. */
+    public int32 readFixed32(int32 slot) {
+        int8[] bb = this.b;
+        int64 p = this.idx.valueStart(slot);
+        int32 b0 = ((int32) bb[p]) & 0xFF;
+        p = p + 1;
+        int32 b1 = ((int32) bb[p]) & 0xFF;
+        p = p + 1;
+        int32 b2 = ((int32) bb[p]) & 0xFF;
+        p = p + 1;
+        int32 b3 = ((int32) bb[p]) & 0xFF;
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    /** Decode the I64 (fixed64) value of the field at `slot`, little-endian. */
+    public int64 readFixed64(int32 slot) {
+        int8[] bb = this.b;
+        int64 p = this.idx.valueStart(slot);
+        int64 v = (int64) 0;
+        int32 i = 0;
+        while (i < 8) {
+            int64 byteVal = (int64) (((int32) bb[p]) & 0xFF);
+            v = v | (byteVal << (i * 8));
+            p = p + 1;
+            i = i + 1;
+        }
+        return v;
+    }
+}

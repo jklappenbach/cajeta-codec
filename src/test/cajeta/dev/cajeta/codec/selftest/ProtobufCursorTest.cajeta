@@ -1,0 +1,71 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.protobuf.ProtobufCursor;
+
+/**
+ * Phase 2.2 — ProtobufCursor lazy skip/projection. Reads only the requested
+ * fields of a multi-field message; verifies look-up by field number, the
+ * VARINT/LEN/fixed decoders, and absence.
+ */
+public class ProtobufCursorTest {
+
+    public ProtobufCursorTest() {
+        return;
+    }
+
+    // field 1 VARINT 150, field 2 LEN "hi", field 3 VARINT 7
+    //  [0x08,0x96,0x01, 0x12,0x02,0x68,0x69, 0x18,0x07]
+
+    @Test
+    public void readsTwoVarintFieldsByNumber() {
+        int8[] b = {(int8) 0x08, (int8) 0x96, (int8) 0x01,
+                    (int8) 0x12, (int8) 0x02, (int8) 0x68, (int8) 0x69,
+                    (int8) 0x18, (int8) 0x07};
+        ProtobufCursor cur = heap ProtobufCursor(b, (int64) 9);
+        // Projection: decode ONLY fields 1 and 3 (field 2 untouched).
+        Assert.that(cur.readVarint(cur.slotOf(1))).isEqualTo((int64) 150);
+        Assert.that(cur.readVarint(cur.slotOf(3))).isEqualTo((int64) 7);
+        Assert.that((int64) cur.fieldCount()).isEqualTo((int64) 3);
+        return;
+    }
+
+    @Test
+    public void readsLenFieldPayload() {
+        int8[] b = {(int8) 0x08, (int8) 0x96, (int8) 0x01,
+                    (int8) 0x12, (int8) 0x02, (int8) 0x68, (int8) 0x69,
+                    (int8) 0x18, (int8) 0x07};
+        ProtobufCursor cur = heap ProtobufCursor(b, (int64) 9);
+        int32 slot = cur.slotOf(2);
+        int8[] bytes = cur.readBytes(slot);
+        Assert.that((int64) bytes.count()).isEqualTo((int64) 2);
+        Assert.that((int64) bytes[0]).isEqualTo((int64) 0x68);   // 'h'
+        Assert.that((int64) bytes[1]).isEqualTo((int64) 0x69);   // 'i'
+        return;
+    }
+
+    @Test
+    public void reportsAbsentField() {
+        int8[] b = {(int8) 0x08, (int8) 0x96, (int8) 0x01};
+        ProtobufCursor cur = heap ProtobufCursor(b, (int64) 3);
+        Assert.isTrue(cur.has(1));
+        Assert.isFalse(cur.has(9));
+        Assert.that((int64) cur.slotOf(9)).isEqualTo((int64) -1);
+        return;
+    }
+
+    @Test
+    public void readsFixed32AndFixed64() {
+        // field 5 I32 = 0x04030201 (LE bytes 01 02 03 04), tag 0x2D
+        // field 6 I64 = 0x0807060504030201 (LE bytes 01..08), tag 0x31
+        int8[] b = {(int8) 0x2D, (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04,
+                    (int8) 0x31, (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04,
+                    (int8) 0x05, (int8) 0x06, (int8) 0x07, (int8) 0x08};
+        ProtobufCursor cur = heap ProtobufCursor(b, (int64) 14);
+        Assert.that((int64) cur.readFixed32(cur.slotOf(5)))
+            .isEqualTo((int64) 0x04030201);
+        Assert.that(cur.readFixed64(cur.slotOf(6)))
+            .isEqualTo((int64) 0x0807060504030201);
+        return;
+    }
+}
