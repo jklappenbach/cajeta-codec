@@ -1,0 +1,22 @@
+package dev.cajeta.codec.protobuf;
+
+import cajeta.error.RecoverableException;
+
+/**
+ * Thrown when a protobuf message cannot be indexed/decoded — a deprecated
+ * group wire type (3/4), an unknown wire type (6/7), or a truncated record.
+ * `position` is the byte offset (0-based) where the problem was noticed.
+ *
+ * ```cajeta
+ * throw heap ProtobufParseException("unsupported wire type", pos);
+ * ```
+ */
+public class ProtobufParseException extends RecoverableException {
+    public int64 position;
+
+    public ProtobufParseException(String message, int64 position) {
+        this.message = message;
+        this.cause = 0;
+        this.position = position;
+    }
+}

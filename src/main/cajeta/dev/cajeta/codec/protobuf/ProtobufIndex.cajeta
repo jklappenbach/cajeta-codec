@@ -1,0 +1,90 @@
+package dev.cajeta.codec.protobuf;
+
+/**
+ * Structural index over a protobuf message (Phase 2.1). A single forward scan
+ * of the tag-length-value records records, per top-level field (in wire order),
+ * its field number, wire type, and the byte bounds of its **value** —
+ * `[valueStart, valueEnd)`. `ProtobufCursor` (2.2) walks this index to skip /
+ * project individual fields without decoding the rest; the eager typed bind
+ * (2.3) drives it for `Protobuf.parse<T>`.
+ *
+ * Value bounds by wire type: VARINT → the varint bytes; I64 → 8 bytes; I32 →
+ * 4 bytes; LEN → the payload AFTER its length prefix. The next field always
+ * begins at the previous field's `valueEnd`. Deprecated group wire types (3/4)
+ * and unknown wire types (6/7) **fail loud** (`ProtobufParseException`).
+ *
+ * Scalar-correct first (this); the SIMD varint/tag boundary scan layers on top
+ * once the oracle is locked.
+ */
+public final class ProtobufIndex {
+    int32[] fieldNumbers;
+    int32[] wireTypes;
+    int64[] valueStarts;   // first byte of the field's value (inclusive)
+    int64[] valueEnds;     // one past the field's value (exclusive)
+    int32 count;
+
+    public ProtobufIndex(#int32[] fieldNumbers, #int32[] wireTypes,
+                         #int64[] valueStarts, #int64[] valueEnds, int32 count) {
+        this.fieldNumbers = fieldNumbers;
+        this.wireTypes = wireTypes;
+        this.valueStarts = valueStarts;
+        this.valueEnds = valueEnds;
+        this.count = count;
+    }
+
+    /**
+     * Build the structural index for the first `n` bytes of `b`. Fails loud on
+     * a group (3/4) or unknown (6/7) wire type.
+     */
+    public static #ProtobufIndex build(int8[] b, int64 n) {
+        int64 cap = n + 1;
+        int32[] fnums = heap int32[cap];
+        int32[] wts = heap int32[cap];
+        int64[] vs = heap int64[cap];
+        int64[] ve = heap int64[cap];
+        int32 c = 0;
+        int64 pos = 0;
+        while (pos < n) {
+            int64 tag = ProtobufWire.decodeVarint(b, pos);
+            int64 tagLen = ProtobufWire.varintLen(b, pos);
+            int32 fnum = ProtobufWire.tagFieldNumber(tag);
+            int32 wt = ProtobufWire.tagWireType(tag);
+            int64 p = pos + tagLen;
+            int64 valStart = p;
+            int64 valEnd = p;
+            if (wt == 0) {
+                valEnd = p + ProtobufWire.varintLen(b, p);
+            } else if (wt == 1) {
+                valEnd = p + (int64) 8;
+            } else if (wt == 2) {
+                int64 len = ProtobufWire.decodeVarint(b, p);
+                int64 lenLen = ProtobufWire.varintLen(b, p);
+                valStart = p + lenLen;
+                valEnd = valStart + len;
+            } else if (wt == 5) {
+                valEnd = p + (int64) 4;
+            } else {
+                throw heap ProtobufParseException(
+                    "unsupported protobuf wire type (group/unknown)", pos);
+            }
+            fnums[c] = fnum;
+            wts[c] = wt;
+            vs[c] = valStart;
+            ve[c] = valEnd;
+            c = c + 1;
+            pos = valEnd;
+        }
+        return heap ProtobufIndex(#fnums, #wts, #vs, #ve, c);
+    }
+
+    /** Number of top-level fields indexed. */
+    public int32 fieldCount() { return this.count; }
+    /** Field number of the i-th indexed field. */
+    public int32 fieldNumber(int32 i) { return this.fieldNumbers[i]; }
+    /** Wire type of the i-th indexed field. */
+    public int32 wireType(int32 i) { return this.wireTypes[i]; }
+    /** First byte of the i-th field's value (inclusive). */
+    public int64 valueStart(int32 i) { return this.valueStarts[i]; }
+    /** One past the i-th field's value (exclusive). */
+    public int64 valueEnd(int32 i) { return this.valueEnds[i]; }
+}
