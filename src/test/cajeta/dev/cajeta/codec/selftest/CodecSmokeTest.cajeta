@@ -1,0 +1,24 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.protobuf.Protobuf;
+
+/**
+ * Scaffold smoke test — proves the cajeta-codec library builds, links against
+ * cajeta-unit, and runs end-to-end via run-tests.sh before the real format
+ * machinery lands. Replaced/augmented by ProtobufIndexTest, ProtobufCursorTest,
+ * … as Phase 2 proceeds.
+ */
+public class CodecSmokeTest {
+
+    public CodecSmokeTest() {
+        return;
+    }
+
+    @Test
+    public void protobufFacadeReachable() {
+        Assert.that(Protobuf.formatName()).isEqualTo("protobuf");
+        Assert.that(Protobuf.wireName()).isEqualTo("application/protobuf");
+        return;
+    }
+}
