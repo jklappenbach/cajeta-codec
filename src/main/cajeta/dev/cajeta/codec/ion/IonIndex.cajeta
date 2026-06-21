@@ -21,17 +21,19 @@ public final class IonIndex {
     int64[] nameSids;
     String[] names;
     int32[] typeCodes;
+    int64[] valueTds;      // the value's type-descriptor octet position
     int64[] valueStarts;
     int64[] valueEnds;
     int32 count;
 
     public IonIndex(#IonSymbolTable table, #int64[] nameSids, #String[] names,
-                    #int32[] typeCodes, #int64[] valueStarts, #int64[] valueEnds,
-                    int32 count) {
+                    #int32[] typeCodes, #int64[] valueTds, #int64[] valueStarts,
+                    #int64[] valueEnds, int32 count) {
         this.table = table;
         this.nameSids = nameSids;
         this.names = names;
         this.typeCodes = typeCodes;
+        this.valueTds = valueTds;
         this.valueStarts = valueStarts;
         this.valueEnds = valueEnds;
         this.count = count;
@@ -62,6 +64,7 @@ public final class IonIndex {
         int64[] nsids = heap int64[cap];
         String[] nms = heap String[cap];
         int32[] tcs = heap int32[cap];
+        int64[] vtds = heap int64[cap];
         int64[] vss = heap int64[cap];
         int64[] ves = heap int64[cap];
         int32 c = 0;
@@ -94,6 +97,7 @@ public final class IonIndex {
                 nsids[c] = sid;
                 nms[c] = tbl.resolve(sid);
                 tcs[c] = tc;
+                vtds[c] = vpos;
                 vss[c] = vStart;
                 ves[c] = vEnd;
                 c = c + 1;
@@ -101,7 +105,7 @@ public final class IonIndex {
             }
         }
 
-        return heap IonIndex(#tbl, #nsids, #nms, #tcs, #vss, #ves, c);
+        return heap IonIndex(#tbl, #nsids, #nms, #tcs, #vtds, #vss, #ves, c);
     }
 
     /** Number of top-level fields indexed. */
@@ -112,6 +116,8 @@ public final class IonIndex {
     public String fieldName(int32 i) { return this.names[i]; }
     /** Ion type code of the i-th field's value. */
     public int32 typeCode(int32 i) { return this.typeCodes[i]; }
+    /** Type-descriptor octet position of the i-th field's value. */
+    public int64 valueTd(int32 i) { return this.valueTds[i]; }
     /** First byte of the i-th field's value (inclusive). */
     public int64 valueStart(int32 i) { return this.valueStarts[i]; }
     /** One past the i-th field's value (exclusive). */

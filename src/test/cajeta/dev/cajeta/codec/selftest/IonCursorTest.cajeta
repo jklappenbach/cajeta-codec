@@ -1,0 +1,96 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.ion.IonCursor;
+import cajeta.lang.String;
+
+/**
+ * Phase 3.2a — Ion cursor typed readers. The fixture names its fields with
+ * **system** symbol IDs (4–9) so no local symbol table is needed:
+ *
+ *   00: E0 01 00 EA                  BVM
+ *   04: DE 93                        struct, content 19
+ *   06: 84  82 68 69                 name(4)    = "hi"        (string)
+ *   10: 85  21 96                    version(5) = 150         (posint)
+ *   13: 86  31 2A                    imports(6) = -42         (negint)
+ *   16: 87  11                       symbols(7) = true        (bool)
+ *   18: 88  A2 07 09                 max_id(8)  = [07,09]     (blob)
+ *   22: 89  71 04                    $ion_shared_symbol_table(9) = symbol→"name"
+ */
+public class IonCursorTest {
+
+    public IonCursorTest() {
+        return;
+    }
+
+    static #int8[] fixture() {
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xDE, (int8) 0x93,
+            (int8) 0x84, (int8) 0x82, (int8) 0x68, (int8) 0x69,
+            (int8) 0x85, (int8) 0x21, (int8) 0x96,
+            (int8) 0x86, (int8) 0x31, (int8) 0x2A,
+            (int8) 0x87, (int8) 0x11,
+            (int8) 0x88, (int8) 0xA2, (int8) 0x07, (int8) 0x09,
+            (int8) 0x89, (int8) 0x71, (int8) 0x04
+        };
+        return b;
+    }
+
+    @Test
+    public void readsPositiveAndNegativeInts() {
+        int8[] b = IonCursorTest.fixture();
+        IonCursor cur = heap IonCursor(b, (int64) b.count());
+        int32 v = cur.slotOf("version");
+        Assert.that(cur.readInt(v)).isEqualTo((int64) 150);
+        int32 im = cur.slotOf("imports");
+        Assert.that(cur.readInt(im)).isEqualTo((int64) 0 - (int64) 42);
+        return;
+    }
+
+    @Test
+    public void readsStringAndBool() {
+        int8[] b = IonCursorTest.fixture();
+        IonCursor cur = heap IonCursor(b, (int64) b.count());
+        int32 nm = cur.slotOf("name");
+        Assert.isTrue(cur.readString(nm).equals("hi"));
+        int32 ac = cur.slotOf("symbols");
+        Assert.isTrue(cur.readBool(ac));
+        return;
+    }
+
+    @Test
+    public void readsBlobBytes() {
+        int8[] b = IonCursorTest.fixture();
+        IonCursor cur = heap IonCursor(b, (int64) b.count());
+        int32 mx = cur.slotOf("max_id");
+        int8[] payload = cur.readBytes(mx);
+        Assert.that((int64) payload.count()).isEqualTo((int64) 2);
+        int8 p0 = payload[0];
+        int8 p1 = payload[1];
+        Assert.that((int64) (((int32) p0) & 0xFF)).isEqualTo((int64) 0x07);
+        Assert.that((int64) (((int32) p1) & 0xFF)).isEqualTo((int64) 0x09);
+        return;
+    }
+
+    @Test
+    public void readsSymbolThroughTable() {
+        int8[] b = IonCursorTest.fixture();
+        IonCursor cur = heap IonCursor(b, (int64) b.count());
+        int32 s = cur.slotOf("$ion_shared_symbol_table");
+        Assert.isTrue(cur.readSymbol(s).equals("name"));
+        return;
+    }
+
+    @Test
+    public void reportsAbsentFieldAndNonNull() {
+        int8[] b = IonCursorTest.fixture();
+        IonCursor cur = heap IonCursor(b, (int64) b.count());
+        Assert.that((int64) cur.slotOf("missing")).isEqualTo((int64) -1);
+        Assert.isFalse(cur.has("missing"));
+        int32 v = cur.slotOf("version");
+        Assert.isFalse(cur.isNull(v));
+        Assert.that((int64) cur.fieldCount()).isEqualTo((int64) 6);
+        return;
+    }
+}

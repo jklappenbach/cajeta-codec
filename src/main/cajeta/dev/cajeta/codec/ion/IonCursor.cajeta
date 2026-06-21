@@ -1,0 +1,99 @@
+package dev.cajeta.codec.ion;
+
+import cajeta.lang.String;
+
+/**
+ * Lazy cursor over an Ion 1.0 binary struct (Phase 3.2a). Builds the structural
+ * index once (`IonIndex` — symbol table + per-field bounds), then decodes only
+ * the fields you ask for, looked up by **name** (`slotOf` / `has`) since Ion is
+ * self-describing. The eager typed bind (3.2b, `Ion.parse<T>`) drives this.
+ *
+ * Readers by index slot: `readInt` (pos/neg magnitude), `readBool` (value is in
+ * the type-descriptor nibble), `readString` (UTF-8), `readBytes` (blob payload),
+ * `readSymbol` (a symbol ID resolved through the table). `readFloat` is parked
+ * (P-ION-FLOAT — bit-reinterpret) and not in any v1 fixture.
+ */
+public final class IonCursor {
+    int8[] b;
+    IonIndex idx;
+
+    public IonCursor(int8[] b, int64 n) {
+        this.b = b;
+        this.idx = IonIndex.build(b, n);
+    }
+
+    /** Number of top-level struct fields. */
+    public int32 fieldCount() { return this.idx.fieldCount(); }
+    /** Ion type code of the value at slot `i`. */
+    public int32 typeCode(int32 i) { return this.idx.typeCode(i); }
+
+    /** Index slot of the first field named `name`, or -1 if absent. */
+    public int32 slotOf(String name) { return this.idx.indexOfName(name); }
+    /** True iff a field named `name` is present. */
+    public boolean has(String name) { return this.idx.indexOfName(name) >= 0; }
+
+    /** True iff the value at slot `i` is a typed null. */
+    public boolean isNull(int32 i) {
+        int64 tdPos = this.idx.valueTd(i);
+        int8 td = this.b[tdPos];
+        return IonWire.isNull(td);
+    }
+
+    /** Decode the integer at slot `i` (negint type code negates the magnitude). */
+    public int64 readInt(int32 i) {
+        int64 s = this.idx.valueStart(i);
+        int64 e = this.idx.valueEnd(i);
+        int64 mag = IonWire.decodeUIntMag(this.b, s, e - s);
+        if (this.idx.typeCode(i) == IonWire.tcNegInt()) {
+            return (int64) 0 - mag;
+        }
+        return mag;
+    }
+
+    /** Decode the bool at slot `i` — the value is the type-descriptor nibble. */
+    public boolean readBool(int32 i) {
+        int64 tdPos = this.idx.valueTd(i);
+        int8 td = this.b[tdPos];
+        return IonWire.lengthNibble(td) == 1;
+    }
+
+    /** Decode the UTF-8 string at slot `i` (caller owns the result). */
+    public #String readString(int32 i) {
+        int8[] bb = this.b;
+        int64 s = this.idx.valueStart(i);
+        int64 e = this.idx.valueEnd(i);
+        int64 len = e - s;
+        int8[] out = heap int8[len];
+        int64 k = (int64) 0;
+        while (k < len) {
+            int64 src = s + k;
+            out[k] = bb[src];
+            k = k + 1;
+        }
+        return heap cajeta.lang.String(#out, (int32) len);
+    }
+
+    /** Copy the blob payload bytes at slot `i` (caller owns them). */
+    public #int8[] readBytes(int32 i) {
+        int8[] bb = this.b;
+        int64 s = this.idx.valueStart(i);
+        int64 e = this.idx.valueEnd(i);
+        int64 len = e - s;
+        int8[] out = heap int8[len];
+        int64 k = (int64) 0;
+        while (k < len) {
+            int64 src = s + k;
+            out[k] = bb[src];
+            k = k + 1;
+        }
+        return out;
+    }
+
+    /** Resolve the symbol value at slot `i` (a symbol ID) to its text. */
+    public String readSymbol(int32 i) {
+        int64 s = this.idx.valueStart(i);
+        int64 e = this.idx.valueEnd(i);
+        int64 sid = IonWire.decodeUIntMag(this.b, s, e - s);
+        return this.idx.symbols().resolve(sid);
+    }
+}
