@@ -1,0 +1,72 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.ion.IonWriter;
+import dev.cajeta.codec.ion.IonCursor;
+import cajeta.lang.String;
+
+/**
+ * Phase 3.3a/b — Ion binary writer, verified by round-trip through `IonCursor`
+ * (the 3.2 decoder). Exercises layered intern (system SID reuse + local SIDs),
+ * LST emission, struct framing, and pos/neg int + string + long-string (L=14)
+ * value encoding.
+ */
+public class IonWriterTest {
+
+    public IonWriterTest() {
+        return;
+    }
+
+    @Test
+    public void roundTripsScalarStruct() {
+        // { id: 150 (local 10), name: "hi" (system 4), count: -42 (local 11) }.
+        IonWriter w = heap IonWriter();
+        w.intern("id");
+        w.intern("name");
+        w.intern("count");
+        w.writeBvm();
+        w.writeLocalSymbolTable();
+        w.beginContainer();
+        w.writeFieldSid(w.intern("id"));
+        w.writeIntValue((int64) 150);
+        w.writeFieldSid(w.intern("name"));
+        String nm = "hi";
+        int8[] nb = nm.bytes;
+        w.writeStringValue(nb, (int32) nb.count());
+        w.writeFieldSid(w.intern("count"));
+        w.writeIntValue((int64) 0 - (int64) 42);
+        w.endContainer(13);
+        int8[] bytes = w.toBytes();
+
+        IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
+        int32 si = cur.slotOf("id");
+        Assert.that(cur.readInt(si)).isEqualTo((int64) 150);
+        int32 sn = cur.slotOf("name");
+        Assert.isTrue(cur.readString(sn).equals("hi"));
+        int32 sc = cur.slotOf("count");
+        Assert.that(cur.readInt(sc)).isEqualTo((int64) 0 - (int64) 42);
+        return;
+    }
+
+    @Test
+    public void roundTripsLongStringL14Framing() {
+        // A 20-byte string forces the L=14 (length-follows) form on both the
+        // string value and the enclosing struct.
+        IonWriter w = heap IonWriter();
+        w.intern("msg");
+        w.writeBvm();
+        w.writeLocalSymbolTable();
+        w.beginContainer();
+        w.writeFieldSid(w.intern("msg"));
+        String msg = "abcdefghijklmnopqrst";
+        int8[] mb = msg.bytes;
+        w.writeStringValue(mb, (int32) mb.count());
+        w.endContainer(13);
+        int8[] bytes = w.toBytes();
+
+        IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
+        int32 sm = cur.slotOf("msg");
+        Assert.isTrue(cur.readString(sm).equals("abcdefghijklmnopqrst"));
+        return;
+    }
+}
