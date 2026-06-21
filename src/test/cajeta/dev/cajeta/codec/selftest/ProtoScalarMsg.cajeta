@@ -1,0 +1,28 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.codec.protobuf.ProtoField;
+import cajeta.lang.String;
+
+/**
+ * Phase 2.3 test fixture — a flat protobuf message with one field per supported
+ * scalar wire shape, each pinned to an explicit `@ProtoField(N)` number. Drives
+ * `Protobuf.parse<ProtoScalarMsg>` in `ProtobufTypedTest`.
+ *
+ *   1: int64   (VARINT)   2: String (LEN)   3: boolean (VARINT)
+ *   4: int32   (VARINT)   5: int8[] (LEN)
+ */
+public class ProtoScalarMsg {
+    @ProtoField(1) public int64 id;
+    @ProtoField(2) public String name;
+    @ProtoField(3) public boolean active;
+    @ProtoField(4) public int32 count;
+    @ProtoField(5) public int8[] payload;
+
+    public ProtoScalarMsg() {
+        this.id = (int64) 0;
+        this.name = null;
+        this.active = false;
+        this.count = 0;
+        this.payload = null;
+    }
+}

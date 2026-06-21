@@ -1,0 +1,26 @@
+package dev.cajeta.codec.protobuf;
+
+/**
+ * Binds a class field to a protobuf wire **field number** for typed decode/encode
+ * (`Protobuf.parse<T>` / the `ProtobufEncoder<T>` path). Protobuf field numbers
+ * are part of the wire contract — sparse, non-sequential, and stable across schema
+ * versions — so they are declared explicitly here rather than inferred from field
+ * order.
+ *
+ * The number is the single unnamed argument:
+ *
+ * ```cajeta
+ * public class Trade {
+ *     @ProtoField(1) public int64  id;
+ *     @ProtoField(2) public String symbol;
+ *     @ProtoField(3) public boolean active;
+ * }
+ * ```
+ *
+ * The **wire type** is inferred from the field's Cajeta type by the synthesizer:
+ * `int*`/`uint*`/`bool`/enum → VARINT; `String`/`int8[]`/nested message → LEN
+ * (length-delimited); `float32` → I32, `float64` → I64. Advanced encodings
+ * (zigzag `sint`, `fixed`-width ints, packed repeated) are opt-in via future
+ * arguments on this annotation. A field without `@ProtoField` is not bound.
+ */
+public annotation ProtoField { }

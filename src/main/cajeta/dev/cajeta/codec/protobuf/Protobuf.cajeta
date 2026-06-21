@@ -31,4 +31,21 @@ public final class Protobuf {
     public static int32 run() {
         return 0;
     }
+
+    /**
+     * Tier-1 templated parse: bind protobuf `bytes` (first `length` valid) to a
+     * declared message type `T`. The resolver routes `Protobuf.parse<T>(...)`
+     * here via the explicit type argument; the cajeta-two `ProtobufSynthesizer`
+     * replaces this captured body per-T — walking T's `@ProtoField` fields and
+     * emitting a `ProtobufCursor`-driven bind (single message → `T`, or a
+     * length-delimited stream → `T[]` when T is an array).
+     *
+     * The body below is a **failsafe**: if the synthesizer does not engage,
+     * callers get a thrown `ProtobufParseException` rather than a silently
+     * default-zeroed result. Mirrors `cajeta.codec.csv.Csv.parse<T>`.
+     */
+    public static T parse<T>(int8[] bytes, int64 length) {
+        throw heap ProtobufParseException(
+            "Protobuf.parse<T>: synthesizer not engaged", (int64) 0);
+    }
 }

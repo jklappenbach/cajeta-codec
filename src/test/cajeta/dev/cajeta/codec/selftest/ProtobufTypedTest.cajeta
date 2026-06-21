@@ -1,0 +1,64 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.protobuf.Protobuf;
+import dev.cajeta.codec.protobuf.ProtobufWriter;
+import cajeta.lang.String;
+
+/**
+ * Phase 2.3 — typed decode (`Protobuf.parse<T>`). Encodes a message with
+ * `ProtobufWriter`, decodes it back into `ProtoScalarMsg` via the synthesized
+ * per-T bind, and checks every scalar field. The synthesizer walks the
+ * `@ProtoField(N)` fields and emits a `ProtobufCursor`-driven bind.
+ */
+public class ProtobufTypedTest {
+
+    public ProtobufTypedTest() {
+        return;
+    }
+
+    @Test
+    public void decodesScalarMessage() {
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(1, (int64) 150);            // id
+        String name = "hi";
+        int8[] nb = name.bytes;
+        w.writeLenField(2, nb, (int32) nb.count());    // name
+        w.writeVarintField(3, (int64) 1);              // active = true
+        w.writeVarintField(4, (int64) 42);             // count
+        int8[] pay = {(int8) 0x07, (int8) 0x09};
+        w.writeLenField(5, pay, (int32) 2);            // payload
+        int8[] bytes = w.toBytes();
+
+        ProtoScalarMsg m = Protobuf.parse<ProtoScalarMsg>(
+            bytes, (int64) bytes.count());
+
+        Assert.that(m.id).isEqualTo((int64) 150);
+        Assert.isTrue(m.name.equals("hi"));
+        Assert.isTrue(m.active);
+        Assert.that((int64) m.count).isEqualTo((int64) 42);
+        Assert.that((int64) m.payload.count()).isEqualTo((int64) 2);
+        int8 p0 = m.payload[0];
+        int8 p1 = m.payload[1];
+        Assert.that((int64) (((int32) p0) & 0xFF)).isEqualTo((int64) 0x07);
+        Assert.that((int64) (((int32) p1) & 0xFF)).isEqualTo((int64) 0x09);
+        return;
+    }
+
+    @Test
+    public void absentFieldsKeepConstructorDefaults() {
+        // Only field 4 present — the rest stay at the ctor defaults (0 / false /
+        // null), exercising slotOf == -1 skip in the synthesized bind.
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(4, (int64) 99);
+        int8[] bytes = w.toBytes();
+
+        ProtoScalarMsg m = Protobuf.parse<ProtoScalarMsg>(
+            bytes, (int64) bytes.count());
+
+        Assert.that((int64) m.count).isEqualTo((int64) 99);
+        Assert.that(m.id).isEqualTo((int64) 0);
+        Assert.isFalse(m.active);
+        return;
+    }
+}
