@@ -1,0 +1,98 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.avro.Avro;
+import dev.cajeta.codec.avro.AvroContainer;
+import dev.cajeta.codec.avro.AvroContainerWriter;
+import dev.cajeta.codec.avro.AvroWriter;
+import cajeta.lang.String;
+
+/**
+ * Phase 5.3 — Avro writer + round-trip. `Avro.toBytes<T>` encodes a single datum
+ * (positional, untagged); `Avro.toBytes<T[]>` writes a full Object Container File
+ * (null codec, emitted JSON schema). Each is round-tripped back through
+ * `Avro.parse<T>` / `parse<T[]>` for value equality, and the datum bytes are
+ * pinned to the known wire form (`54 04 68 69`).
+ */
+public class AvroWriteTest {
+
+    public AvroWriteTest() {
+        return;
+    }
+
+    @Test
+    public void encodesDatumToWireBytes() {
+        AvroRec r = heap AvroRec();
+        r.id = (int64) 42;
+        r.name = "hi";
+        int8[] enc = Avro.toBytes<AvroRec>(r);
+        // id=42 -> zigzag 0x54 ; name="hi" -> len 0x04 + 'h','i'.
+        Assert.that((int64) enc.count()).isEqualTo((int64) 4);
+        Assert.that((int64) (((int32) enc[0]) & 0xFF)).isEqualTo((int64) 0x54);
+        Assert.that((int64) (((int32) enc[1]) & 0xFF)).isEqualTo((int64) 0x04);
+        Assert.that((int64) (((int32) enc[2]) & 0xFF)).isEqualTo((int64) 0x68);
+        Assert.that((int64) (((int32) enc[3]) & 0xFF)).isEqualTo((int64) 0x69);
+        return;
+    }
+
+    @Test
+    public void datumRoundTrips() {
+        AvroRec r = heap AvroRec();
+        r.id = (int64) 0 - (int64) 7;
+        r.name = "round-trip";
+        int8[] enc = Avro.toBytes<AvroRec>(r);
+        AvroRec back = Avro.parse<AvroRec>(enc, (int64) enc.count());
+        Assert.that(back.id).isEqualTo((int64) 0 - (int64) 7);
+        Assert.isTrue(back.name.equals("round-trip"));
+        return;
+    }
+
+    @Test
+    public void wrapDirectIsReadable() {
+        AvroWriter body = heap AvroWriter();
+        body.writeLong((int64) 1);
+        body.writeString("one");
+        body.writeLong((int64) 222);
+        body.writeString("two-two-two");
+        int8[] data = body.result();
+        int64 dlen = body.size();
+        String schema = "{\"type\":\"record\",\"name\":\"AvroRec\",\"fields\":[{\"name\":\"id\",\"type\":\"long\"},{\"name\":\"name\",\"type\":\"string\"}]}";
+        int8[] file = AvroContainerWriter.wrap(data, dlen, (int64) 2, schema);
+        AvroContainer ct = heap AvroContainer(file, (int64) file.count());
+        Assert.isTrue(ct.codec().equals("null"));
+        Assert.isTrue(ct.nextBlock());
+        Assert.that(ct.currentObjectCount()).isEqualTo((int64) 2);
+
+        // Constructor + result() path (the one the synthesizer uses).
+        int8[] data2 = body.result();
+        AvroContainerWriter cw = heap AvroContainerWriter(
+            data2, body.size(), (int64) 2, schema);
+        int8[] file2 = cw.result();
+        AvroContainer ct2 = heap AvroContainer(file2, (int64) file2.count());
+        Assert.isTrue(ct2.codec().equals("null"));
+        return;
+    }
+
+    @Test
+    public void containerRoundTrips() {
+        AvroRec[] recs = heap AvroRec[2];
+        AvroRec a = heap AvroRec();
+        a.id = (int64) 1;
+        a.name = "one";
+        recs[0] = a;
+        AvroRec b = heap AvroRec();
+        b.id = (int64) 222;
+        b.name = "two-two-two";
+        recs[1] = b;
+
+        int8[] file = Avro.toBytes<AvroRec[]>(recs);
+
+        AvroRec[] back = Avro.parse<AvroRec[]>(file, (int64) file.count());
+        Assert.that((int64) back.count()).isEqualTo((int64) 2);
+        Assert.that(back[0].id).isEqualTo((int64) 1);
+        Assert.isTrue(back[0].name.equals("one"));
+        Assert.that(back[1].id).isEqualTo((int64) 222);
+        Assert.isTrue(back[1].name.equals("two-two-two"));
+        return;
+    }
+}
