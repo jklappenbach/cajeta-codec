@@ -1,0 +1,18 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.codec.protobuf.ProtoField;
+
+/**
+ * Phase 2.3c test fixture — a message with a nested-message field (`inner`,
+ * wire type LEN). The synthesizer decodes field 2 by `readBytes` then recursing
+ * with `Protobuf.parse<ProtoInnerMsg>` over the slice.
+ */
+public class ProtoOuterMsg {
+    @ProtoField(1) public int64 id;
+    @ProtoField(2) public ProtoInnerMsg inner;
+
+    public ProtoOuterMsg() {
+        this.id = (int64) 0;
+        this.inner = null;
+    }
+}

@@ -1,0 +1,19 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.codec.protobuf.ProtoField;
+import cajeta.lang.String;
+
+/**
+ * Phase 2.3c test fixture — a small message used as a nested (LEN-delimited)
+ * sub-message inside `ProtoOuterMsg`. Drives the synthesizer's recursive
+ * `Protobuf.parse<ProtoInnerMsg>(slice)` arm.
+ */
+public class ProtoInnerMsg {
+    @ProtoField(1) public int64 x;
+    @ProtoField(2) public String tag;
+
+    public ProtoInnerMsg() {
+        this.x = (int64) 0;
+        this.tag = null;
+    }
+}

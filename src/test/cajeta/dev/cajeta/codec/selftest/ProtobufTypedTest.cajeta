@@ -46,6 +46,32 @@ public class ProtobufTypedTest {
     }
 
     @Test
+    public void decodesNestedMessage() {
+        // Encode the inner message, embed it as outer field 2 (LEN), and check
+        // the synthesizer recurses (Protobuf.parse<ProtoInnerMsg> over the slice).
+        ProtobufWriter iw = heap ProtobufWriter();
+        iw.writeVarintField(1, (int64) 77);            // inner.x
+        String tag = "hi";
+        int8[] tb = tag.bytes;
+        iw.writeLenField(2, tb, (int32) tb.count());   // inner.tag
+        int8[] innerBytes = iw.toBytes();
+
+        ProtobufWriter ow = heap ProtobufWriter();
+        ow.writeVarintField(1, (int64) 5);             // outer.id
+        ow.writeLenField(2, innerBytes, (int32) innerBytes.count());  // outer.inner
+        int8[] bytes = ow.toBytes();
+
+        ProtoOuterMsg m = Protobuf.parse<ProtoOuterMsg>(
+            bytes, (int64) bytes.count());
+
+        Assert.that(m.id).isEqualTo((int64) 5);
+        Assert.isTrue(m.inner != null);
+        Assert.that(m.inner.x).isEqualTo((int64) 77);
+        Assert.isTrue(m.inner.tag.equals("hi"));
+        return;
+    }
+
+    @Test
     public void absentFieldsKeepConstructorDefaults() {
         // Only field 4 present — the rest stay at the ctor defaults (0 / false /
         // null), exercising slotOf == -1 skip in the synthesized bind.
