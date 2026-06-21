@@ -1,0 +1,119 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.ion.IonIndex;
+import cajeta.lang.String;
+
+/**
+ * Phase 3.1c — Ion structural index. Scans the top-level struct, recording each
+ * field's name (resolved against the symbol table), type code, and value bounds.
+ *
+ * The 38-byte fixture is a full stream — BVM, a local symbol table defining
+ * {10:"id", 11:"name", 12:"active"}, then the user struct
+ * `{ id: 150, name: "hi", active: true }`:
+ *
+ *   00: E0 01 00 EA                          BVM
+ *   04: EE 96                                 annotation wrapper, content 22
+ *   06: 81 83                                 annot-list len 1, SID 3 ($ion_symbol_table)
+ *   08: DE 92                                 LST struct, content 18
+ *   10: 87                                    field SID 7 (symbols)
+ *   11: BE 8F                                 list, content 15
+ *   13: 82 69 64                              "id"
+ *   16: 84 6E 61 6D 65                        "name"
+ *   21: 86 61 63 74 69 76 65                  "active"
+ *   28: D9                                    user struct, content 9
+ *   29: 8A  21 96                             id    = posint 150
+ *   32: 8B  82 68 69                          name  = "hi"
+ *   36: 8C  11                                active = true
+ */
+public class IonIndexTest {
+
+    public IonIndexTest() {
+        return;
+    }
+
+    static #int8[] fixture() {
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xEE, (int8) 0x96,
+            (int8) 0x81, (int8) 0x83,
+            (int8) 0xDE, (int8) 0x92,
+            (int8) 0x87,
+            (int8) 0xBE, (int8) 0x8F,
+            (int8) 0x82, (int8) 0x69, (int8) 0x64,
+            (int8) 0x84, (int8) 0x6E, (int8) 0x61, (int8) 0x6D, (int8) 0x65,
+            (int8) 0x86, (int8) 0x61, (int8) 0x63, (int8) 0x74, (int8) 0x69,
+            (int8) 0x76, (int8) 0x65,
+            (int8) 0xD9,
+            (int8) 0x8A, (int8) 0x21, (int8) 0x96,
+            (int8) 0x8B, (int8) 0x82, (int8) 0x68, (int8) 0x69,
+            (int8) 0x8C, (int8) 0x11
+        };
+        return b;
+    }
+
+    @Test
+    public void indexesThreeFields() {
+        int8[] b = IonIndexTest.fixture();
+        IonIndex idx = IonIndex.build(b, (int64) b.count());
+        Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 3);
+        return;
+    }
+
+    @Test
+    public void resolvesFieldNamesAndTypes() {
+        int8[] b = IonIndexTest.fixture();
+        IonIndex idx = IonIndex.build(b, (int64) b.count());
+
+        Assert.that(idx.fieldNameSid(0)).isEqualTo((int64) 10);
+        Assert.isTrue(idx.fieldName(0).equals("id"));
+        Assert.that((int64) idx.typeCode(0)).isEqualTo((int64) 2);   // posint
+
+        Assert.isTrue(idx.fieldName(1).equals("name"));
+        Assert.that((int64) idx.typeCode(1)).isEqualTo((int64) 8);   // string
+
+        Assert.isTrue(idx.fieldName(2).equals("active"));
+        Assert.that((int64) idx.typeCode(2)).isEqualTo((int64) 1);   // bool
+        return;
+    }
+
+    @Test
+    public void recordsValueBounds() {
+        int8[] b = IonIndexTest.fixture();
+        IonIndex idx = IonIndex.build(b, (int64) b.count());
+
+        // id = posint 150: value byte [0x96] at 31..32
+        Assert.that(idx.valueStart(0)).isEqualTo((int64) 31);
+        Assert.that(idx.valueEnd(0)).isEqualTo((int64) 32);
+        // name = "hi": value bytes at 34..36
+        Assert.that(idx.valueStart(1)).isEqualTo((int64) 34);
+        Assert.that(idx.valueEnd(1)).isEqualTo((int64) 36);
+        // active = true: bool value in the nibble → empty span at 38..38
+        Assert.that(idx.valueStart(2)).isEqualTo((int64) 38);
+        Assert.that(idx.valueEnd(2)).isEqualTo((int64) 38);
+        return;
+    }
+
+    @Test
+    public void findsFieldByName() {
+        int8[] b = IonIndexTest.fixture();
+        IonIndex idx = IonIndex.build(b, (int64) b.count());
+        Assert.that((int64) idx.indexOfName("name")).isEqualTo((int64) 1);
+        Assert.that((int64) idx.indexOfName("active")).isEqualTo((int64) 2);
+        Assert.that((int64) idx.indexOfName("missing")).isEqualTo((int64) -1);
+        return;
+    }
+
+    @Test
+    public void unsupportedTypeFailsLoud() {
+        // BVM + struct { name(SID 4): decimal 0x50 } — decimal (tc 5) unsupported.
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xD2, (int8) 0x84, (int8) 0x50
+        };
+        Assert.assertThrows(() -> {
+            IonIndex.build(b, (int64) b.count());
+        });
+        return;
+    }
+}
