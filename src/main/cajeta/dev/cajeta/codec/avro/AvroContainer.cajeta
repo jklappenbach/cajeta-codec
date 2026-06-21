@@ -1,6 +1,9 @@
 package dev.cajeta.codec.avro;
 
 import cajeta.lang.String;
+import dev.cajeta.codec.compress.Deflate;
+import dev.cajeta.codec.compress.Snappy;
+import dev.cajeta.codec.compress.Gzip;
 
 /**
  * Avro Object Container File reader (Phase 5.1b/5.2). Layout: the 4-byte magic
@@ -94,8 +97,38 @@ public final class AvroContainer {
 
     /** Decompressed bytes of the current block (per `codec()`; caller owns). */
     public #int8[] currentData() {
-        // "null" → raw slice. deflate/snappy dispatch lands in 5.2.
-        return this.rawSlice();
+        if (this.codecName.equals("null")) {
+            return this.rawSlice();
+        }
+        int8[] raw = this.rawSlice();
+        if (this.codecName.equals("deflate")) {
+            // Avro deflate blocks are raw DEFLATE with no stored output size.
+            return Deflate.inflateGrow(raw, (int64) raw.count());
+        }
+        if (this.codecName.equals("snappy")) {
+            // Snappy block followed by a 4-byte big-endian CRC-32 of the output.
+            int64 clen = (int64) raw.count() - (int64) 4;
+            int8[] data = Snappy.decompress(raw, clen);
+            int64 want = this.beUint32(raw, clen);
+            int64 got = Gzip.crc32(data, (int64) data.count()) & (int64) 0xFFFFFFFF;
+            if (want != got) {
+                throw heap AvroParseException("Avro snappy block CRC mismatch", clen);
+            }
+            return #data;
+        }
+        throw heap AvroParseException(
+            "unsupported Avro block codec (want null/deflate/snappy)", (int64) 0);
+    }
+
+    int64 beUint32(int8[] b, int64 off) {
+        int64 b0 = (int64) (((int32) b[off]) & 0xFF);
+        int64 o1 = off + (int64) 1;
+        int64 o2 = off + (int64) 2;
+        int64 o3 = off + (int64) 3;
+        int64 b1 = (int64) (((int32) b[o1]) & 0xFF);
+        int64 b2 = (int64) (((int32) b[o2]) & 0xFF);
+        int64 b3 = (int64) (((int32) b[o3]) & 0xFF);
+        return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
     }
 
     #int8[] rawSlice() {

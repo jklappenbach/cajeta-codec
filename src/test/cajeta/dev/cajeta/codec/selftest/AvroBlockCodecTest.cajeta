@@ -1,0 +1,98 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.avro.AvroContainer;
+import dev.cajeta.codec.avro.AvroCursor;
+import cajeta.lang.String;
+
+/**
+ * Phase 5.2 — Avro block decompression. Two hand-built containers carry the same
+ * record `{ id: 42, name: "hi" }` under the `deflate` and `snappy` codecs.
+ * `currentData()` must inflate/decompress the block back to the raw record bytes
+ * (`54 04 68 69`), which `AvroCursor` then decodes. The deflate block carries no
+ * uncompressed size (exercises `Deflate.inflateGrow`); the snappy block carries a
+ * trailing big-endian CRC-32 that `currentData()` verifies.
+ */
+public class AvroBlockCodecTest {
+
+    public AvroBlockCodecTest() {
+        return;
+    }
+
+    static #int8[] deflateContainer() {
+        int8[] b = {
+            (int8) 0x4F, (int8) 0x62, (int8) 0x6A, (int8) 0x01, (int8) 0x04,
+            (int8) 0x16, (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F,
+            (int8) 0x2E, (int8) 0x73, (int8) 0x63, (int8) 0x68, (int8) 0x65,
+            (int8) 0x6D, (int8) 0x61, (int8) 0x02, (int8) 0x58, (int8) 0x14,
+            (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F, (int8) 0x2E,
+            (int8) 0x63, (int8) 0x6F, (int8) 0x64, (int8) 0x65, (int8) 0x63,
+            (int8) 0x0E, (int8) 0x64, (int8) 0x65, (int8) 0x66, (int8) 0x6C,
+            (int8) 0x61, (int8) 0x74, (int8) 0x65, (int8) 0x00, (int8) 0x00,
+            (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04, (int8) 0x05,
+            (int8) 0x06, (int8) 0x07, (int8) 0x08, (int8) 0x09, (int8) 0x0A,
+            (int8) 0x0B, (int8) 0x0C, (int8) 0x0D, (int8) 0x0E, (int8) 0x0F,
+            (int8) 0x02, (int8) 0x0C, (int8) 0x0B, (int8) 0x61, (int8) 0xC9,
+            (int8) 0xC8, (int8) 0x04, (int8) 0x00, (int8) 0x00, (int8) 0x01,
+            (int8) 0x02, (int8) 0x03, (int8) 0x04, (int8) 0x05, (int8) 0x06,
+            (int8) 0x07, (int8) 0x08, (int8) 0x09, (int8) 0x0A, (int8) 0x0B,
+            (int8) 0x0C, (int8) 0x0D, (int8) 0x0E, (int8) 0x0F
+        };
+        return b;
+    }
+
+    static #int8[] snappyContainer() {
+        int8[] b = {
+            (int8) 0x4F, (int8) 0x62, (int8) 0x6A, (int8) 0x01, (int8) 0x04,
+            (int8) 0x16, (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F,
+            (int8) 0x2E, (int8) 0x73, (int8) 0x63, (int8) 0x68, (int8) 0x65,
+            (int8) 0x6D, (int8) 0x61, (int8) 0x02, (int8) 0x58, (int8) 0x14,
+            (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F, (int8) 0x2E,
+            (int8) 0x63, (int8) 0x6F, (int8) 0x64, (int8) 0x65, (int8) 0x63,
+            (int8) 0x0C, (int8) 0x73, (int8) 0x6E, (int8) 0x61, (int8) 0x70,
+            (int8) 0x70, (int8) 0x79, (int8) 0x00, (int8) 0x00, (int8) 0x01,
+            (int8) 0x02, (int8) 0x03, (int8) 0x04, (int8) 0x05, (int8) 0x06,
+            (int8) 0x07, (int8) 0x08, (int8) 0x09, (int8) 0x0A, (int8) 0x0B,
+            (int8) 0x0C, (int8) 0x0D, (int8) 0x0E, (int8) 0x0F, (int8) 0x02,
+            (int8) 0x14, (int8) 0x04, (int8) 0x0C, (int8) 0x54, (int8) 0x04,
+            (int8) 0x68, (int8) 0x69, (int8) 0xFB, (int8) 0x68, (int8) 0xD7,
+            (int8) 0x66, (int8) 0x00, (int8) 0x01, (int8) 0x02, (int8) 0x03,
+            (int8) 0x04, (int8) 0x05, (int8) 0x06, (int8) 0x07, (int8) 0x08,
+            (int8) 0x09, (int8) 0x0A, (int8) 0x0B, (int8) 0x0C, (int8) 0x0D,
+            (int8) 0x0E, (int8) 0x0F
+        };
+        return b;
+    }
+
+    @Test
+    public void inflatesDeflateBlock() {
+        int8[] b = AvroBlockCodecTest.deflateContainer();
+        AvroContainer ct = heap AvroContainer(b, (int64) b.count());
+        Assert.isTrue(ct.codec().equals("deflate"));
+        Assert.isTrue(ct.nextBlock());
+        Assert.that(ct.currentObjectCount()).isEqualTo((int64) 1);
+
+        int8[] data = ct.currentData();
+        AvroCursor rc = heap AvroCursor(data, (int64) 0);
+        Assert.that(rc.readLong()).isEqualTo((int64) 42);
+        Assert.isTrue(rc.readString().equals("hi"));
+        Assert.isFalse(ct.nextBlock());
+        return;
+    }
+
+    @Test
+    public void decompressesSnappyBlock() {
+        int8[] b = AvroBlockCodecTest.snappyContainer();
+        AvroContainer ct = heap AvroContainer(b, (int64) b.count());
+        Assert.isTrue(ct.codec().equals("snappy"));
+        Assert.isTrue(ct.nextBlock());
+        Assert.that(ct.currentObjectCount()).isEqualTo((int64) 1);
+
+        int8[] data = ct.currentData();
+        AvroCursor rc = heap AvroCursor(data, (int64) 0);
+        Assert.that(rc.readLong()).isEqualTo((int64) 42);
+        Assert.isTrue(rc.readString().equals("hi"));
+        Assert.isFalse(ct.nextBlock());
+        return;
+    }
+}

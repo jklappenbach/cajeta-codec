@@ -27,6 +27,24 @@ public final class Deflate {
         this.op = (int64) 0;
     }
 
+    // Ensure `out` can hold `need` bytes; doubles + copies when short. Lets a
+    // size-less stream (Avro deflate blocks store no uncompressed length) grow.
+    // The exact-sized path never triggers this (need <= destLen always).
+    void ensure(int64 need) {
+        int64 cap = (int64) this.out.count();
+        if (need <= cap) { return; }
+        int64 newcap = cap * (int64) 2;
+        while (newcap < need) { newcap = newcap * (int64) 2; }
+        int8[] nb = heap int8[newcap];
+        int64 oldop = this.op;
+        int64 i = (int64) 0;
+        while (i < oldop) {
+            nb[i] = this.out[i];
+            i = i + 1;
+        }
+        this.out = nb;
+    }
+
     // Copy the produced bytes into a fresh, caller-owned array.
     #int8[] result() {
         int8[] r = heap int8[this.op];
@@ -128,6 +146,7 @@ public final class Deflate {
         int32 hi = ((int32) this.src[bp1]) & 0xFF;
         int32 len = lo | (hi << 8);
         bp = bp + 4;
+        this.ensure(this.op + (int64) len);
         int32 k = 0;
         while (k < len) {
             int64 si = bp + (int64) k;
@@ -143,41 +162,42 @@ public final class Deflate {
         int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
         int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
         int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
-        int8[] o = this.out;
-        int64 op = this.op;
-        int64 cap = (int64) o.count();
+        // Terminator is the end-of-block symbol (256), not a buffer-full guard,
+        // so a size-less stream inflates correctly; ensure() grows on demand.
         boolean go = true;
         while (go) {
-            if (op >= cap) { go = false; }
-            else {
-                int32 sym = this.decodeSym(litTable);
-                if (sym < 0) { go = false; }
-                else if (sym == 256) { go = false; }
-                else if (sym < 256) {
-                    o[op] = (int8) sym;
+            int32 sym = this.decodeSym(litTable);
+            if (sym < 0) { go = false; }
+            else if (sym == 256) { go = false; }
+            else if (sym < 256) {
+                this.ensure(this.op + (int64) 1);
+                int8[] o = this.out;
+                o[this.op] = (int8) sym;
+                this.op = this.op + 1;
+            } else if (sym <= 285) {
+                int32 li = sym - 257;
+                int32 leBits = lengthExtra[li];
+                int32 lenE = this.getBits(leBits);
+                int32 len = lengthBase[li] + lenE;
+                int32 dsym = this.decodeSym(distTable);
+                int32 deBits = distExtra[dsym];
+                int32 distE = this.getBits(deBits);
+                int32 dist = distBase[dsym] + distE;
+                this.ensure(this.op + (int64) len);
+                int8[] o = this.out;
+                int64 op = this.op;
+                int64 from = op - (int64) dist;
+                int32 c = 0;
+                while (c < len) {
+                    int8 v = o[from];
+                    o[op] = v;
                     op = op + 1;
-                } else if (sym <= 285) {
-                    int32 li = sym - 257;
-                    int32 leBits = lengthExtra[li];
-                    int32 lenE = this.getBits(leBits);
-                    int32 len = lengthBase[li] + lenE;
-                    int32 dsym = this.decodeSym(distTable);
-                    int32 deBits = distExtra[dsym];
-                    int32 distE = this.getBits(deBits);
-                    int32 dist = distBase[dsym] + distE;
-                    int64 from = op - (int64) dist;
-                    int32 c = 0;
-                    while (c < len) {
-                        int8 v = o[from];
-                        o[op] = v;
-                        op = op + 1;
-                        from = from + 1;
-                        c = c + 1;
-                    }
-                } else { go = false; }
-            }
+                    from = from + 1;
+                    c = c + 1;
+                }
+                this.op = op;
+            } else { go = false; }
         }
-        this.op = op;
     }
 
     void fixedBlock() {
@@ -323,6 +343,16 @@ public final class Deflate {
     /** Inflate a raw DEFLATE stream (first `n` bytes) into `destLen` bytes. */
     public static #int8[] inflate(int8[] src, int64 n, int64 destLen) {
         Deflate d = heap Deflate(src, n, destLen);
+        d.inflateBlocks();
+        return d.result();
+    }
+
+    /**
+     * Inflate a raw DEFLATE stream of unknown output size (Avro deflate blocks
+     * store no uncompressed length). Starts small and grows via `ensure()`.
+     */
+    public static #int8[] inflateGrow(int8[] src, int64 n) {
+        Deflate d = heap Deflate(src, n, (int64) 256);
         d.inflateBlocks();
         return d.result();
     }
