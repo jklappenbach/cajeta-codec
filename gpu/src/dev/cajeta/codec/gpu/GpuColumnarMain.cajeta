@@ -1,0 +1,65 @@
+package dev.cajeta.codec.gpu;
+
+import dev.cajeta.codec.columnar.BitPack;
+
+/**
+ * Phase 9.1 oracle test (standalone, built with --xpu-backend=cpu). For a range
+ * of bit widths it packs values with the scalar `BitPack` (the oracle), unpacks
+ * on the GPU path, and asserts bit-exact equivalence with both the scalar unpack
+ * and the originals. Also checks the offload gate. Prints GPU-DECODE-PASS /
+ * -FAIL; returns 0 / 1. Widths include 32 (the `1<<32` mask edge).
+ */
+public final class GpuColumnarMain {
+
+    // Returns the number of mismatches for one width (0 = bit-exact).
+    static int32 checkWidth(int32 w, int32 count) {
+        int32 mask;
+        if (w >= 32) { mask = (int32) 0xFFFFFFFF; } else { mask = (1 << w) - 1; }
+        int32[] vals = heap int32[count];
+        int32 i = 0;
+        while (i < count) {
+            vals[i] = (i * 2654435761 + 17) & mask;
+            i = i + 1;
+        }
+        int8[] packed = BitPack.pack(vals, w, count);
+        int32[] gpu = GpuColumnar.unpackOnGpu(packed, w, count);
+        int8[] packed2 = BitPack.pack(vals, w, count);
+        int32[] cpu = BitPack.unpack(packed2, (int64) 0, w, count);
+        int32 bad = 0;
+        i = 0;
+        while (i < count) {
+            if (gpu[i] != cpu[i]) { bad = bad + 1; }
+            if (gpu[i] != vals[i]) { bad = bad + 1; }
+            i = i + 1;
+        }
+        return bad;
+    }
+
+    public static int32 run() {
+        int32 count = 1000;
+        int32[] widths = { 1, 7, 8, 13, 16, 17, 24, 31, 32 };
+        int32 totalBad = 0;
+        int32 wi = 0;
+        while (wi < 9) {
+            int32 w = widths[wi];
+            int32 bad = GpuColumnarMain.checkWidth(w, count);
+            if (bad != 0) {
+                System.stdout.println("  width " + w + " MISMATCH bad=" + bad);
+            }
+            totalBad = totalBad + bad;
+            wi = wi + 1;
+        }
+
+        boolean g1 = GpuColumnar.shouldOffload(1000, true);      // small → false
+        boolean g2 = GpuColumnar.shouldOffload(100000, false);   // large, CPU-bound → false
+        boolean g3 = GpuColumnar.shouldOffload(100000, true);    // large + GPU-bound → true
+        boolean gateOk = (!g1) && (!g2) && g3;
+
+        if (totalBad == 0 && gateOk) {
+            System.stdout.println("GPU-DECODE-PASS widths=9 count=" + count);
+            return 0;
+        }
+        System.stdout.println("GPU-DECODE-FAIL totalBad=" + totalBad + " gateOk=" + gateOk);
+        return 1;
+    }
+}

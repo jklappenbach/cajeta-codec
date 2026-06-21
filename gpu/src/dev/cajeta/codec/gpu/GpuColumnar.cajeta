@@ -1,0 +1,92 @@
+package dev.cajeta.codec.gpu;
+
+import cajeta.gpu.GpuBuffer;
+import cajeta.gpu.GpuStream;
+import cajeta.gpu.GpuThread;
+
+/**
+ * GPU columnar decode (Phase 9.1) — the gated throughput offload for bulk
+ * columnar scans (codec spec §6: "BUILD, gated"). The first kernel is fixed-width
+ * **bit-unpack**, the most SIMT-friendly columnar primitive: every output element
+ * is independent (value `i` = bits `[i*w, (i+1)*w)`, LSB-first), so it maps to one
+ * GPU thread per value with no cross-thread dependence. Bit-exact to the scalar
+ * `BitPack` oracle (validated on the CPU backend, runs on real GPUs unchanged).
+ *
+ * Packed bytes are uploaded as little-endian uint32 words (one pad word so the
+ * two-word read never runs past the buffer); each thread reads its `w` bits from
+ * a 64-bit window. Widths 1..32. RLE/dict/delta kernels + on-device measurement
+ * are follow-ups (P-GPU-MORE / P-GPU-BENCH).
+ */
+public final class GpuColumnar {
+
+    @Kernel
+    public static void bitUnpack(GpuBuffer<uint32> out, GpuBuffer<uint32> packed,
+                                 uint32 width, uint32 count) {
+        uint32 i = GpuThread.globalIdX();
+        if (i < count) {
+            uint32 bitOff = i * width;
+            uint32 wi = bitOff >> 5;
+            uint32 b = bitOff & (uint32) 31;
+            uint32 wi1 = wi + (uint32) 1;
+            uint64 lo = (uint64) packed[wi];
+            uint64 hi = (uint64) packed[wi1];
+            uint64 two = lo | (hi << (uint64) 32);
+            uint64 mask = ((uint64) 1 << (uint64) width) - (uint64) 1;
+            uint64 val = (two >> (uint64) b) & mask;
+            out[i] = (uint32) val;
+        }
+    }
+
+    /**
+     * Host wrapper: unpack `count` width-`w` LSB-first values from `src` on the
+     * GPU, returning the decoded int32s. `w==0` decodes all-zeros without a launch.
+     */
+    public static #int32[] unpackOnGpu(int8[] src, int32 w, int32 count) {
+        int32[] out = heap int32[count];
+        if (w == 0 || count == 0) {
+            int32 z = 0;
+            while (z < count) { out[z] = 0; z = z + 1; }
+            return out;
+        }
+
+        int64 nbytes = ((int64) w * (int64) count + (int64) 7) >> 3;
+        int32 nwords = (int32) ((nbytes + (int64) 3) >> 2) + 1;   // +1 pad word
+        uint32[] words = heap uint32[nwords];
+        int32 z = 0;
+        while (z < nwords) { words[z] = (uint32) 0; z = z + 1; }
+        int64 bi = (int64) 0;
+        while (bi < nbytes) {
+            int32 wIdx = (int32) (bi >> 2);
+            int32 sh = (int32) ((bi & (int64) 3) * (int64) 8);
+            uint32 bv = (uint32) (((int32) src[bi]) & 0xFF);
+            uint32 cur = words[wIdx];
+            words[wIdx] = cur | (bv << (uint32) sh);
+            bi = bi + 1;
+        }
+
+        uint32[] hout = heap uint32[count];
+        GpuBuffer<uint32> pb = heap GpuBuffer<uint32>((uint64) nwords);
+        GpuBuffer<uint32> ob = heap GpuBuffer<uint32>((uint64) count);
+        pb.upload(words);
+        GpuStream s = GpuStream.current();
+        uint32 grid = ((uint32) count + (uint32) 63) / (uint32) 64;
+        bitUnpack.launch(s, grid: [grid], block: [64])(ob, pb, (uint32) w, (uint32) count);
+        s.sync();
+        ob.download(hout);
+
+        int32 k = 0;
+        while (k < count) { out[k] = (int32) hout[k]; k = k + 1; }
+        return out;
+    }
+
+    /**
+     * Gating heuristic (spec §6, cuDF model): offload only when the column is
+     * large enough to amortize launch/transfer **and** the data is already bound
+     * for the GPU. Small or CPU-resident reads stay on the CPU.
+     */
+    public static boolean shouldOffload(int32 count, boolean dataGoingToGpu) {
+        int32 threshold = 65536;
+        if (count < threshold) { return false; }
+        return dataGoingToGpu;
+    }
+}
