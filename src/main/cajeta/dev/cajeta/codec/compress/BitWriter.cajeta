@@ -1,0 +1,85 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * LSB-first bit writer for DEFLATE encoding (Phase 4.3). Non-Huffman fields
+ * (block header, length/distance extra bits) are emitted LSB-first directly via
+ * `writeBits`; Huffman codes are canonical MSB-first, so `writeHuff` reverses
+ * the code over its length before handing it to the LSB-first path. The byte
+ * accumulator (`bitbuf`/`bitcnt`) is flushed a byte at a time; `flushByte` pads
+ * the final partial byte with zeros.
+ */
+public final class BitWriter {
+    int8[] out;
+    int64 op;       // bytes emitted
+    int32 bitbuf;   // pending bits, LSB-first
+    int32 bitcnt;   // valid bits in bitbuf
+
+    public BitWriter(int64 cap) {
+        this.out = heap int8[cap];
+        this.op = (int64) 0;
+        this.bitbuf = 0;
+        this.bitcnt = 0;
+    }
+
+    void ensure(int64 need) {
+        int64 cap = (int64) this.out.count();
+        if (need <= cap) { return; }
+        int64 newcap = cap * (int64) 2;
+        while (newcap < need) { newcap = newcap * (int64) 2; }
+        int8[] nb = heap int8[newcap];
+        int64 i = (int64) 0;
+        while (i < this.op) { nb[i] = this.out[i]; i = i + 1; }
+        this.out = nb;
+    }
+
+    // Append the low `nbits` of `value`, LSB-first.
+    public void writeBits(int32 value, int32 nbits) {
+        int32 mask = (1 << nbits) - 1;
+        int32 buf = this.bitbuf | ((value & mask) << this.bitcnt);
+        int32 cnt = this.bitcnt + nbits;
+        while (cnt >= 8) {
+            this.ensure(this.op + (int64) 1);
+            int8[] o = this.out;
+            int32 byteOut = buf & 0xFF;
+            o[this.op] = (int8) byteOut;
+            this.op = this.op + 1;
+            buf = buf >> 8;
+            cnt = cnt - 8;
+        }
+        this.bitbuf = buf;
+        this.bitcnt = cnt;
+    }
+
+    // Emit a canonical Huffman code (MSB-first) by reversing it over `len` bits.
+    public void writeHuff(int32 code, int32 len) {
+        int32 rev = 0;
+        int32 c = code;
+        int32 i = 0;
+        while (i < len) {
+            rev = (rev << 1) | (c & 1);
+            c = c >> 1;
+            i = i + 1;
+        }
+        this.writeBits(rev, len);
+    }
+
+    // Pad the final partial byte with zero bits.
+    public void flushByte() {
+        if (this.bitcnt > 0) {
+            this.ensure(this.op + (int64) 1);
+            int8[] o = this.out;
+            int32 byteOut = this.bitbuf & 0xFF;
+            o[this.op] = (int8) byteOut;
+            this.op = this.op + 1;
+            this.bitbuf = 0;
+            this.bitcnt = 0;
+        }
+    }
+
+    public #int8[] result() {
+        int8[] r = heap int8[this.op];
+        int64 i = (int64) 0;
+        while (i < this.op) { r[i] = this.out[i]; i = i + 1; }
+        return r;
+    }
+}

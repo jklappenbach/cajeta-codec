@@ -340,6 +340,33 @@ public final class Deflate {
         return r;
     }
 
+    /**
+     * Encode `src` (first `n` bytes) as a single fixed-Huffman DEFLATE block
+     * (BTYPE 01), literals only — no LZ77 matching yet (4.3b adds it). Real
+     * entropy coding: the 7/8/9-bit fixed literal codes already shrink most
+     * text. Validated by round-tripping our own decoder and python
+     * `zlib.decompress(-15)`. Caller owns the result.
+     */
+    public static #int8[] deflateFixed(int8[] src, int64 n) {
+        int64 cap = n + (n >> 2) + (int64) 16;
+        BitWriter bw = heap BitWriter(cap);
+        bw.writeBits(1, 1);   // BFINAL = 1 (single block)
+        bw.writeBits(1, 2);   // BTYPE  = 01 (fixed Huffman)
+        int64 i = (int64) 0;
+        while (i < n) {
+            int32 b = ((int32) src[i]) & 0xFF;   // hoist array element (4.2a gotcha)
+            int32 code = 0;
+            int32 len = 0;
+            if (b < 144) { code = 0x30 + b; len = 8; }
+            else { code = 0x190 + (b - 144); len = 9; }
+            bw.writeHuff(code, len);
+            i = i + 1;
+        }
+        bw.writeHuff(0, 7);   // end-of-block symbol 256 (7-bit code 0)
+        bw.flushByte();
+        return bw.result();
+    }
+
     /** Inflate a raw DEFLATE stream (first `n` bytes) into `destLen` bytes. */
     public static #int8[] inflate(int8[] src, int64 n, int64 destLen) {
         Deflate d = heap Deflate(src, n, destLen);

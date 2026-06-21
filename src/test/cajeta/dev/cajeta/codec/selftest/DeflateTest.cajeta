@@ -56,6 +56,40 @@ public class DeflateTest {
     }
 
     @Test
+    public void deflateFixedRoundTrips() {
+        // 4.3a — fixed-Huffman literal block, round-tripped through our decoder.
+        String text = "the quick brown fox jumps over the lazy dog";
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] comp = Deflate.deflateFixed(in, inLen);
+        int8[] out = Deflate.inflate(comp, (int64) comp.count(), inLen);
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("the quick brown fox jumps over the lazy dog"));
+        return;
+    }
+
+    @Test
+    public void deflateFixedHighBytesRoundTrip() {
+        // 4.3a — exercise the 9-bit literal codes (bytes >= 144).
+        int8[] in = heap int8[64];
+        int32 i = 0;
+        while (i < 64) { in[i] = (int8) (140 + i); i = i + 1; }
+        int64 inLen = (int64) 64;
+        int8[] comp = Deflate.deflateFixed(in, inLen);
+        int8[] out = Deflate.inflate(comp, (int64) comp.count(), inLen);
+        boolean ok = true;
+        int32 k = 0;
+        while (k < 64) {
+            int32 a = ((int32) out[k]) & 0xFF;
+            int32 b = (140 + k) & 0xFF;
+            if (a != b) { ok = false; }
+            k = k + 1;
+        }
+        Assert.isTrue(ok);
+        return;
+    }
+
+    @Test
     public void inflatesDynamicHuffman() {
         // zlib level 9, "the quick brown fox jumps over the lazy dog. " x4 (180).
         int8[] blob = {
