@@ -94,6 +94,31 @@ public class IonTypedTest {
     }
 
     @Test
+    public void decodesTopLevelStream() {
+        // BVM + three back-to-back top-level structs (system-symbol field names,
+        // no LST): { version:10, name:"a" }, { version:20, "b" }, { version:30, "c" }.
+        // Each struct: D6 85 21 VV 84 81 SS  (content 6: version field + name field).
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xD6, (int8) 0x85, (int8) 0x21, (int8) 0x0A,
+            (int8) 0x84, (int8) 0x81, (int8) 0x61,
+            (int8) 0xD6, (int8) 0x85, (int8) 0x21, (int8) 0x14,
+            (int8) 0x84, (int8) 0x81, (int8) 0x62,
+            (int8) 0xD6, (int8) 0x85, (int8) 0x21, (int8) 0x1E,
+            (int8) 0x84, (int8) 0x81, (int8) 0x63
+        };
+        IonStreamMsg[] msgs = Ion.parse<IonStreamMsg[]>(b, (int64) b.count());
+
+        Assert.that((int64) msgs.count()).isEqualTo((int64) 3);
+        Assert.that(msgs[0].version).isEqualTo((int64) 10);
+        Assert.isTrue(msgs[0].name.equals("a"));
+        Assert.that(msgs[1].version).isEqualTo((int64) 20);
+        Assert.that(msgs[2].version).isEqualTo((int64) 30);
+        Assert.isTrue(msgs[2].name.equals("c"));
+        return;
+    }
+
+    @Test
     public void absentFieldsKeepConstructorDefaults() {
         // A struct with only `count` (SID 13) present — others stay at ctor
         // defaults. Reuses the same LST so field names resolve.

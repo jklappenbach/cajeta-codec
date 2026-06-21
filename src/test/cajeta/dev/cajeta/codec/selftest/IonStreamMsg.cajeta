@@ -1,0 +1,18 @@
+package dev.cajeta.codec.selftest;
+
+import cajeta.lang.String;
+
+/**
+ * Phase 3.2d stream fixture. Its field names are **system** symbol IDs
+ * (`version` = 5, `name` = 4) so the hand-encoded stream needs no local symbol
+ * table — keeping the multi-value framing test compact.
+ */
+public class IonStreamMsg {
+    public int64 version;
+    public String name;
+
+    public IonStreamMsg() {
+        this.version = (int64) 0;
+        this.name = null;
+    }
+}

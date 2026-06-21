@@ -19,16 +19,42 @@ import cajeta.lang.String;
  */
 public final class IonCursor {
     int8[] b;
+    int64 n;
     IonSymbolTable table;
     IonIndex[] frames;
     int32 depth;
+    int64 topTd;     // type-descriptor position of the current top-level value
 
     public IonCursor(int8[] b, int64 n) {
         this.b = b;
+        this.n = n;
         this.table = IonSymbolTable.parse(b, n);
         this.frames = heap IonIndex[32];
-        int64 start = this.table.userValueStart();
-        this.frames[0] = IonIndex.buildAt(b, start, this.table);
+        this.topTd = this.table.userValueStart();
+        this.frames[0] = IonIndex.buildAt(b, this.topTd, this.table);
+        this.depth = 1;
+    }
+
+    /**
+     * Advance to the next back-to-back top-level value (re-indexing it against
+     * the same shared symbol table), returning false when the stream is
+     * exhausted. Drives `Ion.parse<T[]>` over a multi-value document.
+     */
+    public boolean nextTopLevel() {
+        int64 hl = IonWire.headerLen(this.b, this.topTd);
+        int64 cl = IonWire.contentLength(this.b, this.topTd);
+        int64 next = this.topTd + hl + cl;
+        if (next >= this.n) { return false; }
+        this.topTd = next;
+        this.frames[0] = IonIndex.buildAt(this.b, next, this.table);
+        this.depth = 1;
+        return true;
+    }
+
+    /** Re-point to the first top-level value (for a second pass). */
+    public void reset() {
+        this.topTd = this.table.userValueStart();
+        this.frames[0] = IonIndex.buildAt(this.b, this.topTd, this.table);
         this.depth = 1;
     }
 
