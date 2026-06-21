@@ -1,0 +1,114 @@
+package dev.cajeta.codec.orc;
+
+import dev.cajeta.codec.protobuf.ProtobufIndex;
+import dev.cajeta.codec.protobuf.ProtobufWire;
+
+/**
+ * ORC single-column reader (Phase 8.1b) — reads one integer column's DATA stream
+ * from the first stripe and decodes it via `OrcRleV2`. Walks the protobuf Footer →
+ * StripeInformation → StripeFooter (streams) to locate the column's DATA stream
+ * byte range, then RLE-v2-decodes `numberOfRows` integers. Everything inline (the
+ * protobuf indices are objects — passing one to a helper would consume it). v1:
+ * uncompressed (NONE) streams, single stripe, no nulls; returns the decoded **sum**
+ * (int64[]-return-to-test miscompiles). Stream kinds: PRESENT=0, DATA=1, ROW_INDEX=6.
+ */
+public final class OrcColumnReader {
+
+    public static int64 int32ColumnSum(int8[] file, int64 n, int32 col) {
+        // PostScript → footerLength
+        int64 lastPos = n - (int64) 1;
+        int64 pslen = (int64) (((int32) file[lastPos]) & 0xFF);
+        int64 psStart = n - (int64) 1 - pslen;
+        int8[] ps = OrcMetadata.slice(file, psStart, pslen);
+        ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
+        int64 footerLength = (int64) 0;
+        int32 pc = psIdx.fieldCount();
+        int32 i = 0;
+        while (i < pc) {
+            if (psIdx.fieldNumber(i) == 1) {
+                footerLength = ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            }
+            i = i + 1;
+        }
+
+        // Footer → numberOfRows + first StripeInformation
+        int64 footerStart = psStart - footerLength;
+        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+        int64 numRows = (int64) 0;
+        int64 stripeVs = (int64) 0 - (int64) 1;
+        int64 stripeVe = (int64) 0;
+        int32 fc = fIdx.fieldCount();
+        i = 0;
+        while (i < fc) {
+            int32 fn = fIdx.fieldNumber(i);
+            if (fn == 6) {
+                numRows = ProtobufWire.decodeVarint(footer, fIdx.valueStart(i));
+            } else if (fn == 3) {
+                if (stripeVs < (int64) 0) {
+                    stripeVs = fIdx.valueStart(i);
+                    stripeVe = fIdx.valueEnd(i);
+                }
+            }
+            i = i + 1;
+        }
+
+        // StripeInformation: offset(1), indexLength(2), dataLength(3), footerLength(4)
+        int8[] stripe = OrcMetadata.slice(footer, stripeVs, stripeVe - stripeVs);
+        ProtobufIndex sIdx = ProtobufIndex.build(stripe, stripeVe - stripeVs);
+        int64 sOffset = (int64) 0;
+        int64 sIndexLen = (int64) 0;
+        int64 sDataLen = (int64) 0;
+        int64 sFooterLen = (int64) 0;
+        int32 sc = sIdx.fieldCount();
+        i = 0;
+        while (i < sc) {
+            int32 fn = sIdx.fieldNumber(i);
+            if (fn == 1) { sOffset = ProtobufWire.decodeVarint(stripe, sIdx.valueStart(i)); }
+            else if (fn == 2) { sIndexLen = ProtobufWire.decodeVarint(stripe, sIdx.valueStart(i)); }
+            else if (fn == 3) { sDataLen = ProtobufWire.decodeVarint(stripe, sIdx.valueStart(i)); }
+            else if (fn == 4) { sFooterLen = ProtobufWire.decodeVarint(stripe, sIdx.valueStart(i)); }
+            i = i + 1;
+        }
+
+        // StripeFooter (streams). Walk in order, accumulating the byte offset.
+        int64 sfStart = sOffset + sIndexLen + sDataLen;
+        int8[] sf = OrcMetadata.slice(file, sfStart, sFooterLen);
+        ProtobufIndex sfIdx = ProtobufIndex.build(sf, sFooterLen);
+        int64 runOffset = sOffset;
+        int64 dataOffset = (int64) 0 - (int64) 1;
+        int32 sfc = sfIdx.fieldCount();
+        i = 0;
+        while (i < sfc) {
+            if (sfIdx.fieldNumber(i) == 1) {
+                // Stream message: kind(1), column(2), length(3)
+                int64 stVs = sfIdx.valueStart(i);
+                int64 stVe = sfIdx.valueEnd(i);
+                int8[] st = OrcMetadata.slice(sf, stVs, stVe - stVs);
+                ProtobufIndex stIdx = ProtobufIndex.build(st, stVe - stVs);
+                int32 kind = 0;
+                int32 column = 0;
+                int64 length = (int64) 0;
+                int32 stc = stIdx.fieldCount();
+                int32 j = 0;
+                while (j < stc) {
+                    int32 fn = stIdx.fieldNumber(j);
+                    if (fn == 1) { kind = (int32) ProtobufWire.decodeVarint(st, stIdx.valueStart(j)); }
+                    else if (fn == 2) { column = (int32) ProtobufWire.decodeVarint(st, stIdx.valueStart(j)); }
+                    else if (fn == 3) { length = ProtobufWire.decodeVarint(st, stIdx.valueStart(j)); }
+                    j = j + 1;
+                }
+                if (kind == 1 && column == col) {
+                    dataOffset = runOffset;
+                }
+                runOffset = runOffset + length;
+            }
+            i = i + 1;
+        }
+
+        if (dataOffset < (int64) 0) {
+            throw heap OrcParseException("no DATA stream for column", (int64) 0);
+        }
+        return OrcRleV2.decodeSum(file, dataOffset, (int32) numRows);
+    }
+}

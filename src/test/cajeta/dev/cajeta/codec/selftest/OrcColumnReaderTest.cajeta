@@ -1,0 +1,24 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.orc.OrcColumnReader;
+
+/**
+ * Phase 8.1b — end-to-end ORC single-column read from a REAL pyarrow ORC file
+ * (`x` = [5,10,15,20]). Walks Footer → StripeInformation → StripeFooter to find
+ * the column DATA stream, then RLE-v2-decodes it. Validated by the sum (50).
+ */
+public class OrcColumnReaderTest {
+
+    public OrcColumnReaderTest() {
+        return;
+    }
+
+    @Test
+    public void readsRealOrcColumn() {
+        int8[] f = OrcMetadataTest.simpleOrc();
+        int64 sum = OrcColumnReader.int32ColumnSum(f, (int64) f.count(), 1);
+        Assert.that(sum).isEqualTo((int64) 50);   // 5+10+15+20
+        return;
+    }
+}
