@@ -1,0 +1,28 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.columnar.FrameOfReference;
+
+/**
+ * Phase 6.1d — Frame-of-Reference decode. Residuals (value - reference)
+ * bit-packed at the narrowed width; decode adds the reference back.
+ */
+public class FrameOfReferenceTest {
+
+    public FrameOfReferenceTest() {
+        return;
+    }
+
+    @Test
+    public void decodesForBlock() {
+        int8[] s = { (int8) 0x50, (int8) 0xA3, (int8) 0xF0 };
+        int32[] got = FrameOfReference.decode(s, (int64) 0, 4, 6, 1000);
+        int32[] want = { 1000, 1005, 1003, 1010, 1000, 1015 };
+        int32 i = 0;
+        while (i < 6) {
+            Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
+            i = i + 1;
+        }
+        return;
+    }
+}

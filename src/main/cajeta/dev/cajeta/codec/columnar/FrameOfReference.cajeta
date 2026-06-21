@@ -1,0 +1,23 @@
+package dev.cajeta.codec.columnar;
+
+/**
+ * Frame-of-Reference (FOR) decode (Phase 6.1d). Values are stored as a constant
+ * `reference` (typically the column/block min) plus bit-packed residuals
+ * `value[i] - reference`, narrowing the bit width. Decode unpacks the residuals
+ * via `BitPack` and adds the reference back. The reference is supplied by the
+ * format layer (ORC/Parquet block headers); this kernel takes it as a parameter.
+ */
+public final class FrameOfReference {
+
+    public static #int32[] decode(int8[] src, int64 byteOff, int32 w,
+                                  int32 count, int32 reference) {
+        int32[] residuals = BitPack.unpack(src, byteOff << 3, w, count);
+        int32[] out = heap int32[count];
+        int32 i = 0;
+        while (i < count) {
+            out[i] = residuals[i] + reference;
+            i = i + 1;
+        }
+        return out;
+    }
+}

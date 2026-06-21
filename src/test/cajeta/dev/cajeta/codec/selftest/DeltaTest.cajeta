@@ -1,0 +1,36 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.columnar.Delta;
+
+/**
+ * Phase 6.1e — delta decode (prefix-sum). first + successive deltas (including
+ * negatives) reconstruct the value sequence.
+ */
+public class DeltaTest {
+
+    public DeltaTest() {
+        return;
+    }
+
+    @Test
+    public void prefixSumsDeltas() {
+        int32[] deltas = { 2, 3, 0 - 1, 5 };
+        int32[] got = Delta.decode(10, deltas, 5);
+        int32[] want = { 10, 12, 15, 14, 19 };
+        int32 i = 0;
+        while (i < 5) {
+            Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void singleValueHasNoDeltas() {
+        int32[] none = { };
+        int32[] got = Delta.decode(42, none, 1);
+        Assert.that((int64) got[0]).isEqualTo((int64) 42);
+        return;
+    }
+}

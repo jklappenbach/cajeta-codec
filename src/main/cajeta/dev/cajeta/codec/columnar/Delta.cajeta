@@ -1,0 +1,26 @@
+package dev.cajeta.codec.columnar;
+
+/**
+ * Delta decode (Phase 6.1e) — reconstruct values from a first value plus
+ * successive deltas by **prefix-sum** (`value[i] = value[i-1] + delta[i-1]`).
+ * This scalar kernel is the oracle; the SIMD prefix-sum (log-step shifts) is
+ * parked (P-COLUMNAR-SIMD). Parquet DELTA_BINARY_PACKED mini-block framing
+ * (zigzag + per-block bit widths) sits above this in the Parquet layer (7.3).
+ */
+public final class Delta {
+
+    /** `deltas` holds `n-1` successive differences after `first`. */
+    public static #int32[] decode(int32 first, int32[] deltas, int32 n) {
+        int32[] out = heap int32[n];
+        if (n == 0) { return out; }
+        out[0] = first;
+        int32 acc = first;
+        int32 i = 1;
+        while (i < n) {
+            acc = acc + deltas[i - 1];
+            out[i] = acc;
+            i = i + 1;
+        }
+        return out;
+    }
+}
