@@ -15,7 +15,7 @@ public class DictionaryTest {
 
     @Test
     public void decodesDictionaryPage() {
-        int8[] page = { (int8) 0x02, (int8) 0x02, (int8) 0xE4, (int8) 0x1B };
+        int8[] page = { (int8) 0x02, (int8) 0x03, (int8) 0xE4, (int8) 0x1B };
         int32[] dict = { 100, 200, 300, 400 };
         int32[] got = Dictionary.decode(page, (int64) 0, 8, dict);
         int32[] want = { 100, 200, 300, 400, 400, 300, 200, 100 };

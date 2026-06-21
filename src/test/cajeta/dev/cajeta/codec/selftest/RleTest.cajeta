@@ -16,7 +16,7 @@ public class RleTest {
 
     @Test
     public void decodesRleThenBitPackedW3() {
-        int8[] s = { (int8) 0x0B, (int8) 0x04, (int8) 0x02,
+        int8[] s = { (int8) 0x0A, (int8) 0x04, (int8) 0x03,
                      (int8) 0x88, (int8) 0xC6, (int8) 0xFA };
         int32[] got = Rle.decode(s, (int64) 0, 3, 13);
         int32[] want = { 4, 4, 4, 4, 4, 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -30,7 +30,7 @@ public class RleTest {
 
     @Test
     public void decodesBooleanW1() {
-        int8[] s2 = { (int8) 0x07, (int8) 0x01, (int8) 0x02, (int8) 0x4D };
+        int8[] s2 = { (int8) 0x06, (int8) 0x01, (int8) 0x03, (int8) 0x4D };
         int32[] got = Rle.decode(s2, (int64) 0, 1, 11);
         int32[] want = { 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0 };
         int32 i = 0;
@@ -43,7 +43,7 @@ public class RleTest {
 
     @Test
     public void decodesWidthZeroRun() {
-        int8[] s3 = { (int8) 0x0D };
+        int8[] s3 = { (int8) 0x0C };
         int32[] got = Rle.decode(s3, (int64) 0, 0, 6);
         int32 i = 0;
         while (i < 6) {
