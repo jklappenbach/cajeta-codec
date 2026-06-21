@@ -24,6 +24,22 @@ public class ZlibTest {
     }
 
     @Test
+    public void zlibRealCompressesAndRoundTrips() {
+        // 4.3c — repetitive corpus must shrink (real DEFLATE) and round-trip.
+        String unit = "the quick brown fox jumps over the lazy dog. ";
+        String text = unit + unit + unit + unit + unit + unit + unit + unit;
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] z = Zlib.compress(in, inLen);
+        int64 zLen = (int64) z.count();   // capture before the move into decompress
+        int8[] out = Zlib.decompress(z, zLen, inLen);
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals(text));
+        Assert.that(zLen).isLessThan(inLen);
+        return;
+    }
+
+    @Test
     public void roundTripsThroughZlib() {
         String text = "the quick brown fox jumps over the lazy dog";
         int8[] in = text.bytes;

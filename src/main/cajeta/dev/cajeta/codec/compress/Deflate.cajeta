@@ -289,12 +289,26 @@ public final class Deflate {
     }
 
     /**
-     * Encode `src` (first `n` bytes) as a raw DEFLATE stream of **stored**
-     * blocks (BTYPE 0, ≤65535 bytes each). Valid DEFLATE that round-trips, but
-     * does not compress — real fixed/dynamic-Huffman entropy coding is parked
-     * (P-DEFLATE-COMPRESS). Caller owns the result.
+     * Encode `src` (first `n` bytes) as a raw DEFLATE stream. Produces the
+     * fixed-Huffman + LZ77 stream (`deflateFixed`) when it is no larger than the
+     * stored encoding, else falls back to stored blocks — so incompressible
+     * input never expands beyond the ~0.04% stored overhead. Caller owns the
+     * result.
      */
     public static #int8[] deflate(int8[] src, int64 n) {
+        int8[] fixed = Deflate.deflateFixed(src, n);
+        int64 flen = (int64) fixed.count();
+        int64 storedLen = n + ((n / (int64) 65535) + (int64) 1) * (int64) 5;
+        if (flen <= storedLen) { return fixed; }
+        return Deflate.deflateStored(src, n);
+    }
+
+    /**
+     * Encode `src` (first `n` bytes) as a raw DEFLATE stream of **stored**
+     * blocks (BTYPE 0, ≤65535 bytes each). Valid DEFLATE that round-trips but
+     * does not compress; the incompressible-input fallback for `deflate`.
+     */
+    static #int8[] deflateStored(int8[] src, int64 n) {
         int64 nblocks = (n / (int64) 65535) + (int64) 1;
         int64 cap = n + nblocks * (int64) 5 + (int64) 8;
         int8[] out = heap int8[cap];

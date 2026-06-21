@@ -1,0 +1,22 @@
+package dev.cajeta.codec.tools;
+import dev.cajeta.codec.compress.Gzip;
+import cajeta.io.file.File;
+import cajeta.io.file.FileWriter;
+import cajeta.io.file.OpenMode;
+import cajeta.lang.String;
+/** Emits /tmp/our.gz from Gzip.compress for the stock-python gzip.decompress check. */
+public final class GzipEmitMain {
+    public static int32 run() {
+        String unit = "the quick brown fox jumps over the lazy dog. " +
+            "pack my box with five dozen liquor jugs. ";
+        String text = unit + unit + unit + unit + unit + unit + unit + unit;
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] gz = Gzip.compress(in, inLen);
+        int32 n = (int32) gz.count();
+        FileWriter w = File.openWrite("/tmp/our.gz", OpenMode.WRITE);
+        w.write(gz, n);
+        w.close();
+        return 0;
+    }
+}
