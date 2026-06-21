@@ -1,0 +1,21 @@
+package dev.cajeta.codec.tools;
+
+import dev.cajeta.codec.orc.OrcWriter;
+import cajeta.io.file.File;
+import cajeta.io.file.FileWriter;
+import cajeta.io.file.OpenMode;
+
+/** Emits /tmp/our.orc from OrcWriter for the pyarrow ecosystem check. */
+public final class OrcWriteMain {
+    public static int32 run() {
+        int64[] v = heap int64[5];
+        v[0] = (int64) 7; v[1] = (int64) 14; v[2] = (int64) 21;
+        v[3] = (int64) 28; v[4] = (int64) 35;
+        int8[] f = OrcWriter.writeLongColumn(v, 5);
+        int32 n = (int32) f.count();
+        FileWriter w = File.openWrite("/tmp/our.orc", OpenMode.WRITE);
+        w.write(f, n);
+        w.close();
+        return 0;
+    }
+}

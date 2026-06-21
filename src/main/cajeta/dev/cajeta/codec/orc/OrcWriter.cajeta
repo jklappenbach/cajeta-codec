@@ -1,0 +1,116 @@
+package dev.cajeta.codec.orc;
+
+import dev.cajeta.codec.protobuf.ProtobufWriter;
+
+/**
+ * Minimal ORC **writer** (Phase 8.4b) — emits a complete, spec-valid ORC file for
+ * a single LONG column with no nulls, uncompressed. Layout: `ORC` magic (header,
+ * 3B) → one stripe (no index; a single DATA stream RLE-v2-DIRECT-encoded) →
+ * StripeFooter (streams + per-column encodings) → Footer (types, the stripe,
+ * numberOfRows) → PostScript (footerLength, compression NONE, version, magic) →
+ * the 1-byte PostScript length. All protobuf messages are built with
+ * `ProtobufWriter`. Reads back via `OrcColumnReader`; pyarrow reads it too.
+ *
+ * v1: one LONG column, no nulls, single stripe, uncompressed, no statistics /
+ * row index. Richer writes (multi-column, nulls, compression, stats) are
+ * follow-ups (P-ORC-WRITE-RICH).
+ */
+public final class OrcWriter {
+
+    static void blit(int8[] dst, int64 off, int8[] src, int32 n) {
+        int32 i = 0;
+        while (i < n) {
+            int64 di = off + (int64) i;
+            dst[di] = src[i];
+            i = i + 1;
+        }
+    }
+
+    public static #int8[] writeLongColumn(int64[] vals, int32 count) {
+        // DATA stream (RLE v2 DIRECT).
+        int8[] data = OrcRleV2.encodeDirect(vals, count);
+        int32 dataLen = (int32) data.count();
+
+        // StripeFooter: one Stream{kind=DATA(1), column=1, length} + two
+        // ColumnEncodings (root DIRECT=0, column DIRECT_V2=3).
+        ProtobufWriter streamMsg = heap ProtobufWriter();
+        streamMsg.writeVarintField(1, (int64) 1);            // kind DATA
+        streamMsg.writeVarintField(2, (int64) 1);            // column
+        streamMsg.writeVarintField(3, (int64) dataLen);      // length
+        int8[] streamBytes = streamMsg.toBytes();
+
+        ProtobufWriter enc0 = heap ProtobufWriter();
+        enc0.writeVarintField(1, (int64) 0);                 // DIRECT
+        int8[] enc0Bytes = enc0.toBytes();
+
+        ProtobufWriter enc1 = heap ProtobufWriter();
+        enc1.writeVarintField(1, (int64) 3);                 // DIRECT_V2
+        int8[] enc1Bytes = enc1.toBytes();
+
+        ProtobufWriter sf = heap ProtobufWriter();
+        sf.writeLenField(1, streamBytes, (int32) streamBytes.count());
+        sf.writeLenField(2, enc0Bytes, (int32) enc0Bytes.count());
+        sf.writeLenField(2, enc1Bytes, (int32) enc1Bytes.count());
+        int8[] sfBytes = sf.toBytes();
+        int32 sfLen = (int32) sfBytes.count();
+
+        // StripeInformation: offset(1)=3, indexLength(2)=0, dataLength(3),
+        // footerLength(4), numberOfRows(5).
+        ProtobufWriter si = heap ProtobufWriter();
+        si.writeVarintField(1, (int64) 3);
+        si.writeVarintField(2, (int64) 0);
+        si.writeVarintField(3, (int64) dataLen);
+        si.writeVarintField(4, (int64) sfLen);
+        si.writeVarintField(5, (int64) count);
+        int8[] siBytes = si.toBytes();
+
+        // Types: [0] STRUCT{subtypes=[1], fieldNames=["x"]}, [1] LONG.
+        int8[] subPacked = { (int8) 0x01 };
+        int8[] nameX = { (int8) 0x78 };                      // "x"
+        ProtobufWriter t0 = heap ProtobufWriter();
+        t0.writeVarintField(1, (int64) 12);                  // STRUCT
+        t0.writeLenField(2, subPacked, 1);
+        t0.writeLenField(3, nameX, 1);
+        int8[] t0Bytes = t0.toBytes();
+
+        ProtobufWriter t1 = heap ProtobufWriter();
+        t1.writeVarintField(1, (int64) 4);                   // LONG
+        int8[] t1Bytes = t1.toBytes();
+
+        // Footer.
+        int64 contentLength = (int64) dataLen + (int64) sfLen;
+        ProtobufWriter footer = heap ProtobufWriter();
+        footer.writeVarintField(1, (int64) 3);               // headerLength
+        footer.writeVarintField(2, contentLength);
+        footer.writeLenField(3, siBytes, (int32) siBytes.count());
+        footer.writeLenField(4, t0Bytes, (int32) t0Bytes.count());
+        footer.writeLenField(4, t1Bytes, (int32) t1Bytes.count());
+        footer.writeVarintField(6, (int64) count);           // numberOfRows
+        int8[] footerBytes = footer.toBytes();
+        int32 footerLen = (int32) footerBytes.count();
+
+        // PostScript.
+        int8[] ver = { (int8) 0x00, (int8) 0x0C };           // version [0,12]
+        int8[] orcMagic = { (int8) 0x4F, (int8) 0x52, (int8) 0x43 };
+        ProtobufWriter ps = heap ProtobufWriter();
+        ps.writeVarintField(1, (int64) footerLen);
+        ps.writeVarintField(2, (int64) 0);                   // compression NONE
+        ps.writeLenField(4, ver, 2);
+        ps.writeLenField(8000, orcMagic, 3);
+        int8[] psBytes = ps.toBytes();
+        int32 psLen = (int32) psBytes.count();
+
+        // Assemble: ORC | data | stripeFooter | footer | postscript | psLen.
+        int64 total = (int64) 3 + (int64) dataLen + (int64) sfLen
+            + (int64) footerLen + (int64) psLen + (int64) 1;
+        int8[] file = heap int8[total];
+        file[0] = (int8) 0x4F; file[1] = (int8) 0x52; file[2] = (int8) 0x43;
+        int64 o = (int64) 3;
+        OrcWriter.blit(file, o, data, dataLen);        o = o + (int64) dataLen;
+        OrcWriter.blit(file, o, sfBytes, sfLen);       o = o + (int64) sfLen;
+        OrcWriter.blit(file, o, footerBytes, footerLen); o = o + (int64) footerLen;
+        OrcWriter.blit(file, o, psBytes, psLen);       o = o + (int64) psLen;
+        file[o] = (int8) psLen;
+        return #file;
+    }
+}

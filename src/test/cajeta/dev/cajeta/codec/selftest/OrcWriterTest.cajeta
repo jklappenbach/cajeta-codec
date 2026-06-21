@@ -1,0 +1,55 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.orc.OrcWriter;
+import dev.cajeta.codec.orc.OrcMetadata;
+import dev.cajeta.codec.orc.OrcColumnReader;
+
+/**
+ * Phase 8.4b — ORC writer round-trip. `OrcWriter.writeLongColumn` assembles a
+ * full ORC file (magic + stripe + StripeFooter + Footer + PostScript); we read
+ * it back with our own metadata + column reader. The same bytes are pyarrow-read
+ * in the ecosystem check (tools/), proving both directions.
+ */
+public class OrcWriterTest {
+
+    public OrcWriterTest() {
+        return;
+    }
+
+    @Test
+    public void roundTripsMetadata() {
+        int64[] v = heap int64[5];
+        v[0] = (int64) 7; v[1] = (int64) 14; v[2] = (int64) 21;
+        v[3] = (int64) 28; v[4] = (int64) 35;
+        int8[] f = OrcWriter.writeLongColumn(v, 5);
+        OrcMetadata m = OrcMetadata.parse(f, (int64) f.count());
+        Assert.that(m.numberOfRows).isEqualTo((int64) 5);
+        Assert.that((int64) m.stripeCount).isEqualTo((int64) 1);
+        Assert.that((int64) m.typeCount).isEqualTo((int64) 2);
+        Assert.that((int64) m.compression).isEqualTo((int64) 0);
+        return;
+    }
+
+    @Test
+    public void roundTripsColumnValues() {
+        int64[] v = heap int64[5];
+        v[0] = (int64) 7; v[1] = (int64) 14; v[2] = (int64) 21;
+        v[3] = (int64) 28; v[4] = (int64) 35;
+        int8[] f = OrcWriter.writeLongColumn(v, 5);
+        int64 sum = OrcColumnReader.int32ColumnSum(f, (int64) f.count(), 1);
+        Assert.that(sum).isEqualTo((int64) 105);   // 7+14+21+28+35
+        return;
+    }
+
+    @Test
+    public void roundTripsByName() {
+        int64[] v = heap int64[5];
+        v[0] = (int64) 7; v[1] = (int64) 14; v[2] = (int64) 21;
+        v[3] = (int64) 28; v[4] = (int64) 35;
+        int8[] f = OrcWriter.writeLongColumn(v, 5);
+        int64 sum = OrcColumnReader.int32ColumnSumByName(f, (int64) f.count(), "x");
+        Assert.that(sum).isEqualTo((int64) 105);
+        return;
+    }
+}
