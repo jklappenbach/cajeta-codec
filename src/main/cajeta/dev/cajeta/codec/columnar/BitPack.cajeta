@@ -1,0 +1,50 @@
+package dev.cajeta.codec.columnar;
+
+/**
+ * Bit-packing primitive (Phase 6.1a) — the shared columnar building block under
+ * Parquet's RLE/bit-packing hybrid and ORC's encodings. Values of a fixed bit
+ * width `w` (0..32) are packed **LSB-first**: value `i` occupies bits
+ * `[i*w, (i+1)*w)` of the little-endian bit stream, low bit of each value first.
+ *
+ * This scalar decoder is bit-exact and serves as the v1 kernel *and* the oracle
+ * the SIMD-BP128 vectorization (parked, P-COLUMNAR-SIMD) must match.
+ */
+public final class BitPack {
+
+    /**
+     * Unpack `count` width-`w` values starting at bit offset `bitOff` into `src`.
+     * `w == 0` decodes all-zeros (a common RLE degenerate). Caller owns the result.
+     */
+    public static #int32[] unpack(int8[] src, int64 bitOff, int32 w, int32 count) {
+        int32[] out = heap int32[count];
+        if (w == 0) {
+            int32 z = 0;
+            while (z < count) { out[z] = 0; z = z + 1; }
+            return out;
+        }
+        int64 bp = bitOff;
+        int32 i = 0;
+        while (i < count) {
+            int32 val = 0;
+            int32 b = 0;
+            while (b < w) {
+                int64 byteIdx = bp >> 3;
+                int32 bitIdx = (int32) (bp & (int64) 7);
+                int32 byteVal = ((int32) src[byteIdx]) & 0xFF;
+                int32 bit = (byteVal >> bitIdx) & 1;
+                val = val | (bit << b);
+                bp = bp + 1;
+                b = b + 1;
+            }
+            out[i] = val;
+            i = i + 1;
+        }
+        return out;
+    }
+
+    /** Byte length of `count` width-`w` packed values, rounded up to whole bytes. */
+    public static int64 packedBytes(int32 w, int32 count) {
+        int64 bits = (int64) w * (int64) count;
+        return (bits + (int64) 7) >> 3;
+    }
+}

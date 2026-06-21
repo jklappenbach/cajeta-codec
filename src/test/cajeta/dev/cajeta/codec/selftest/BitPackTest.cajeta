@@ -1,0 +1,75 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.columnar.BitPack;
+
+/**
+ * Phase 6.1a — LSB-first bit-packing decode. Fixtures are python-packed
+ * (value i in bits [i*w, (i+1)*w), low bit first) for widths 1/3/5, plus the
+ * degenerate w=0 (all zeros). Bit-exact vs the known value vectors.
+ */
+public class BitPackTest {
+
+    public BitPackTest() {
+        return;
+    }
+
+    @Test
+    public void unpacksWidth3() {
+        int8[] w3 = { (int8) 0xD1, (int8) 0x58, (int8) 0x1F };
+        int32[] got = BitPack.unpack(w3, (int64) 0, 3, 8);
+        int32[] want = { 1, 2, 3, 4, 5, 6, 7, 0 };
+        int32 i = 0;
+        while (i < 8) {
+            Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void unpacksWidth5() {
+        int8[] w5 = { (int8) 0x1F, (int8) 0x44, (int8) 0xE4, (int8) 0x01 };
+        int32[] got = BitPack.unpack(w5, (int64) 0, 5, 5);
+        int32[] want = { 31, 0, 17, 8, 30 };
+        int32 i = 0;
+        while (i < 5) {
+            Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void unpacksWidth1() {
+        int8[] w1 = { (int8) 0x4D, (int8) 0x03 };
+        int32[] got = BitPack.unpack(w1, (int64) 0, 1, 10);
+        int32[] want = { 1, 0, 1, 1, 0, 0, 1, 0, 1, 1 };
+        int32 i = 0;
+        while (i < 10) {
+            Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void widthZeroIsAllZeros() {
+        int8[] empty = { (int8) 0x00 };
+        int32[] got = BitPack.unpack(empty, (int64) 0, 0, 4);
+        int32 i = 0;
+        while (i < 4) {
+            Assert.that((int64) got[i]).isEqualTo((int64) 0);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void packedBytesRoundsUp() {
+        // 8 values * 3 bits = 24 bits = 3 bytes; 5*5=25 bits -> 4 bytes.
+        Assert.that(BitPack.packedBytes(3, 8)).isEqualTo((int64) 3);
+        Assert.that(BitPack.packedBytes(5, 5)).isEqualTo((int64) 4);
+        return;
+    }
+}
