@@ -1,0 +1,17 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * A canonical Huffman decode table (Phase 4.2) — per-length code `count` plus a
+ * length-then-symbol-sorted `symbol` list (the puff.c representation). Wrapping
+ * the two arrays in an object lets `Deflate` pass tables across methods by
+ * reference without raw heap arrays crossing instance-method boundaries.
+ */
+final class HuffTable {
+    int32[] count;
+    int32[] symbol;
+
+    HuffTable(#int32[] count, #int32[] symbol) {
+        this.count = count;
+        this.symbol = symbol;
+    }
+}
