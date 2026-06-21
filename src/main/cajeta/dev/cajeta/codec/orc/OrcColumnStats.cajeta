@@ -45,17 +45,22 @@ public final class OrcColumnStats {
         int8[] ps = OrcMetadata.slice(file, psStart, pslen);
         ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
         int64 footerLength = (int64) 0;
+        int32 compression = 0;
         int32 pc = psIdx.fieldCount();
         int32 i = 0;
         while (i < pc) {
-            if (psIdx.fieldNumber(i) == 1) {
+            int32 pfn = psIdx.fieldNumber(i);
+            if (pfn == 1) {
                 footerLength = ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            } else if (pfn == 2) {
+                compression = (int32) ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
             }
             i = i + 1;
         }
         int64 footerStart = psStart - footerLength;
-        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
-        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+        int8[] footer = OrcCompression.decompress(file, footerStart, footerLength, compression);
+        int64 footerN = (int64) footer.count();
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerN);
 
         // field 7 = repeated ColumnStatistics, in column-id order.
         int32 statsSeen = 0;

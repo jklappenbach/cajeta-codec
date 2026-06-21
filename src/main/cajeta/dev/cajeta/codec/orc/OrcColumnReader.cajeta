@@ -22,19 +22,24 @@ public final class OrcColumnReader {
         int8[] ps = OrcMetadata.slice(file, psStart, pslen);
         ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
         int64 footerLength = (int64) 0;
+        int32 compression = 0;
         int32 pc = psIdx.fieldCount();
         int32 i = 0;
         while (i < pc) {
-            if (psIdx.fieldNumber(i) == 1) {
+            int32 pfn = psIdx.fieldNumber(i);
+            if (pfn == 1) {
                 footerLength = ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            } else if (pfn == 2) {
+                compression = (int32) ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
             }
             i = i + 1;
         }
 
         // Footer → numberOfRows + first StripeInformation
         int64 footerStart = psStart - footerLength;
-        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
-        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+        int8[] footer = OrcCompression.decompress(file, footerStart, footerLength, compression);
+        int64 footerN = (int64) footer.count();
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerN);
         int64 numRows = (int64) 0;
         int64 stripeVs = (int64) 0 - (int64) 1;
         int64 stripeVe = (int64) 0;
@@ -73,10 +78,12 @@ public final class OrcColumnReader {
 
         // StripeFooter (streams). Walk in order, accumulating the byte offset.
         int64 sfStart = sOffset + sIndexLen + sDataLen;
-        int8[] sf = OrcMetadata.slice(file, sfStart, sFooterLen);
-        ProtobufIndex sfIdx = ProtobufIndex.build(sf, sFooterLen);
+        int8[] sf = OrcCompression.decompress(file, sfStart, sFooterLen, compression);
+        int64 sfN = (int64) sf.count();
+        ProtobufIndex sfIdx = ProtobufIndex.build(sf, sfN);
         int64 runOffset = sOffset;
         int64 dataOffset = (int64) 0 - (int64) 1;
+        int64 dataLen = (int64) 0;
         int32 sfc = sfIdx.fieldCount();
         i = 0;
         while (i < sfc) {
@@ -100,6 +107,7 @@ public final class OrcColumnReader {
                 }
                 if (kind == 1 && column == col) {
                     dataOffset = runOffset;
+                    dataLen = length;
                 }
                 runOffset = runOffset + length;
             }
@@ -109,7 +117,8 @@ public final class OrcColumnReader {
         if (dataOffset < (int64) 0) {
             throw heap OrcParseException("no DATA stream for column", (int64) 0);
         }
-        return OrcRleV2.decodeSum(file, dataOffset, (int32) numRows);
+        int8[] dataBuf = OrcCompression.decompress(file, dataOffset, dataLen, compression);
+        return OrcRleV2.decodeSum(dataBuf, (int64) 0, (int32) numRows);
     }
 
     /**
@@ -128,17 +137,22 @@ public final class OrcColumnReader {
         int8[] ps = OrcMetadata.slice(file, psStart, pslen);
         ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
         int64 footerLength = (int64) 0;
+        int32 compression = 0;
         int32 pc = psIdx.fieldCount();
         int32 i = 0;
         while (i < pc) {
-            if (psIdx.fieldNumber(i) == 1) {
+            int32 pfn = psIdx.fieldNumber(i);
+            if (pfn == 1) {
                 footerLength = ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            } else if (pfn == 2) {
+                compression = (int32) ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
             }
             i = i + 1;
         }
         int64 footerStart = psStart - footerLength;
-        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
-        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+        int8[] footer = OrcCompression.decompress(file, footerStart, footerLength, compression);
+        int64 footerN = (int64) footer.count();
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerN);
 
         // First field 4 = root Type (column 0, the struct).
         int64 rootVs = (int64) 0 - (int64) 1;

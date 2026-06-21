@@ -1,0 +1,90 @@
+package dev.cajeta.codec.orc;
+
+import dev.cajeta.codec.compress.Deflate;
+import dev.cajeta.codec.compress.Snappy;
+
+/**
+ * ORC stream decompression (Phase 8.3a). With a compressed file every metadata
+ * and data stream is split into compression chunks: a 3-byte little-endian header
+ * `(chunkLength << 1) | isOriginal`, followed by `chunkLength` bytes that are raw
+ * (isOriginal=1) or codec-compressed. ORC ZLIB is **raw DEFLATE** (no zlib
+ * wrapper), reusing Phase-4 `Deflate.inflateGrow`; SNAPPY reuses `Snappy`. The
+ * PostScript is never compressed. compKind: 0 NONE, 1 ZLIB, 2 SNAPPY (others
+ * fail loud in v1).
+ */
+public final class OrcCompression {
+
+    public static #int8[] decompress(int8[] file, int64 off, int64 len, int32 compKind) {
+        if (compKind == 0) {
+            return OrcMetadata.slice(file, off, len);
+        }
+        if (compKind != 1 && compKind != 2) {
+            throw heap OrcParseException("unsupported ORC compression", (int64) compKind);
+        }
+
+        int64 cap = len * (int64) 3;
+        if (cap < (int64) 64) { cap = (int64) 64; }
+        int8[] out = heap int8[cap];
+        int64 outLen = (int64) 0;
+
+        int64 p = off;
+        int64 end = off + len;
+        while (p + (int64) 3 <= end) {
+            int32 h0 = ((int32) file[p]) & 0xFF;
+            int32 h1 = ((int32) file[p + (int64) 1]) & 0xFF;
+            int32 h2 = ((int32) file[p + (int64) 2]) & 0xFF;
+            int64 header = (int64) h0 | ((int64) h1 << 8) | ((int64) h2 << 16);
+            int64 isOrig = header & (int64) 1;
+            int64 clen = header >> 1;
+            p = p + (int64) 3;
+
+            if (isOrig != (int64) 0) {
+                if (outLen + clen > cap) {
+                    int64 nc = cap;
+                    while (outLen + clen > nc) { nc = nc * (int64) 2; }
+                    int8[] bigger = heap int8[nc];
+                    int64 c = (int64) 0;
+                    while (c < outLen) { bigger[c] = out[c]; c = c + 1; }
+                    out = bigger;
+                    cap = nc;
+                }
+                int64 k = (int64) 0;
+                while (k < clen) {
+                    out[outLen] = file[p + k];
+                    outLen = outLen + 1;
+                    k = k + 1;
+                }
+            } else {
+                int8[] cbuf = OrcMetadata.slice(file, p, clen);
+                int8[] inf = heap int8[1];
+                if (compKind == 1) {
+                    inf = Deflate.inflateGrow(cbuf, clen);
+                } else {
+                    inf = Snappy.decompress(cbuf, clen);
+                }
+                int64 m = (int64) inf.count();
+                if (outLen + m > cap) {
+                    int64 nc = cap;
+                    while (outLen + m > nc) { nc = nc * (int64) 2; }
+                    int8[] bigger = heap int8[nc];
+                    int64 c = (int64) 0;
+                    while (c < outLen) { bigger[c] = out[c]; c = c + 1; }
+                    out = bigger;
+                    cap = nc;
+                }
+                int64 k = (int64) 0;
+                while (k < m) {
+                    out[outLen] = inf[k];
+                    outLen = outLen + 1;
+                    k = k + 1;
+                }
+            }
+            p = p + clen;
+        }
+
+        int8[] res = heap int8[outLen];
+        int64 j = (int64) 0;
+        while (j < outLen) { res[j] = out[j]; j = j + 1; }
+        return #res;
+    }
+}

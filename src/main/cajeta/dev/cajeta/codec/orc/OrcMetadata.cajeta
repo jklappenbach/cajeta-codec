@@ -71,8 +71,9 @@ public final class OrcMetadata {
         meta.compression = compression;
 
         int64 footerStart = psStart - footerLength;
-        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
-        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+        int8[] footer = OrcCompression.decompress(file, footerStart, footerLength, compression);
+        int64 footerN = (int64) footer.count();
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerN);
 
         int64 numRows = (int64) 0;
         int32 stripeCount = 0;
