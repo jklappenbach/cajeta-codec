@@ -1,0 +1,96 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.ion.IonSymbolTable;
+import cajeta.lang.String;
+
+/**
+ * Phase 3.1b — Ion symbol table. Resolves system symbols (SID 1–9) and parses a
+ * leading local symbol table (an `$ion_symbol_table`-annotated struct whose
+ * `symbols` list appends locals from SID 10). The hand-encoded stream below is:
+ *
+ *   E0 01 00 EA              BVM
+ *   ED                       annotation wrapper, content length 13
+ *   81                       annot-list length 1
+ *   83                       annotation SID 3 ($ion_symbol_table)
+ *   DA                       struct, content length 10
+ *   87                       field name SID 7 (symbols)
+ *   B8                       list, content length 8
+ *   82 69 64                 "id"
+ *   84 6E 61 6D 65           "name"
+ *
+ * → locals {10:"id", 11:"name"}; user data begins at offset 18.
+ */
+public class IonSymbolTableTest {
+
+    public IonSymbolTableTest() {
+        return;
+    }
+
+    static #int8[] lstStream() {
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xED,
+            (int8) 0x81,
+            (int8) 0x83,
+            (int8) 0xDA,
+            (int8) 0x87,
+            (int8) 0xB8,
+            (int8) 0x82, (int8) 0x69, (int8) 0x64,
+            (int8) 0x84, (int8) 0x6E, (int8) 0x61, (int8) 0x6D, (int8) 0x65
+        };
+        return b;
+    }
+
+    @Test
+    public void resolvesSystemSymbols() {
+        IonSymbolTable t = IonSymbolTable.system();
+        Assert.isTrue(t.resolve((int64) 3).equals("$ion_symbol_table"));
+        Assert.isTrue(t.resolve((int64) 4).equals("name"));
+        Assert.isTrue(t.resolve((int64) 7).equals("symbols"));
+        Assert.isTrue(t.resolve((int64) 1).equals("$ion"));
+        return;
+    }
+
+    @Test
+    public void systemTableHasNoLocalsAndUserStartsAfterBvm() {
+        // BVM then a bare empty struct 0xD0 → no LST, user data at offset 4.
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xD0
+        };
+        IonSymbolTable t = IonSymbolTable.parse(b, (int64) b.count());
+        Assert.that((int64) t.localSymbolCount()).isEqualTo((int64) 0);
+        Assert.that(t.userValueStart()).isEqualTo((int64) 4);
+        return;
+    }
+
+    @Test
+    public void parsesLocalSymbolTable() {
+        int8[] b = IonSymbolTableTest.lstStream();
+        IonSymbolTable t = IonSymbolTable.parse(b, (int64) b.count());
+
+        Assert.that((int64) t.localSymbolCount()).isEqualTo((int64) 2);
+        Assert.isTrue(t.resolve((int64) 10).equals("id"));
+        Assert.isTrue(t.resolve((int64) 11).equals("name"));
+        // system symbols still resolve through the same table
+        Assert.isTrue(t.resolve((int64) 7).equals("symbols"));
+        return;
+    }
+
+    @Test
+    public void userDataStartsAfterLocalSymbolTable() {
+        int8[] b = IonSymbolTableTest.lstStream();
+        IonSymbolTable t = IonSymbolTable.parse(b, (int64) b.count());
+        Assert.that(t.userValueStart()).isEqualTo((int64) 18);
+        return;
+    }
+
+    @Test
+    public void unknownSidResolvesNull() {
+        IonSymbolTable t = IonSymbolTable.system();
+        Assert.isTrue(t.resolve((int64) 99) == null);
+        Assert.isTrue(t.resolve((int64) 0) == null);
+        return;
+    }
+}
