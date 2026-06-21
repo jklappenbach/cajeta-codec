@@ -1,0 +1,246 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * LZ4 block-format codec (Phase 4.1), our own implementation. An LZ4 block is a
+ * series of sequences: a **token** byte (high nibble = literal length, low nibble
+ * = match length − 4, the minmatch being 4), optional `0xFF`-run length
+ * extensions, then the literal bytes, a 16-bit little-endian back-reference
+ * **offset**, and the match copied byte-by-byte (overlapping runs work). The
+ * final sequence is literals only (no offset/match). A raw block carries no size,
+ * so `decompress` takes the decompressed length from the caller (the frame /
+ * page metadata supplies it).
+ *
+ * Compound array indices are hoisted to named locals (the codec gotcha).
+ */
+public final class Lz4 {
+
+    // --- compression -------------------------------------------------------
+
+    static int64 readLE4(int8[] src, int64 pos) {
+        int64 p0 = pos;
+        int64 p1 = pos + 1;
+        int64 p2 = pos + 2;
+        int64 p3 = pos + 3;
+        int64 b0 = (int64) (((int32) src[p0]) & 0xFF);
+        int64 b1 = (int64) (((int32) src[p1]) & 0xFF);
+        int64 b2 = (int64) (((int32) src[p2]) & 0xFF);
+        int64 b3 = (int64) (((int32) src[p3]) & 0xFF);
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    static int32 hashKey(int64 key, int32 tsize) {
+        int64 hh = key * (int64) 0x1e35a7bd;
+        int64 idx = (hh >> (int64) 20) & (int64) (tsize - 1);
+        return (int32) idx;
+    }
+
+    static boolean match4(int8[] src, int64 a, int64 b) {
+        int32 j = 0;
+        boolean ok = true;
+        while (j < 4) {
+            int64 ai = a + (int64) j;
+            int64 bi = b + (int64) j;
+            int8 ca = src[ai];
+            int8 cb = src[bi];
+            if (ca != cb) { ok = false; }
+            j = j + 1;
+        }
+        return ok;
+    }
+
+    // Write a `0xFF`-run length extension for (value - 15), then the remainder.
+    static int64 emitLenExt(int8[] out, int64 olen, int64 value) {
+        int64 o = olen;
+        int64 rem = value - (int64) 15;
+        while (rem >= (int64) 255) {
+            out[o] = (int8) 0xFF;
+            o = o + 1;
+            rem = rem - (int64) 255;
+        }
+        out[o] = (int8) rem;
+        o = o + 1;
+        return o;
+    }
+
+    // Emit a full sequence: token, literal-length ext, literals, offset, match ext.
+    static int64 emitSequence(int8[] out, int64 olen, int8[] src, int64 anchor,
+                              int64 litLen, int64 offset, int64 matchLen) {
+        int64 o = olen;
+        int64 mEnc = matchLen - (int64) 4;
+        int32 tLit = (int32) litLen;
+        if (litLen > (int64) 15) { tLit = 15; }
+        int32 tMat = (int32) mEnc;
+        if (mEnc > (int64) 15) { tMat = 15; }
+        out[o] = (int8) ((tLit << 4) | tMat);
+        o = o + 1;
+        if (litLen >= (int64) 15) { o = Lz4.emitLenExt(out, o, litLen); }
+        int64 k = (int64) 0;
+        while (k < litLen) {
+            int64 si = anchor + k;
+            int64 di = o + k;
+            out[di] = src[si];
+            k = k + 1;
+        }
+        o = o + litLen;
+        out[o] = (int8) (offset & (int64) 0xFF);
+        o = o + 1;
+        out[o] = (int8) ((offset >> 8) & (int64) 0xFF);
+        o = o + 1;
+        if (mEnc >= (int64) 15) { o = Lz4.emitLenExt(out, o, mEnc); }
+        return o;
+    }
+
+    // Emit the trailing literals-only sequence (no offset/match).
+    static int64 emitLastLiterals(int8[] out, int64 olen, int8[] src,
+                                  int64 anchor, int64 litLen) {
+        int64 o = olen;
+        int32 tLit = (int32) litLen;
+        if (litLen > (int64) 15) { tLit = 15; }
+        out[o] = (int8) (tLit << 4);
+        o = o + 1;
+        if (litLen >= (int64) 15) { o = Lz4.emitLenExt(out, o, litLen); }
+        int64 k = (int64) 0;
+        while (k < litLen) {
+            int64 si = anchor + k;
+            int64 di = o + k;
+            out[di] = src[si];
+            k = k + 1;
+        }
+        return o + litLen;
+    }
+
+    /**
+     * Compress `src` (first `n` bytes) into an LZ4 block via LZ77 hash-match
+     * (4-byte hash table → 16-bit-offset back-references). The decompressed
+     * length must be tracked by the caller (a raw block stores no size). Matches
+     * start only before the final 12 bytes (the LZ4 last-literals convention).
+     */
+    public static #int8[] compress(int8[] src, int64 n) {
+        int64 cap = n + (n / (int64) 255) + (int64) 32;
+        int8[] out = heap int8[cap];
+        int64 olen = (int64) 0;
+
+        int32 tsize = 4096;
+        int64[] table = heap int64[tsize];
+        int32 ti = 0;
+        while (ti < tsize) {
+            table[ti] = (int64) 0;
+            ti = ti + 1;
+        }
+
+        int64 anchor = (int64) 0;
+        int64 ip = (int64) 0;
+        int64 limit = n - (int64) 12;
+        while (ip < limit) {
+            int64 key = Lz4.readLE4(src, ip);
+            int32 h = Lz4.hashKey(key, tsize);
+            int64 cand = table[h] - 1;
+            table[h] = ip + 1;
+
+            boolean matched = false;
+            if (cand >= (int64) 0) {
+                int64 off = ip - cand;
+                if (off >= (int64) 1 && off < (int64) 65536) {
+                    if (Lz4.match4(src, cand, ip)) { matched = true; }
+                }
+            }
+
+            if (matched) {
+                int64 mlen = (int64) 4;
+                int64 maxLen = n - ip;
+                boolean go = true;
+                while (go) {
+                    if (mlen >= maxLen) { go = false; }
+                    else {
+                        int64 a = cand + mlen;
+                        int64 b = ip + mlen;
+                        int8 ca = src[a];
+                        int8 cb = src[b];
+                        if (ca != cb) { go = false; }
+                        else { mlen = mlen + 1; }
+                    }
+                }
+                int64 offset = ip - cand;
+                int64 litLen = ip - anchor;
+                olen = Lz4.emitSequence(out, olen, src, anchor, litLen, offset, mlen);
+                ip = ip + mlen;
+                anchor = ip;
+            } else {
+                ip = ip + 1;
+            }
+        }
+        olen = Lz4.emitLastLiterals(out, olen, src, anchor, n - anchor);
+
+        int8[] result = heap int8[olen];
+        int64 i = (int64) 0;
+        while (i < olen) {
+            result[i] = out[i];
+            i = i + 1;
+        }
+        return result;
+    }
+
+    /** Decompress an LZ4 block (first `n` bytes of `src`) into `destLen` bytes. */
+    public static #int8[] decompress(int8[] src, int64 n, int64 destLen) {
+        int8[] out = heap int8[destLen];
+        int64 op = (int64) 0;
+        int64 ip = (int64) 0;
+
+        while (ip < n) {
+            int32 token = ((int32) src[ip]) & 0xFF;
+            ip = ip + 1;
+
+            int64 litLen = (int64) (token >> 4);
+            if (litLen == (int64) 15) {
+                boolean go = true;
+                while (go) {
+                    int32 b = ((int32) src[ip]) & 0xFF;
+                    ip = ip + 1;
+                    litLen = litLen + (int64) b;
+                    if (b < 255) { go = false; }
+                }
+            }
+
+            int64 k = (int64) 0;
+            while (k < litLen) {
+                int64 si = ip + k;
+                int64 di = op + k;
+                out[di] = src[si];
+                k = k + 1;
+            }
+            ip = ip + litLen;
+            op = op + litLen;
+
+            if (ip < n) {
+                int64 ip1 = ip + 1;
+                int64 o0 = (int64) (((int32) src[ip]) & 0xFF);
+                int64 o1 = (int64) (((int32) src[ip1]) & 0xFF);
+                int64 offset = o0 | (o1 << 8);
+                ip = ip + 2;
+
+                int64 matchLen = (int64) (token & 0x0F);
+                if (matchLen == (int64) 15) {
+                    boolean go = true;
+                    while (go) {
+                        int32 b = ((int32) src[ip]) & 0xFF;
+                        ip = ip + 1;
+                        matchLen = matchLen + (int64) b;
+                        if (b < 255) { go = false; }
+                    }
+                }
+                matchLen = matchLen + (int64) 4;
+
+                int64 from = op - offset;
+                int64 j = (int64) 0;
+                while (j < matchLen) {
+                    int8 v = out[from];
+                    out[op] = v;
+                    op = op + 1;
+                    from = from + 1;
+                    j = j + 1;
+                }
+            }
+        }
+        return out;
+    }
+}

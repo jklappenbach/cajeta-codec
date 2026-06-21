@@ -1,0 +1,122 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.compress.Lz4;
+import cajeta.lang.String;
+
+/**
+ * Phase 4.1c — LZ4 block decompression, against hand-encoded golden blocks
+ * (token = literal-length / match-length nibbles, 16-bit LE offset, minmatch 4,
+ * 0xFF length-extension runs). A raw LZ4 block carries no size, so the caller
+ * supplies the decompressed length. Phase 4.1d adds round-trip via the
+ * compressor.
+ */
+public class Lz4Test {
+
+    public Lz4Test() {
+        return;
+    }
+
+    @Test
+    public void decompressesPureLiterals() {
+        // "hello": token 0x50 (litLen 5, matchLen nibble 0), then 'hello'.
+        int8[] blob = {
+            (int8) 0x50,
+            (int8) 0x68, (int8) 0x65, (int8) 0x6C, (int8) 0x6C, (int8) 0x6F
+        };
+        int8[] out = Lz4.decompress(blob, (int64) blob.count(), (int64) 5);
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals("hello"));
+        return;
+    }
+
+    @Test
+    public void decompressesBackReference() {
+        // "abcabcabc": token 0x32 (litLen 3, matchLen 2→6), 'abc', offset 03 00.
+        int8[] blob = {
+            (int8) 0x32,
+            (int8) 0x61, (int8) 0x62, (int8) 0x63,
+            (int8) 0x03, (int8) 0x00
+        };
+        int8[] out = Lz4.decompress(blob, (int64) blob.count(), (int64) 9);
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals("abcabcabc"));
+        return;
+    }
+
+    @Test
+    public void decompressesOverlappingRun() {
+        // "aaaaa": token 0x10 (litLen 1, matchLen 0→4), 'a', offset 01 00.
+        int8[] blob = {
+            (int8) 0x10,
+            (int8) 0x61,
+            (int8) 0x01, (int8) 0x00
+        };
+        int8[] out = Lz4.decompress(blob, (int64) blob.count(), (int64) 5);
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals("aaaaa"));
+        return;
+    }
+
+    @Test
+    public void roundTripsRepetitiveText() {
+        String text = "the quick brown fox the quick brown fox the quick brown fox";
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] comp = Lz4.compress(in, inLen);
+        Assert.isTrue((int64) comp.count() < inLen);
+        int8[] out = Lz4.decompress(comp, (int64) comp.count(), inLen);
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals(
+            "the quick brown fox the quick brown fox the quick brown fox"));
+        return;
+    }
+
+    @Test
+    public void roundTripsLongRun() {
+        int8[] in = heap int8[50];
+        int32 i = 0;
+        while (i < 50) { in[i] = (int8) 0x7A; i = i + 1; }
+        int8[] comp = Lz4.compress(in, (int64) 50);
+        Assert.isTrue((int64) comp.count() < (int64) 50);
+        int8[] out = Lz4.decompress(comp, (int64) comp.count(), (int64) 50);
+        Assert.that((int64) out.count()).isEqualTo((int64) 50);
+        int8 last = out[49];
+        Assert.that((int64) (((int32) last) & 0xFF)).isEqualTo((int64) 0x7A);
+        return;
+    }
+
+    @Test
+    public void roundTripsIncompressibleShort() {
+        String text = "abcdefg";
+        int8[] in = text.bytes;
+        int8[] comp = Lz4.compress(in, (int64) in.count());
+        int8[] out = Lz4.decompress(comp, (int64) comp.count(), (int64) in.count());
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("abcdefg"));
+        return;
+    }
+
+    @Test
+    public void decompressesExtendedLiteralLength() {
+        // 20-byte literal: token 0xF0 (litLen nibble 15) + ext 0x05 (15+5=20),
+        // then 20 bytes 'A'+(i%26).
+        int8[] blob = heap int8[22];
+        blob[0] = (int8) 0xF0;
+        blob[1] = (int8) 0x05;
+        int32 i = 0;
+        while (i < 20) {
+            int32 v = 0x41 + (i % 26);
+            int32 at = 2 + i;
+            blob[at] = (int8) v;
+            i = i + 1;
+        }
+        int8[] out = Lz4.decompress(blob, (int64) 22, (int64) 20);
+        Assert.that((int64) out.count()).isEqualTo((int64) 20);
+        int8 c0 = out[0];
+        Assert.that((int64) (((int32) c0) & 0xFF)).isEqualTo((int64) 0x41);
+        int8 c19 = out[19];
+        Assert.that((int64) (((int32) c19) & 0xFF)).isEqualTo((int64) 0x54);
+        return;
+    }
+}
