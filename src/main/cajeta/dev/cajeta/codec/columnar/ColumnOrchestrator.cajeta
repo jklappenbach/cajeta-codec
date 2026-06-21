@@ -1,0 +1,56 @@
+package dev.cajeta.codec.columnar;
+
+/**
+ * Fiber-parallel page/column orchestration (Phase 6.3). Independent column pages
+ * decode concurrently via structured `scope { spawn ... }` fan-out — each worker
+ * owns one page index and writes its decoded column into its own output slot, so
+ * there is no cross-page write sharing and the barrier at scope close joins them.
+ * The scheduler is single-carrier today (workers run cooperatively), so the
+ * result is by construction identical to the serial path; true scaling lands when
+ * the carrier pool grows (bench parked → P-COLUMNAR-BENCH).
+ *
+ * Pages share **one flat byte buffer** (`flat`) with per-page start offsets — a
+ * read-only borrow shared across workers, never a nested owning array. Reading an
+ * inner owning array out of an `int8[][]` currently moves it (double-frees on the
+ * source's drop); the flat layout sidesteps that and keeps borrow soundness on
+ * the block buffer. The output nesting (`int32[][]`) is write-only, which is sound.
+ */
+public final class ColumnOrchestrator {
+
+    static void decodeWorker(int32[][] out, int8[] flat, int64[] offs,
+                             int32[] ws, int32[] counts, int32 i) {
+        int64 off = offs[i];
+        int32 w = ws[i];
+        int32 count = counts[i];
+        out[i] = Rle.decode(flat, off, w, count);
+    }
+
+    /** Decode `n` independent pages concurrently; slot `i` holds page `i`. */
+    public static #int32[][] decodeAll(int8[] flat, int64[] offs, int32[] ws,
+                                       int32[] counts, int32 n) {
+        int32[][] out = heap int32[n][];
+        scope {
+            int32 i = 0;
+            while (i < n) {
+                spawn decodeWorker(out, flat, offs, ws, counts, i);
+                i = i + 1;
+            }
+        }
+        return out;
+    }
+
+    /** Serial reference: same result as `decodeAll`, no fan-out. */
+    public static #int32[][] decodeAllSerial(int8[] flat, int64[] offs,
+                                             int32[] ws, int32[] counts, int32 n) {
+        int32[][] out = heap int32[n][];
+        int32 i = 0;
+        while (i < n) {
+            int64 off = offs[i];
+            int32 w = ws[i];
+            int32 count = counts[i];
+            out[i] = Rle.decode(flat, off, w, count);
+            i = i + 1;
+        }
+        return out;
+    }
+}

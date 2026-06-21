@@ -1,0 +1,72 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.columnar.Rle;
+import dev.cajeta.codec.columnar.ColumnOrchestrator;
+
+/**
+ * Phase 6.3 — fiber-parallel page orchestration. Three independent pages, packed
+ * into one flat buffer, decode concurrently via `scope { spawn }`; the result
+ * must equal the serial path and the known per-page values.
+ */
+public class ColumnOrchestratorTest {
+
+    public ColumnOrchestratorTest() {
+        return;
+    }
+
+    static void blit(int8[] dst, int64 base, int8[] src, int64 n) {
+        int64 k = (int64) 0;
+        while (k < n) {
+            int64 di = base + k;
+            dst[di] = src[k];
+            k = k + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void parallelMatchesSerialAndValues() {
+        int32[] p0 = { 7, 7, 7, 7 };
+        int8[] e0 = Rle.encode(p0, 3, 4);
+        int32[] p1 = { 0, 1, 2, 3, 4, 5, 6, 7 };
+        int8[] e1 = Rle.encode(p1, 3, 8);
+        int32[] p2 = { 5, 5, 5 };
+        int8[] e2 = Rle.encode(p2, 4, 3);
+
+        int64 n0 = (int64) e0.count();
+        int64 n1 = (int64) e1.count();
+        int64 n2 = (int64) e2.count();
+        int8[] flat = heap int8[n0 + n1 + n2];
+        ColumnOrchestratorTest.blit(flat, (int64) 0, e0, n0);
+        ColumnOrchestratorTest.blit(flat, n0, e1, n1);
+        ColumnOrchestratorTest.blit(flat, n0 + n1, e2, n2);
+
+        int64[] offs = { (int64) 0, n0, n0 + n1 };
+        int32[] ws = { 3, 3, 4 };
+        int32[] counts = { 4, 8, 3 };
+
+        int32[][] par = ColumnOrchestrator.decodeAll(flat, offs, ws, counts, 3);
+        int32[][] ser = ColumnOrchestrator.decodeAllSerial(flat, offs, ws, counts, 3);
+
+        int32 k = 0;
+        while (k < 4) {
+            Assert.that((int64) par[0][k]).isEqualTo((int64) 7);
+            Assert.that((int64) par[0][k]).isEqualTo((int64) ser[0][k]);
+            k = k + 1;
+        }
+        k = 0;
+        while (k < 8) {
+            Assert.that((int64) par[1][k]).isEqualTo((int64) k);
+            Assert.that((int64) par[1][k]).isEqualTo((int64) ser[1][k]);
+            k = k + 1;
+        }
+        k = 0;
+        while (k < 3) {
+            Assert.that((int64) par[2][k]).isEqualTo((int64) 5);
+            Assert.that((int64) par[2][k]).isEqualTo((int64) ser[2][k]);
+            k = k + 1;
+        }
+        return;
+    }
+}
