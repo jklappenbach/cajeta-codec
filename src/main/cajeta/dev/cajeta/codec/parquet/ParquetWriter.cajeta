@@ -1,0 +1,114 @@
+package dev.cajeta.codec.parquet;
+
+/**
+ * Parquet **writer** (Phase 7.4) — emits a complete single-INT32-column file:
+ * `PAR1` magic, one uncompressed PLAIN data page (REQUIRED column ⇒ no def/rep
+ * levels), and a Thrift-compact FileMetaData footer (schema + one row group →
+ * one column chunk), then the footer-length trailer and closing `PAR1`. Read back
+ * by `ParquetColumnReader` and by reference readers (pyarrow). Everything is
+ * written into one `ThriftCompactWriter` inline — passing the writer object to a
+ * helper would consume it. v1: one column, REQUIRED, UNCOMPRESSED, PLAIN.
+ */
+public final class ParquetWriter {
+
+    public static #int8[] writeInt32Column(int32[] values, int32 count) {
+        ThriftCompactWriter w = heap ThriftCompactWriter();
+
+        // magic
+        w.putByte(0x50);
+        w.putByte(0x41);
+        w.putByte(0x52);
+        w.putByte(0x31);
+
+        int64 dataPageOffset = w.size();      // = 4
+        int32 dataLen = count * 4;
+
+        // --- data page header (Thrift compact) ---
+        w.writeI32Field(1, 0);                // page type = DATA_PAGE
+        w.writeI32Field(2, dataLen);          // uncompressed_page_size
+        w.writeI32Field(3, dataLen);          // compressed_page_size
+        w.beginStructField(5);                // data_page_header
+        w.writeI32Field(1, count);            //   num_values
+        w.writeI32Field(2, 0);                //   encoding = PLAIN
+        w.writeI32Field(3, 0);                //   def_level_encoding
+        w.writeI32Field(4, 0);                //   rep_level_encoding
+        w.stop();
+        w.stop();                             // end PageHeader
+
+        // --- data page payload: PLAIN INT32 values, no def/rep (REQUIRED) ---
+        int32 vi = 0;
+        while (vi < count) {
+            int32 val = values[vi];
+            w.putLE32(val);
+            vi = vi + 1;
+        }
+
+        int64 pageTotalSize = w.size() - dataPageOffset;
+
+        // --- FileMetaData footer ---
+        int64 footerStart = w.size();
+        w.writeI32Field(1, 1);                // version
+
+        // schema: list<SchemaElement> = [ root, column ]
+        w.beginListField(2, 2, 12);
+        // root: name="schema", num_children=1
+        w.writeBinaryField(4, ParquetWriter.schemaName(), 6);
+        w.writeI32Field(5, 1);
+        w.stop();
+        // column 'x': type=INT32(1), repetition_type=REQUIRED(0), name="x"
+        w.writeI32Field(1, 1);
+        w.writeI32Field(3, 0);
+        w.writeBinaryField(4, ParquetWriter.colName(), 1);
+        w.stop();
+
+        w.writeI64Field(3, (int64) count);    // num_rows
+
+        // row_groups: list<RowGroup> = [ one ]
+        w.beginListField(4, 1, 12);
+        // RowGroup.columns: list<ColumnChunk> = [ one ]
+        w.beginListField(1, 1, 12);
+        // ColumnChunk: file_offset, meta_data
+        w.writeI64Field(2, dataPageOffset);
+        w.beginStructField(3);                // ColumnMetaData
+        w.writeI32Field(1, 1);                //   type = INT32
+        w.beginListField(2, 1, 5);            //   encodings = [PLAIN]
+        w.writeZigZag((int64) 0);
+        w.beginListField(3, 1, 8);            //   path_in_schema = ["x"]
+        w.writeVarint((int64) 1);
+        w.putByte(0x78);
+        w.writeI32Field(4, 0);                //   codec = UNCOMPRESSED
+        w.writeI64Field(5, (int64) count);    //   num_values
+        w.writeI64Field(6, pageTotalSize);    //   total_uncompressed_size
+        w.writeI64Field(7, pageTotalSize);    //   total_compressed_size
+        w.writeI64Field(9, dataPageOffset);   //   data_page_offset
+        w.stop();                             // end ColumnMetaData
+        w.stop();                             // end ColumnChunk
+        // RowGroup scalars
+        w.writeI64Field(2, pageTotalSize);    // total_byte_size
+        w.writeI64Field(3, (int64) count);    // num_rows
+        w.stop();                             // end RowGroup
+        w.stop();                             // end FileMetaData
+
+        int64 footerLen = w.size() - footerStart;
+
+        // footer-length trailer + closing magic
+        w.putLE32((int32) footerLen);
+        w.putByte(0x50);
+        w.putByte(0x41);
+        w.putByte(0x52);
+        w.putByte(0x31);
+
+        return w.result();
+    }
+
+    static #int8[] schemaName() {
+        int8[] s = { (int8) 0x73, (int8) 0x63, (int8) 0x68,
+                     (int8) 0x65, (int8) 0x6D, (int8) 0x61 };   // "schema"
+        return s;
+    }
+
+    static #int8[] colName() {
+        int8[] s = { (int8) 0x78 };                              // "x"
+        return s;
+    }
+}

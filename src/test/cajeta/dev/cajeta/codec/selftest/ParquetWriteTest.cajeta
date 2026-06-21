@@ -1,0 +1,44 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.parquet.ParquetWriter;
+import dev.cajeta.codec.parquet.ParquetColumnReader;
+import dev.cajeta.codec.parquet.ParquetMetadata;
+
+/**
+ * Phase 7.4 — Parquet writer round-trip. Write a single INT32 column to a complete
+ * Parquet file, then read it back with our own reader (and validate the footer
+ * metadata). pyarrow cross-read validates ecosystem-readability separately.
+ */
+public class ParquetWriteTest {
+
+    public ParquetWriteTest() {
+        return;
+    }
+
+    @Test
+    public void writesReadableFooter() {
+        int32[] vals = { 11, 22, 33, 44 };
+        int8[] file = ParquetWriter.writeInt32Column(vals, 4);
+        int64 fc = (int64) file.count();
+        ParquetMetadata m = ParquetMetadata.parse(file, fc);
+        Assert.that(m.numRows).isEqualTo((int64) 4);
+        Assert.that((int64) m.numColumns).isEqualTo((int64) 1);
+        return;
+    }
+
+    @Test
+    public void roundTripsColumn() {
+        int32[] vals = { 1, 2, 3, 4, 5 };
+        int8[] file = ParquetWriter.writeInt32Column(vals, 5);
+        int64 fc = (int64) file.count();
+        int32[] back = ParquetColumnReader.readInt32Column(file, fc, 0);
+        Assert.that((int64) back.count()).isEqualTo((int64) 5);
+        int32 i = 0;
+        while (i < 5) {
+            Assert.that((int64) back[i]).isEqualTo((int64) (i + 1));
+            i = i + 1;
+        }
+        return;
+    }
+}

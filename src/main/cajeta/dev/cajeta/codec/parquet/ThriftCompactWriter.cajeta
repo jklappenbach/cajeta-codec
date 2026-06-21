@@ -1,0 +1,126 @@
+package dev.cajeta.codec.parquet;
+
+/**
+ * Thrift **compact protocol** writer (Phase 7.4) — the inverse of
+ * `ThriftCompactReader`, used to emit Parquet `PageHeader`s and the FileMetaData
+ * footer. Every field uses the **long-form** header (field-id delta 0 → the type
+ * nibble byte, then the zigzag field id) so no per-struct delta state is needed;
+ * the reader accepts it identically. Growable buffer; `result()` copies out.
+ */
+public final class ThriftCompactWriter {
+    int8[] buf;
+    int64 len;
+
+    public ThriftCompactWriter() {
+        this.buf = heap int8[64];
+        this.len = (int64) 0;
+    }
+
+    void ensure(int64 need) {
+        int64 cap = (int64) this.buf.count();
+        if (need <= cap) { return; }
+        int64 newcap = cap * (int64) 2;
+        while (newcap < need) { newcap = newcap * (int64) 2; }
+        int8[] nb = heap int8[newcap];
+        int64 cur = this.len;
+        int64 i = (int64) 0;
+        while (i < cur) { nb[i] = this.buf[i]; i = i + 1; }
+        this.buf = nb;
+    }
+
+    public void putByte(int32 b) {
+        this.ensure(this.len + (int64) 1);
+        this.buf[this.len] = (int8) (b & 0xFF);
+        this.len = this.len + 1;
+    }
+
+    public void writeVarint(int64 v) {
+        int64 t = v;
+        while (t >= (int64) 128) {
+            this.putByte((int32) ((t & (int64) 0x7F) | (int64) 0x80));
+            t = (t >> 7) & (int64) 0x01FFFFFFFFFFFFFF;
+        }
+        this.putByte((int32) (t & (int64) 0x7F));
+    }
+
+    public void writeZigZag(int64 v) {
+        int64 zz = (v << 1) ^ (v >> 63);
+        this.writeVarint(zz);
+    }
+
+    /** Long-form field header: type nibble byte (delta 0) + zigzag field id. */
+    void field(int32 fid, int32 type) {
+        this.putByte(type);
+        this.writeZigZag((int64) fid);
+    }
+
+    public void writeI32Field(int32 fid, int32 v) {
+        this.field(fid, 5);
+        this.writeZigZag((int64) v);
+    }
+
+    public void writeI64Field(int32 fid, int64 v) {
+        this.field(fid, 6);
+        this.writeZigZag(v);
+    }
+
+    public void writeBoolField(int32 fid, boolean v) {
+        int32 ty = 2;                 // T_BOOL_FALSE
+        if (v) { ty = 1; }            // T_BOOL_TRUE — value carried in the type
+        this.field(fid, ty);
+    }
+
+    public void writeBinaryField(int32 fid, int8[] data, int32 n) {
+        this.field(fid, 8);
+        this.writeVarint((int64) n);
+        int32 k = 0;
+        while (k < n) {
+            int32 bv = ((int32) data[k]) & 0xFF;
+            this.putByte(bv);
+            k = k + 1;
+        }
+    }
+
+    /** Begin a struct-typed field; caller writes the struct's fields then `stop()`. */
+    public void beginStructField(int32 fid) { this.field(fid, 12); }
+
+    /** Begin a list-typed field; then write `size` elements of `elemType`. */
+    public void beginListField(int32 fid, int32 size, int32 elemType) {
+        this.field(fid, 9);
+        if (size < 15) {
+            this.putByte((size << 4) | elemType);
+        } else {
+            this.putByte((15 << 4) | elemType);
+            this.writeVarint((int64) size);
+        }
+    }
+
+    public void stop() { this.putByte(0); }
+
+    /** Raw little-endian 32-bit (PLAIN INT32 values, footer length trailer). */
+    public void putLE32(int32 v) {
+        this.putByte(v & 0xFF);
+        this.putByte((v >> 8) & 0xFF);
+        this.putByte((v >> 16) & 0xFF);
+        this.putByte((v >> 24) & 0xFF);
+    }
+
+    /** Append raw bytes (page payloads, magic). */
+    public void writeRaw(int8[] data, int32 n) {
+        int32 k = 0;
+        while (k < n) {
+            int32 bv = ((int32) data[k]) & 0xFF;
+            this.putByte(bv);
+            k = k + 1;
+        }
+    }
+
+    public int64 size() { return this.len; }
+
+    public #int8[] result() {
+        int8[] r = heap int8[this.len];
+        int64 i = (int64) 0;
+        while (i < this.len) { r[i] = this.buf[i]; i = i + 1; }
+        return r;
+    }
+}
