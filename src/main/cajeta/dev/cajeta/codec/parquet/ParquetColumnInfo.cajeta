@@ -1,10 +1,11 @@
 package dev.cajeta.codec.parquet;
 
 /**
- * One Parquet column chunk's `ColumnMetaData` (Phase 7.1b) — scalar fields only,
- * so the `#`-moved return is sound. `read(file, n, col)` re-walks the footer to
- * the `col`-th column of the first row group. v1 covers the fields a single-column
- * read (7.1c) needs: physical type, codec, value count, page offsets, sizes.
+ * One Parquet column chunk's `ColumnMetaData` (Phase 7.1b/7.2) — scalar fields
+ * only, so the `#`-moved return is sound. `read(file, n, col)` re-walks the footer
+ * to the `col`-th column of the first row group: physical type, codec, value count,
+ * page offsets, sizes, and (7.2) the min/max **statistics** used for predicate
+ * pushdown. Reading only the projected column already touches only its chunk.
  */
 public final class ParquetColumnInfo {
     public int32 type;                  // parquet.thrift Type
@@ -13,6 +14,10 @@ public final class ParquetColumnInfo {
     public int64 dataPageOffset;
     public int64 dictPageOffset;        // -1 when absent
     public int64 totalCompressedSize;
+    public boolean hasStats;
+    public int64 minValue;              // min_value as LE int64 (fixed-width types)
+    public int64 maxValue;
+    public int64 nullCount;
 
     public ParquetColumnInfo() {
         this.type = 0;
@@ -21,6 +26,34 @@ public final class ParquetColumnInfo {
         this.dataPageOffset = (int64) 0;
         this.dictPageOffset = (int64) 0 - (int64) 1;
         this.totalCompressedSize = (int64) 0;
+        this.hasStats = false;
+        this.minValue = (int64) 0;
+        this.maxValue = (int64) 0;
+        this.nullCount = (int64) 0;
+    }
+
+    static int64 leBytesToLong(int8[] b) {
+        int64 v = (int64) 0;
+        int32 len = (int32) b.count();
+        int32 i = 0;
+        while (i < len && i < 8) {
+            int64 bb = (int64) (((int32) b[i]) & 0xFF);
+            v = v | (bb << (i * 8));
+            i = i + 1;
+        }
+        return v;
+    }
+
+    /**
+     * Predicate pushdown: can a chunk with these stats contain a value in
+     * `[lo, hi]`? Conservative — true when stats are absent (must scan) or the
+     * ranges overlap. A `false` lets the caller skip the chunk/row-group.
+     */
+    public boolean mightContainRange(int64 lo, int64 hi) {
+        if (!this.hasStats) { return true; }
+        if (hi < this.minValue) { return false; }
+        if (lo > this.maxValue) { return false; }
+        return true;
     }
 
     public static #ParquetColumnInfo read(int8[] file, int64 n, int32 col) {
@@ -70,6 +103,28 @@ public final class ParquetColumnInfo {
                                                         info.dataPageOffset = r.readI64();
                                                     } else if (mfid == 11) {
                                                         info.dictPageOffset = r.readI64();
+                                                    } else if (mfid == 12) {
+                                                        // Statistics struct.
+                                                        int32 stSaved = r.enterStruct();
+                                                        int32 stt = r.readFieldHeader();
+                                                        while (stt != (int32) 0) {
+                                                            int32 sfid = r.fieldId();
+                                                            if (sfid == 3) {
+                                                                info.nullCount = r.readI64();
+                                                            } else if (sfid == 5) {
+                                                                int8[] mx = r.readBinary();
+                                                                info.maxValue = ParquetColumnInfo.leBytesToLong(mx);
+                                                                info.hasStats = true;
+                                                            } else if (sfid == 6) {
+                                                                int8[] mn = r.readBinary();
+                                                                info.minValue = ParquetColumnInfo.leBytesToLong(mn);
+                                                                info.hasStats = true;
+                                                            } else {
+                                                                r.skip(stt);
+                                                            }
+                                                            stt = r.readFieldHeader();
+                                                        }
+                                                        r.exitStruct(stSaved);
                                                     } else {
                                                         r.skip(mt);
                                                     }

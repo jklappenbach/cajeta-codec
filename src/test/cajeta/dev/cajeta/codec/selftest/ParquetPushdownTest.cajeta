@@ -1,0 +1,41 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.parquet.ParquetColumnInfo;
+
+/**
+ * Phase 7.2 — projection + predicate pushdown. Reads the `ColumnMetaData`
+ * statistics (min/max) of a real pyarrow file (`x` = [10,20,10,30,...], stats
+ * min=10 max=30) and exercises the range pushdown predicate. Reading a single
+ * column by index already touches only that column's chunk (projection).
+ */
+public class ParquetPushdownTest {
+
+    public ParquetPushdownTest() {
+        return;
+    }
+
+    @Test
+    public void extractsMinMaxStats() {
+        int8[] f = ParquetDictTest.dictParquet();
+        ParquetColumnInfo ci = ParquetColumnInfo.read(f, (int64) f.count(), 0);
+        Assert.isTrue(ci.hasStats);
+        Assert.that(ci.minValue).isEqualTo((int64) 10);
+        Assert.that(ci.maxValue).isEqualTo((int64) 30);
+        return;
+    }
+
+    @Test
+    public void pushdownSkipsAndKeeps() {
+        int8[] f = ParquetDictTest.dictParquet();
+        ParquetColumnInfo ci = ParquetColumnInfo.read(f, (int64) f.count(), 0);
+        // Overlapping ranges must be kept (might contain a match).
+        Assert.isTrue(ci.mightContainRange((int64) 5, (int64) 15));
+        Assert.isTrue(ci.mightContainRange((int64) 25, (int64) 100));
+        Assert.isTrue(ci.mightContainRange((int64) 20, (int64) 20));
+        // Disjoint ranges can be skipped.
+        Assert.isFalse(ci.mightContainRange((int64) 31, (int64) 50));
+        Assert.isFalse(ci.mightContainRange((int64) 0 - (int64) 5, (int64) 9));
+        return;
+    }
+}
