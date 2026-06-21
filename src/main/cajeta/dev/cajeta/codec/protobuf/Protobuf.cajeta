@@ -48,4 +48,18 @@ public final class Protobuf {
         throw heap ProtobufParseException(
             "Protobuf.parse<T>: synthesizer not engaged", (int64) 0);
     }
+
+    /**
+     * Tier-1 templated encode: serialize a message `T` (or a `T[]` length-
+     * delimited stream) to protobuf wire bytes. The encode mirror of `parse<T>`
+     * — the `ProtobufSynthesizer` replaces this captured body per-T, walking T's
+     * `@ProtoField` fields and emitting a `ProtobufWriter`-driven encode.
+     *
+     * Failsafe: a thrown `ProtobufParseException` if the synthesizer does not
+     * engage, rather than a silently empty buffer.
+     */
+    public static #int8[] toBytes<T>(T value) {
+        throw heap ProtobufParseException(
+            "Protobuf.toBytes<T>: synthesizer not engaged", (int64) 0);
+    }
 }

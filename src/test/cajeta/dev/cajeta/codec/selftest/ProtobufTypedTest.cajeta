@@ -46,6 +46,73 @@ public class ProtobufTypedTest {
     }
 
     @Test
+    public void encodeDecodeScalarRoundTrips() {
+        ProtoScalarMsg m = heap ProtoScalarMsg();
+        m.id = (int64) 150;
+        m.name = "hi";
+        m.active = true;
+        m.count = 42;
+        int8[] pay = {(int8) 0x07, (int8) 0x09};
+        m.payload = pay;
+
+        int8[] bytes = Protobuf.toBytes<ProtoScalarMsg>(m);
+        ProtoScalarMsg back = Protobuf.parse<ProtoScalarMsg>(
+            bytes, (int64) bytes.count());
+
+        Assert.that(back.id).isEqualTo((int64) 150);
+        Assert.isTrue(back.name.equals("hi"));
+        Assert.isTrue(back.active);
+        Assert.that((int64) back.count).isEqualTo((int64) 42);
+        Assert.that((int64) back.payload.count()).isEqualTo((int64) 2);
+        int8 b0 = back.payload[0];
+        Assert.that((int64) (((int32) b0) & 0xFF)).isEqualTo((int64) 0x07);
+        return;
+    }
+
+    @Test
+    public void encodeDecodeNestedRoundTrips() {
+        ProtoInnerMsg inner = heap ProtoInnerMsg();
+        inner.x = (int64) 77;
+        inner.tag = "hi";
+        ProtoOuterMsg outer = heap ProtoOuterMsg();
+        outer.id = (int64) 5;
+        outer.inner = inner;
+
+        int8[] bytes = Protobuf.toBytes<ProtoOuterMsg>(outer);
+        ProtoOuterMsg back = Protobuf.parse<ProtoOuterMsg>(
+            bytes, (int64) bytes.count());
+
+        Assert.that(back.id).isEqualTo((int64) 5);
+        Assert.isTrue(back.inner != null);
+        Assert.that(back.inner.x).isEqualTo((int64) 77);
+        Assert.isTrue(back.inner.tag.equals("hi"));
+        return;
+    }
+
+    @Test
+    public void encodeDecodeStreamRoundTrips() {
+        ProtoScalarMsg[] src = heap ProtoScalarMsg[2];
+        ProtoScalarMsg a = heap ProtoScalarMsg();
+        a.id = (int64) 11;
+        a.count = 1;
+        src[0] = a;
+        ProtoScalarMsg b = heap ProtoScalarMsg();
+        b.id = (int64) 22;
+        b.count = 2;
+        src[1] = b;
+
+        int8[] bytes = Protobuf.toBytes<ProtoScalarMsg[]>(src);
+        ProtoScalarMsg[] back = Protobuf.parse<ProtoScalarMsg[]>(
+            bytes, (int64) bytes.count());
+
+        Assert.that((int64) back.count()).isEqualTo((int64) 2);
+        Assert.that(back[0].id).isEqualTo((int64) 11);
+        Assert.that(back[1].id).isEqualTo((int64) 22);
+        Assert.that((int64) back[1].count).isEqualTo((int64) 2);
+        return;
+    }
+
+    @Test
     public void decodesNestedMessage() {
         // Encode the inner message, embed it as outer field 2 (LEN), and check
         // the synthesizer recurses (Protobuf.parse<ProtoInnerMsg> over the slice).
