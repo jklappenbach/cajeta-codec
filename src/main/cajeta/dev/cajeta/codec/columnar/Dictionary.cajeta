@@ -1,0 +1,34 @@
+package dev.cajeta.codec.columnar;
+
+/**
+ * Dictionary decode (Phase 6.1c). Parquet dictionary-encoded data pages store a
+ * single **bit-width byte** followed by RLE/bit-packing-hybrid indices into the
+ * column's dictionary page. Decode = `Rle.decode` the indices, then gather the
+ * dictionary values. The value plane is `int32` at the kernel tier (the Parquet
+ * layer maps it to the column's physical type).
+ */
+public final class Dictionary {
+
+    /** Gather `n` dictionary values by index. */
+    public static #int32[] gather(int32[] indices, int32 n, int32[] dict) {
+        int32[] out = heap int32[n];
+        int32 i = 0;
+        while (i < n) {
+            int32 idx = indices[i];
+            out[i] = dict[idx];
+            i = i + 1;
+        }
+        return out;
+    }
+
+    /**
+     * Decode a Parquet dictionary data page: leading bit-width byte at `off`,
+     * then `count` hybrid-encoded indices, gathered through `dict`.
+     */
+    public static #int32[] decode(int8[] src, int64 off, int32 count,
+                                  int32[] dict) {
+        int32 w = ((int32) src[off]) & 0xFF;
+        int32[] idx = Rle.decode(src, off + (int64) 1, w, count);
+        return Dictionary.gather(idx, count, dict);
+    }
+}

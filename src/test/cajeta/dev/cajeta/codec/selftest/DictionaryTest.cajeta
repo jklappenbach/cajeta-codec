@@ -1,0 +1,40 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.columnar.Dictionary;
+
+/**
+ * Phase 6.1c — dictionary decode. A Parquet dictionary data page (leading
+ * bit-width byte + hybrid indices) gathered through a dictionary of values.
+ */
+public class DictionaryTest {
+
+    public DictionaryTest() {
+        return;
+    }
+
+    @Test
+    public void decodesDictionaryPage() {
+        int8[] page = { (int8) 0x02, (int8) 0x02, (int8) 0xE4, (int8) 0x1B };
+        int32[] dict = { 100, 200, 300, 400 };
+        int32[] got = Dictionary.decode(page, (int64) 0, 8, dict);
+        int32[] want = { 100, 200, 300, 400, 400, 300, 200, 100 };
+        int32 i = 0;
+        while (i < 8) {
+            Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void gathersByIndex() {
+        int32[] idx = { 2, 0, 1 };
+        int32[] dict = { 7, 8, 9 };
+        int32[] got = Dictionary.gather(idx, 3, dict);
+        Assert.that((int64) got[0]).isEqualTo((int64) 9);
+        Assert.that((int64) got[1]).isEqualTo((int64) 7);
+        Assert.that((int64) got[2]).isEqualTo((int64) 8);
+        return;
+    }
+}
