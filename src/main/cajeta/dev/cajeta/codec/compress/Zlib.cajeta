@@ -1,0 +1,60 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * zlib container (RFC 1950) over a raw DEFLATE stream (Phase 4.2c): a 2-byte
+ * header (CMF + FLG, with `(CMF*256+FLG) % 31 == 0`), the DEFLATE stream, then a
+ * 4-byte big-endian Adler-32 of the uncompressed data. Unlike gzip, zlib stores
+ * no length, so `decompress` takes the output size from the caller (the
+ * surrounding format supplies it).
+ */
+public final class Zlib {
+
+    /** Adler-32 checksum of the first `n` bytes. */
+    public static int64 adler32(int8[] data, int64 n) {
+        int64 a = (int64) 1;
+        int64 b = (int64) 0;
+        int64 i = (int64) 0;
+        while (i < n) {
+            int64 c = (int64) (((int32) data[i]) & 0xFF);
+            a = (a + c) % (int64) 65521;
+            b = (b + a) % (int64) 65521;
+            i = i + 1;
+        }
+        return (b << 16) | a;
+    }
+
+    /** Decompress a zlib stream (first `n` bytes) into `destLen` bytes. */
+    public static #int8[] decompress(int8[] src, int64 n, int64 destLen) {
+        int64 dlen = (n - (int64) 4) - (int64) 2;
+        int8[] def = Gzip.slice(src, (int64) 2, dlen);
+        return Deflate.inflate(def, dlen, destLen);
+    }
+
+    /** Compress `src` (first `n` bytes) into a zlib stream (stored DEFLATE). */
+    public static #int8[] compress(int8[] src, int64 n) {
+        int8[] def = Deflate.deflate(src, n);
+        int64 dlen = (int64) def.count();
+        int64 ad = Zlib.adler32(src, n);
+
+        int64 cap = (int64) 2 + dlen + (int64) 4;
+        int8[] out = heap int8[cap];
+        out[0] = (int8) 0x78;
+        out[1] = (int8) 0x01;
+        int64 o = (int64) 2;
+        int64 i = (int64) 0;
+        while (i < dlen) {
+            int64 di = o + i;
+            out[di] = def[i];
+            i = i + 1;
+        }
+        o = o + dlen;
+        int64 o1 = o + 1;
+        int64 o2 = o + 2;
+        int64 o3 = o + 3;
+        out[o] = (int8) ((ad >> 24) & (int64) 0xFF);
+        out[o1] = (int8) ((ad >> 16) & (int64) 0xFF);
+        out[o2] = (int8) ((ad >> 8) & (int64) 0xFF);
+        out[o3] = (int8) (ad & (int64) 0xFF);
+        return out;
+    }
+}

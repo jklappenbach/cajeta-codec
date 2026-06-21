@@ -1,0 +1,55 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.compress.Gzip;
+import cajeta.lang.String;
+
+/**
+ * Phase 4.2c — gzip container. Decodes a real `gzip`-produced member, round-trips
+ * through our own compress/decompress, and checks the CRC-32.
+ */
+public class GzipTest {
+
+    public GzipTest() {
+        return;
+    }
+
+    @Test
+    public void decompressesRealGzipMember() {
+        // python gzip.compress(b"hello hello hello hello world\n").
+        int8[] blob = {
+            (int8) 0x1F, (int8) 0x8B, (int8) 0x08, (int8) 0x00, (int8) 0x5C,
+            (int8) 0x83, (int8) 0x37, (int8) 0x6A, (int8) 0x00, (int8) 0xFF,
+            (int8) 0xCB, (int8) 0x48, (int8) 0xCD, (int8) 0xC9, (int8) 0xC9,
+            (int8) 0x57, (int8) 0xC8, (int8) 0xC0, (int8) 0x20, (int8) 0xCB,
+            (int8) 0xF3, (int8) 0x8B, (int8) 0x72, (int8) 0x52, (int8) 0xB8,
+            (int8) 0x00, (int8) 0xE0, (int8) 0x53, (int8) 0x33, (int8) 0x8D,
+            (int8) 0x1E, (int8) 0x00, (int8) 0x00, (int8) 0x00
+        };
+        int8[] out = Gzip.decompress(blob, (int64) blob.count());
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals("hello hello hello hello world\n"));
+        return;
+    }
+
+    @Test
+    public void roundTripsThroughGzip() {
+        String text = "the quick brown fox jumps over the lazy dog";
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] gz = Gzip.compress(in, inLen);
+        int8[] out = Gzip.decompress(gz, (int64) gz.count());
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("the quick brown fox jumps over the lazy dog"));
+        return;
+    }
+
+    @Test
+    public void computesCrc32() {
+        String text = "hello hello hello hello world\n";
+        int8[] in = text.bytes;
+        int64 crc = Gzip.crc32(in, (int64) in.count());
+        Assert.that(crc).isEqualTo((int64) 0x8D3353E0);
+        return;
+    }
+}

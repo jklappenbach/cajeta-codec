@@ -1,0 +1,37 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.compress.Zlib;
+import cajeta.lang.String;
+
+/**
+ * Phase 4.2c — zlib container: Adler-32 value check + compress/decompress
+ * round-trip (zlib stores no size, so decompress takes the output length).
+ */
+public class ZlibTest {
+
+    public ZlibTest() {
+        return;
+    }
+
+    @Test
+    public void computesAdler32() {
+        String text = "hello hello hello hello world\n";
+        int8[] in = text.bytes;
+        int64 ad = Zlib.adler32(in, (int64) in.count());
+        Assert.that(ad).isEqualTo((int64) 0xAE8D0B03);
+        return;
+    }
+
+    @Test
+    public void roundTripsThroughZlib() {
+        String text = "the quick brown fox jumps over the lazy dog";
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] z = Zlib.compress(in, inLen);
+        int8[] out = Zlib.decompress(z, (int64) z.count(), inLen);
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("the quick brown fox jumps over the lazy dog"));
+        return;
+    }
+}

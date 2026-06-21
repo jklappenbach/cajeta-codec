@@ -1,0 +1,125 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * gzip container (RFC 1952) over a raw DEFLATE stream (Phase 4.2c). A gzip member
+ * is a 10-byte fixed header (`1F 8B 08` + flags + mtime + xfl + os), optional
+ * flag-gated fields (extra / name / comment / header-CRC), the DEFLATE stream,
+ * then an 8-byte trailer: CRC-32 of the uncompressed data + ISIZE (original size
+ * mod 2^32), both little-endian. ISIZE makes a gzip member self-describing, so
+ * `decompress` needs no external length.
+ */
+public final class Gzip {
+
+    /** CRC-32 (reflected, polynomial 0xEDB88320) of the first `n` bytes. */
+    public static int64 crc32(int8[] data, int64 n) {
+        int64 crc = (int64) 0xFFFFFFFF;
+        int64 i = (int64) 0;
+        while (i < n) {
+            int64 b = (int64) (((int32) data[i]) & 0xFF);
+            crc = crc ^ b;
+            int32 k = 0;
+            while (k < 8) {
+                int64 mask = (int64) 0 - (crc & (int64) 1);
+                crc = (crc >> 1) ^ ((int64) 0xEDB88320 & mask);
+                k = k + 1;
+            }
+            i = i + 1;
+        }
+        return (crc ^ (int64) 0xFFFFFFFF) & (int64) 0xFFFFFFFF;
+    }
+
+    static int64 readLE4(int8[] b, int64 pos) {
+        int64 p1 = pos + 1;
+        int64 p2 = pos + 2;
+        int64 p3 = pos + 3;
+        int64 b0 = (int64) (((int32) b[pos]) & 0xFF);
+        int64 b1 = (int64) (((int32) b[p1]) & 0xFF);
+        int64 b2 = (int64) (((int32) b[p2]) & 0xFF);
+        int64 b3 = (int64) (((int32) b[p3]) & 0xFF);
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    static #int8[] slice(int8[] src, int64 start, int64 len) {
+        int8[] out = heap int8[len];
+        int64 k = (int64) 0;
+        while (k < len) {
+            int64 si = start + k;
+            out[k] = src[si];
+            k = k + 1;
+        }
+        return out;
+    }
+
+    /** Decompress a gzip member (first `n` bytes); ISIZE gives the output size. */
+    public static #int8[] decompress(int8[] src, int64 n) {
+        int64 pos = (int64) 10;
+        int32 flg = ((int32) src[3]) & 0xFF;
+        if ((flg & 4) != 0) {
+            int64 p1 = pos + 1;
+            int32 lo = ((int32) src[pos]) & 0xFF;
+            int32 hi = ((int32) src[p1]) & 0xFF;
+            int64 xlen = (int64) (lo | (hi << 8));
+            pos = pos + (int64) 2 + xlen;
+        }
+        if ((flg & 8) != 0) {
+            boolean go = true;
+            while (go) { int8 c = src[pos]; pos = pos + 1; if (c == (int8) 0) { go = false; } }
+        }
+        if ((flg & 16) != 0) {
+            boolean go = true;
+            while (go) { int8 c = src[pos]; pos = pos + 1; if (c == (int8) 0) { go = false; } }
+        }
+        if ((flg & 2) != 0) { pos = pos + (int64) 2; }
+
+        int64 isPos = n - (int64) 4;
+        int64 isize = Gzip.readLE4(src, isPos);
+        int64 dlen = (n - (int64) 8) - pos;
+        int8[] def = Gzip.slice(src, pos, dlen);
+        return Deflate.inflate(def, dlen, isize);
+    }
+
+    /** Compress `src` (first `n` bytes) into a gzip member (stored DEFLATE). */
+    public static #int8[] compress(int8[] src, int64 n) {
+        int8[] def = Deflate.deflate(src, n);
+        int64 dlen = (int64) def.count();
+        int64 crc = Gzip.crc32(src, n);
+
+        int64 cap = (int64) 10 + dlen + (int64) 8;
+        int8[] out = heap int8[cap];
+        out[0] = (int8) 0x1F;
+        out[1] = (int8) 0x8B;
+        out[2] = (int8) 0x08;
+        out[3] = (int8) 0;
+        out[4] = (int8) 0;
+        out[5] = (int8) 0;
+        out[6] = (int8) 0;
+        out[7] = (int8) 0;
+        out[8] = (int8) 0;
+        out[9] = (int8) 0xFF;
+        int64 o = (int64) 10;
+        int64 i = (int64) 0;
+        while (i < dlen) {
+            int64 di = o + i;
+            out[di] = def[i];
+            i = i + 1;
+        }
+        o = o + dlen;
+        out[o] = (int8) (crc & (int64) 0xFF);
+        int64 o1 = o + 1;
+        int64 o2 = o + 2;
+        int64 o3 = o + 3;
+        out[o1] = (int8) ((crc >> 8) & (int64) 0xFF);
+        out[o2] = (int8) ((crc >> 16) & (int64) 0xFF);
+        out[o3] = (int8) ((crc >> 24) & (int64) 0xFF);
+        o = o + 4;
+        int64 isize = n & (int64) 0xFFFFFFFF;
+        int64 q1 = o + 1;
+        int64 q2 = o + 2;
+        int64 q3 = o + 3;
+        out[o] = (int8) (isize & (int64) 0xFF);
+        out[q1] = (int8) ((isize >> 8) & (int64) 0xFF);
+        out[q2] = (int8) ((isize >> 16) & (int64) 0xFF);
+        out[q3] = (int8) ((isize >> 24) & (int64) 0xFF);
+        return out;
+    }
+}
