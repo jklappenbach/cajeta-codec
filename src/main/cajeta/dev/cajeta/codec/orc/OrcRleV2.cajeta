@@ -6,7 +6,7 @@ package dev.cajeta.codec.orc;
  * select the sub-encoding:
  *   - 0 SHORT_REPEAT — a value (1..8 big-endian bytes) repeated 3..10 times;
  *   - 1 DIRECT — `runLen` fixed-width values, **MSB-first** bit-packed;
- *   - 2 PATCHED_BASE — base + patched bit-packing (fail loud in v1);
+ *   - 2 PATCHED_BASE — sign-magnitude base + width-bit values + a patch list;
  *   - 3 DELTA — base + delta-base + monotonic deltas (fixed or bit-packed).
  * Signed values are zigzag-decoded. ORC bit-packing is MSB-first (opposite of the
  * Parquet/columnar LSB-first `BitPack`). `decodeInto` fills a buffer in-library;
@@ -163,8 +163,58 @@ public final class OrcRleV2 {
                 }
                 int32 unused = start;
             } else {
-                throw heap OrcParseException(
-                    "ORC RLE v2 PATCHED_BASE unsupported (v1)", this.bp);
+                // PATCHED_BASE (enc 2): a sign-magnitude base + width-bit values
+                // (base-removed, unsigned, NOT zigzag) + a patch list supplying
+                // the high bits of the few outliers.
+                int32 encW = (b0 >> 1) & 0x1F;
+                int32 width = OrcRleV2.decodeWidth(encW);
+                int32 b1 = this.readByte();
+                int32 runLen = (((b0 & 1) << 8) | b1) + 1;
+                int32 b2 = this.readByte();
+                int32 bw = ((b2 >> 5) & 7) + 1;          // base width (bytes)
+                int32 pw = OrcRleV2.decodeWidth(b2 & 0x1F);  // patch width (bits)
+                int32 b3 = this.readByte();
+                int32 pgw = ((b3 >> 5) & 7) + 1;         // patch gap width (bits)
+                int32 pl = b3 & 0x1F;                    // patch list length
+
+                int64 base = (int64) 0;
+                int32 kb = 0;
+                while (kb < bw) {
+                    base = (base << 8) | (int64) this.readByte();
+                    kb = kb + 1;
+                }
+                int64 msbMask = (int64) 1 << (int64) (bw * 8 - 1);
+                if ((base & msbMask) != (int64) 0) {
+                    base = (int64) 0 - (base & (msbMask - (int64) 1));
+                }
+
+                // width-bit values into out[produced..], then patch high bits.
+                this.readBitsInto(out, produced, runLen, width);
+                if (pl > 0) {
+                    int64[] patches = heap int64[pl];
+                    this.readBitsInto(patches, 0, pl, pgw + pw);
+                    int64 patchMask = ((int64) 1 << (int64) pw) - (int64) 1;
+                    int32 idx = 0;
+                    int32 pp = 0;
+                    while (pp < pl) {
+                        int64 raw = patches[pp];
+                        int64 gap = raw >> (int64) pw;
+                        int64 patch = raw & patchMask;
+                        idx = idx + (int32) gap;
+                        int64 oi = (int64) (produced + idx);
+                        int64 cur = out[oi];
+                        out[oi] = cur | (patch << (int64) width);
+                        pp = pp + 1;
+                    }
+                }
+                int32 rb = 0;
+                while (rb < runLen) {
+                    int64 oj = (int64) (produced + rb);
+                    int64 cv = out[oj];
+                    out[oj] = base + cv;
+                    rb = rb + 1;
+                }
+                produced = produced + runLen;
             }
         }
     }
