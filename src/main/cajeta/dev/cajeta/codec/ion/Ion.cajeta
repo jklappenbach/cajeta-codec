@@ -43,4 +43,18 @@ public final class Ion {
         throw heap IonParseException(
             "Ion.parse<T>: synthesizer not engaged", (int64) 0);
     }
+
+    /**
+     * Tier-1 templated encode: serialize a value `T` (or a `T[]` stream) to Ion
+     * binary bytes (BVM + a local symbol table + the struct). The encode mirror
+     * of `parse<T>` — the `IonSynthesizer` interns T's field names (layered:
+     * system SIDs reused, locals from 10), emits the LST, then writes the struct
+     * via `IonWriter`. Validated by round-trip `decode(encode(v)) == v`.
+     *
+     * Failsafe: a thrown `IonParseException` if the synthesizer does not engage.
+     */
+    public static #int8[] toBytes<T>(T value) {
+        throw heap IonParseException(
+            "Ion.toBytes<T>: synthesizer not engaged", (int64) 0);
+    }
 }

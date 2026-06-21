@@ -1,0 +1,98 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.ion.Ion;
+import cajeta.lang.String;
+
+/**
+ * Phase 3.3c/d/e — Ion typed encode (`Ion.toBytes<T>`), verified by round-trip
+ * `decode(encode(v)) == v` through `Ion.parse<T>`. Covers scalar struct, nested
+ * struct (shared interned SIDs), and a top-level stream.
+ */
+public class IonEncodeTest {
+
+    public IonEncodeTest() {
+        return;
+    }
+
+    @Test
+    public void encodeDecodeScalarRoundTrips() {
+        IonScalarMsg m = heap IonScalarMsg();
+        m.id = (int64) 150;
+        m.name = "hi";
+        m.active = true;
+        m.count = 42;
+        int8[] pay = {(int8) 0x07, (int8) 0x09};
+        m.payload = pay;
+
+        int8[] bytes = Ion.toBytes<IonScalarMsg>(m);
+        IonScalarMsg back = Ion.parse<IonScalarMsg>(bytes, (int64) bytes.count());
+
+        Assert.that(back.id).isEqualTo((int64) 150);
+        Assert.isTrue(back.name.equals("hi"));
+        Assert.isTrue(back.active);
+        Assert.that((int64) back.count).isEqualTo((int64) 42);
+        Assert.that((int64) back.payload.count()).isEqualTo((int64) 2);
+        int8 b0 = back.payload[0];
+        Assert.that((int64) (((int32) b0) & 0xFF)).isEqualTo((int64) 0x07);
+        return;
+    }
+
+    @Test
+    public void encodeDecodeNegativeIntRoundTrips() {
+        IonScalarMsg m = heap IonScalarMsg();
+        m.id = (int64) 0 - (int64) 9000;
+        m.count = 0 - 1;
+        int8[] bytes = Ion.toBytes<IonScalarMsg>(m);
+        IonScalarMsg back = Ion.parse<IonScalarMsg>(bytes, (int64) bytes.count());
+        Assert.that(back.id).isEqualTo((int64) 0 - (int64) 9000);
+        Assert.that((int64) back.count).isEqualTo((int64) 0 - (int64) 1);
+        return;
+    }
+
+    @Test
+    public void encodeDecodeNestedRoundTrips() {
+        IonInnerMsg inner = heap IonInnerMsg();
+        inner.x = (int64) 77;
+        inner.tag = "hi";
+        IonOuterMsg outer = heap IonOuterMsg();
+        outer.id = (int64) 5;
+        outer.inner = inner;
+
+        int8[] bytes = Ion.toBytes<IonOuterMsg>(outer);
+        IonOuterMsg back = Ion.parse<IonOuterMsg>(bytes, (int64) bytes.count());
+
+        Assert.that(back.id).isEqualTo((int64) 5);
+        Assert.isTrue(back.inner != null);
+        Assert.that(back.inner.x).isEqualTo((int64) 77);
+        Assert.isTrue(back.inner.tag.equals("hi"));
+        return;
+    }
+
+    @Test
+    public void encodeDecodeStreamRoundTrips() {
+        IonStreamMsg[] src = heap IonStreamMsg[3];
+        IonStreamMsg a = heap IonStreamMsg();
+        a.version = (int64) 10;
+        a.name = "a";
+        src[0] = a;
+        IonStreamMsg b = heap IonStreamMsg();
+        b.version = (int64) 20;
+        b.name = "b";
+        src[1] = b;
+        IonStreamMsg c = heap IonStreamMsg();
+        c.version = (int64) 30;
+        c.name = "c";
+        src[2] = c;
+
+        int8[] bytes = Ion.toBytes<IonStreamMsg[]>(src);
+        IonStreamMsg[] back = Ion.parse<IonStreamMsg[]>(bytes, (int64) bytes.count());
+
+        Assert.that((int64) back.count()).isEqualTo((int64) 3);
+        Assert.that(back[0].version).isEqualTo((int64) 10);
+        Assert.isTrue(back[0].name.equals("a"));
+        Assert.that(back[2].version).isEqualTo((int64) 30);
+        Assert.isTrue(back[2].name.equals("c"));
+        return;
+    }
+}
