@@ -1,0 +1,18 @@
+package dev.cajeta.codec.parquet;
+
+import cajeta.error.RecoverableException;
+
+/**
+ * Thrown when a Parquet file cannot be parsed — a bad `PAR1` magic, a malformed
+ * Thrift footer/page header, or an unsupported encoding/type. `position` is the
+ * byte offset (0-based) where the problem was noticed.
+ */
+public class ParquetParseException extends RecoverableException {
+    public int64 position;
+
+    public ParquetParseException(String message, int64 position) {
+        this.message = message;
+        this.cause = 0;
+        this.position = position;
+    }
+}

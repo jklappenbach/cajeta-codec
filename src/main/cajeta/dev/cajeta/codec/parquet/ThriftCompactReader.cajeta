@@ -1,0 +1,189 @@
+package dev.cajeta.codec.parquet;
+
+/**
+ * Thrift **compact protocol** reader (Phase 7.1a) — our own decoder for the
+ * structures Parquet stores in that encoding (FileMetaData footer, PageHeaders).
+ * No third-party Thrift.
+ *
+ * Compact protocol essentials:
+ *   - unsigned base-128 varints (ULEB128); signed ints are zigzag varints;
+ *   - a field header byte: `0x00` = STOP; else high nibble = field-id **delta**
+ *     (1..15) from the previous id, low nibble = compact type (1..12). A delta of
+ *     0 means the zigzag field id follows as a varint;
+ *   - field-level booleans carry their value in the type nibble (TRUE=1, FALSE=2);
+ *   - binary/string = ULEB length + bytes;
+ *   - list/set header = one byte (high nibble = size if <15 else 15 then ULEB
+ *     size; low nibble = element type), then elements.
+ *
+ * Stateful cursor: `pos` advances; `lastFieldId` tracks the delta base (reset on
+ * entering a struct via `pushField`/`popField`).
+ */
+public final class ThriftCompactReader {
+    public static final int32 T_STOP = 0;
+    public static final int32 T_BOOL_TRUE = 1;
+    public static final int32 T_BOOL_FALSE = 2;
+    public static final int32 T_BYTE = 3;
+    public static final int32 T_I16 = 4;
+    public static final int32 T_I32 = 5;
+    public static final int32 T_I64 = 6;
+    public static final int32 T_DOUBLE = 7;
+    public static final int32 T_BINARY = 8;
+    public static final int32 T_LIST = 9;
+    public static final int32 T_SET = 10;
+    public static final int32 T_MAP = 11;
+    public static final int32 T_STRUCT = 12;
+
+    int8[] b;
+    int64 pos;
+    int32 lastFieldId;
+    int32 curType;
+    int32 curFieldId;
+    boolean curBool;
+
+    public ThriftCompactReader(int8[] b, int64 pos) {
+        this.b = b;
+        this.pos = pos;
+        this.lastFieldId = 0;
+        this.curType = 0;
+        this.curFieldId = 0;
+        this.curBool = false;
+    }
+
+    public int64 position() { return this.pos; }
+
+    /** Unsigned base-128 varint. */
+    public int64 readVarint() {
+        int64 result = (int64) 0;
+        int32 shift = 0;
+        boolean go = true;
+        while (go) {
+            int32 byteVal = ((int32) this.b[this.pos]) & 0xFF;
+            this.pos = this.pos + 1;
+            int64 chunk = (int64) (byteVal & 0x7F);
+            result = result | (chunk << shift);
+            if ((byteVal & 0x80) == 0) { go = false; }
+            shift = shift + 7;
+        }
+        return result;
+    }
+
+    /** Zigzag-decoded signed varint. */
+    public int64 readZigZag() {
+        int64 raw = this.readVarint();
+        int64 lowBit = raw & (int64) 1;
+        return (raw >> 1) ^ ((int64) 0 - lowBit);
+    }
+
+    /**
+     * Read the next field header. Returns the compact type (T_STOP at struct end);
+     * `fieldId()` / `boolValue()` expose the decoded id and (for bool fields) value.
+     */
+    public int32 readFieldHeader() {
+        int32 hdr = ((int32) this.b[this.pos]) & 0xFF;
+        this.pos = this.pos + 1;
+        if (hdr == 0) {
+            this.curType = ThriftCompactReader.T_STOP;
+            return ThriftCompactReader.T_STOP;
+        }
+        int32 delta = (hdr >> 4) & 0x0F;
+        int32 type = hdr & 0x0F;
+        int32 fid;
+        if (delta == 0) {
+            fid = (int32) this.readZigZag();
+        } else {
+            fid = this.lastFieldId + delta;
+        }
+        this.lastFieldId = fid;
+        this.curFieldId = fid;
+        this.curType = type;
+        if (type == ThriftCompactReader.T_BOOL_TRUE) { this.curBool = true; }
+        else if (type == ThriftCompactReader.T_BOOL_FALSE) { this.curBool = false; }
+        return type;
+    }
+
+    public int32 fieldId() { return this.curFieldId; }
+    public boolean boolValue() { return this.curBool; }
+
+    /** A struct boundary saves/restores the field-id delta base. */
+    public int32 enterStruct() {
+        int32 saved = this.lastFieldId;
+        this.lastFieldId = 0;
+        return saved;
+    }
+
+    public void exitStruct(int32 saved) { this.lastFieldId = saved; }
+
+    /** i16/i32/i64 are all zigzag varints. */
+    public int64 readI64() { return this.readZigZag(); }
+    public int32 readI32() { return (int32) this.readZigZag(); }
+
+    /** Length-prefixed binary; caller owns the copy. */
+    public #int8[] readBinary() {
+        int64 len = this.readVarint();
+        int8[] out = heap int8[len];
+        int64 k = (int64) 0;
+        while (k < len) {
+            int64 si = this.pos + k;
+            out[k] = this.b[si];
+            k = k + 1;
+        }
+        this.pos = this.pos + len;
+        return out;
+    }
+
+    /**
+     * Read a list/set header: returns the element count; `listElemType()` exposes
+     * the element compact type. Long form (size>=15) reads the size as a varint.
+     */
+    public int32 readListHeader() {
+        int32 hdr = ((int32) this.b[this.pos]) & 0xFF;
+        this.pos = this.pos + 1;
+        int32 size = (hdr >> 4) & 0x0F;
+        int32 etype = hdr & 0x0F;
+        if (size == 15) { size = (int32) this.readVarint(); }
+        this.curType = etype;
+        return size;
+    }
+
+    public int32 listElemType() { return this.curType; }
+
+    /** Skip one value of the given compact type (for unwanted fields). */
+    public void skip(int32 type) {
+        if (type == ThriftCompactReader.T_BOOL_TRUE
+                || type == ThriftCompactReader.T_BOOL_FALSE) {
+            return;
+        }
+        if (type == ThriftCompactReader.T_BYTE) { this.pos = this.pos + 1; return; }
+        if (type == ThriftCompactReader.T_I16 || type == ThriftCompactReader.T_I32
+                || type == ThriftCompactReader.T_I64) {
+            this.readZigZag();
+            return;
+        }
+        if (type == ThriftCompactReader.T_DOUBLE) { this.pos = this.pos + 8; return; }
+        if (type == ThriftCompactReader.T_BINARY) {
+            int64 len = this.readVarint();
+            this.pos = this.pos + len;
+            return;
+        }
+        if (type == ThriftCompactReader.T_LIST
+                || type == ThriftCompactReader.T_SET) {
+            int32 n = this.readListHeader();
+            int32 et = this.listElemType();
+            int32 i = 0;
+            while (i < n) { this.skip(et); i = i + 1; }
+            return;
+        }
+        if (type == ThriftCompactReader.T_STRUCT) {
+            int32 saved = this.enterStruct();
+            int32 t = this.readFieldHeader();
+            while (t != ThriftCompactReader.T_STOP) {
+                this.skip(t);
+                t = this.readFieldHeader();
+            }
+            this.exitStruct(saved);
+            return;
+        }
+        // map and unknown types are not produced by Parquet metadata (v1).
+        throw heap ParquetParseException("unsupported Thrift type in skip", this.pos);
+    }
+}

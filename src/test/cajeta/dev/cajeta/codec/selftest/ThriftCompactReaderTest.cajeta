@@ -1,0 +1,100 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.parquet.ThriftCompactReader;
+
+/**
+ * Phase 7.1a — Thrift compact-protocol reader. A python-encoded struct exercises
+ * field-id deltas, zigzag i32/i64, binary, a field-level bool, a list of i32, and
+ * a nested struct (delta-base save/restore).
+ */
+public class ThriftCompactReaderTest {
+
+    public ThriftCompactReaderTest() {
+        return;
+    }
+
+    @Test
+    public void decodesCompactStruct() {
+        int8[] s = { (int8) 0x15, (int8) 0x0A, (int8) 0x16, (int8) 0x80,
+                     (int8) 0x89, (int8) 0x7A, (int8) 0x18, (int8) 0x02,
+                     (int8) 0x68, (int8) 0x69, (int8) 0x11, (int8) 0x29,
+                     (int8) 0x35, (int8) 0x14, (int8) 0x28, (int8) 0x3C,
+                     (int8) 0x1C, (int8) 0x15, (int8) 0xC6, (int8) 0x01,
+                     (int8) 0x00, (int8) 0x00 };
+        ThriftCompactReader r = heap ThriftCompactReader(s, (int64) 0);
+        r.enterStruct();
+
+        // field 1: i32 = 5
+        int32 t = r.readFieldHeader();
+        Assert.that((int64) t).isEqualTo((int64) 5);   // T_I32
+        Assert.that((int64) r.fieldId()).isEqualTo((int64) 1);
+        Assert.that(r.readI64()).isEqualTo((int64) 5);
+
+        // field 2: i64 = 1000000
+        t = r.readFieldHeader();
+        Assert.that((int64) r.fieldId()).isEqualTo((int64) 2);
+        Assert.that(r.readI64()).isEqualTo((int64) 1000000);
+
+        // field 3: binary "hi"
+        t = r.readFieldHeader();
+        Assert.that((int64) r.fieldId()).isEqualTo((int64) 3);
+        int8[] bin = r.readBinary();
+        Assert.that((int64) bin.count()).isEqualTo((int64) 2);
+        Assert.that((int64) (((int32) bin[0]) & 0xFF)).isEqualTo((int64) 0x68);
+        Assert.that((int64) (((int32) bin[1]) & 0xFF)).isEqualTo((int64) 0x69);
+
+        // field 4: bool true (value in type nibble)
+        t = r.readFieldHeader();
+        Assert.that((int64) r.fieldId()).isEqualTo((int64) 4);
+        Assert.that((int64) t).isEqualTo((int64) 1);    // T_BOOL_TRUE
+        Assert.isTrue(r.boolValue());
+
+        // field 6: list<i32> [10,20,30]
+        t = r.readFieldHeader();
+        Assert.that((int64) r.fieldId()).isEqualTo((int64) 6);
+        Assert.that((int64) t).isEqualTo((int64) 9);    // T_LIST
+        int32 n = r.readListHeader();
+        Assert.that((int64) n).isEqualTo((int64) 3);
+        Assert.that((int64) r.listElemType()).isEqualTo((int64) 5);
+        Assert.that(r.readI64()).isEqualTo((int64) 10);
+        Assert.that(r.readI64()).isEqualTo((int64) 20);
+        Assert.that(r.readI64()).isEqualTo((int64) 30);
+
+        // field 7: struct { field 1: i32 = 99 }
+        t = r.readFieldHeader();
+        Assert.that((int64) r.fieldId()).isEqualTo((int64) 7);
+        Assert.that((int64) t).isEqualTo((int64) 12);   // T_STRUCT
+        int32 saved = r.enterStruct();
+        int32 it = r.readFieldHeader();
+        Assert.that((int64) r.fieldId()).isEqualTo((int64) 1);
+        Assert.that(r.readI64()).isEqualTo((int64) 99);
+        int32 stop = r.readFieldHeader();
+        Assert.that((int64) stop).isEqualTo((int64) 0); // STOP
+        r.exitStruct(saved);
+
+        int32 outerStop = r.readFieldHeader();
+        Assert.that((int64) outerStop).isEqualTo((int64) 0);
+        return;
+    }
+
+    @Test
+    public void skipsUnwantedFields() {
+        int8[] s = { (int8) 0x15, (int8) 0x0A, (int8) 0x16, (int8) 0x80,
+                     (int8) 0x89, (int8) 0x7A, (int8) 0x18, (int8) 0x02,
+                     (int8) 0x68, (int8) 0x69, (int8) 0x11, (int8) 0x29,
+                     (int8) 0x35, (int8) 0x14, (int8) 0x28, (int8) 0x3C,
+                     (int8) 0x1C, (int8) 0x15, (int8) 0xC6, (int8) 0x01,
+                     (int8) 0x00, (int8) 0x00 };
+        ThriftCompactReader r = heap ThriftCompactReader(s, (int64) 0);
+        r.enterStruct();
+        // Skip everything, expect to land on the final STOP cleanly.
+        int32 t = r.readFieldHeader();
+        while (t != (int32) 0) {
+            r.skip(t);
+            t = r.readFieldHeader();
+        }
+        Assert.that((int64) t).isEqualTo((int64) 0);
+        return;
+    }
+}
