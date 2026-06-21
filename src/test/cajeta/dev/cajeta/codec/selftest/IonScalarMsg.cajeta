@@ -1,0 +1,27 @@
+package dev.cajeta.codec.selftest;
+
+import cajeta.lang.String;
+
+/**
+ * Phase 3.2b test fixture — a flat Ion struct with one field per supported
+ * scalar shape. Unlike the protobuf fixture there are **no annotations**: Ion is
+ * self-describing, so `Ion.parse<IonScalarMsg>` binds each field by matching its
+ * name to the Ion struct's field symbol.
+ *
+ *   id (int64) · name (String) · active (boolean) · count (int32) · payload (int8[])
+ */
+public class IonScalarMsg {
+    public int64 id;
+    public String name;
+    public boolean active;
+    public int32 count;
+    public int8[] payload;
+
+    public IonScalarMsg() {
+        this.id = (int64) 0;
+        this.name = null;
+        this.active = false;
+        this.count = 0;
+        this.payload = null;
+    }
+}

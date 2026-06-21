@@ -1,0 +1,92 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.ion.Ion;
+import cajeta.lang.String;
+
+/**
+ * Phase 3.2b — Ion typed decode (`Ion.parse<T>`). The 60-byte fixture is a full
+ * stream: BVM, a local symbol table defining {10:id, 11:name, 12:active,
+ * 13:count, 14:payload}, then the struct
+ * `{ id: 150, name: "hi", active: true, count: 42, payload: [07,09] }`.
+ * The synthesizer binds each `IonScalarMsg` field by matching its name to the
+ * struct's field symbol.
+ */
+public class IonTypedTest {
+
+    public IonTypedTest() {
+        return;
+    }
+
+    static #int8[] scalarStream() {
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xEE, (int8) 0xA4,
+            (int8) 0x81, (int8) 0x83,
+            (int8) 0xDE, (int8) 0xA0,
+            (int8) 0x87,
+            (int8) 0xBE, (int8) 0x9D,
+            (int8) 0x82, (int8) 0x69, (int8) 0x64,
+            (int8) 0x84, (int8) 0x6E, (int8) 0x61, (int8) 0x6D, (int8) 0x65,
+            (int8) 0x86, (int8) 0x61, (int8) 0x63, (int8) 0x74, (int8) 0x69,
+            (int8) 0x76, (int8) 0x65,
+            (int8) 0x85, (int8) 0x63, (int8) 0x6F, (int8) 0x75, (int8) 0x6E,
+            (int8) 0x74,
+            (int8) 0x87, (int8) 0x70, (int8) 0x61, (int8) 0x79, (int8) 0x6C,
+            (int8) 0x6F, (int8) 0x61, (int8) 0x64,
+            (int8) 0xDE, (int8) 0x90,
+            (int8) 0x8A, (int8) 0x21, (int8) 0x96,
+            (int8) 0x8B, (int8) 0x82, (int8) 0x68, (int8) 0x69,
+            (int8) 0x8C, (int8) 0x11,
+            (int8) 0x8D, (int8) 0x21, (int8) 0x2A,
+            (int8) 0x8E, (int8) 0xA2, (int8) 0x07, (int8) 0x09
+        };
+        return b;
+    }
+
+    @Test
+    public void decodesScalarStruct() {
+        int8[] bytes = IonTypedTest.scalarStream();
+        IonScalarMsg m = Ion.parse<IonScalarMsg>(bytes, (int64) bytes.count());
+
+        Assert.that(m.id).isEqualTo((int64) 150);
+        Assert.isTrue(m.name.equals("hi"));
+        Assert.isTrue(m.active);
+        Assert.that((int64) m.count).isEqualTo((int64) 42);
+        Assert.that((int64) m.payload.count()).isEqualTo((int64) 2);
+        int8 p0 = m.payload[0];
+        int8 p1 = m.payload[1];
+        Assert.that((int64) (((int32) p0) & 0xFF)).isEqualTo((int64) 0x07);
+        Assert.that((int64) (((int32) p1) & 0xFF)).isEqualTo((int64) 0x09);
+        return;
+    }
+
+    @Test
+    public void absentFieldsKeepConstructorDefaults() {
+        // A struct with only `count` (SID 13) present — others stay at ctor
+        // defaults. Reuses the same LST so field names resolve.
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xEE, (int8) 0xA4,
+            (int8) 0x81, (int8) 0x83,
+            (int8) 0xDE, (int8) 0xA0,
+            (int8) 0x87,
+            (int8) 0xBE, (int8) 0x9D,
+            (int8) 0x82, (int8) 0x69, (int8) 0x64,
+            (int8) 0x84, (int8) 0x6E, (int8) 0x61, (int8) 0x6D, (int8) 0x65,
+            (int8) 0x86, (int8) 0x61, (int8) 0x63, (int8) 0x74, (int8) 0x69,
+            (int8) 0x76, (int8) 0x65,
+            (int8) 0x85, (int8) 0x63, (int8) 0x6F, (int8) 0x75, (int8) 0x6E,
+            (int8) 0x74,
+            (int8) 0x87, (int8) 0x70, (int8) 0x61, (int8) 0x79, (int8) 0x6C,
+            (int8) 0x6F, (int8) 0x61, (int8) 0x64,
+            (int8) 0xD3, (int8) 0x8D, (int8) 0x21, (int8) 0x63
+        };
+        IonScalarMsg m = Ion.parse<IonScalarMsg>(b, (int64) b.count());
+        Assert.that((int64) m.count).isEqualTo((int64) 99);
+        Assert.that(m.id).isEqualTo((int64) 0);
+        Assert.isFalse(m.active);
+        Assert.isTrue(m.name == null);
+        return;
+    }
+}
