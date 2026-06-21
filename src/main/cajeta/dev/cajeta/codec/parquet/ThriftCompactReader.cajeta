@@ -51,6 +51,36 @@ public final class ThriftCompactReader {
 
     public int64 position() { return this.pos; }
 
+    /** Reposition the cursor (resets the field-id delta base). */
+    public void seek(int64 pos) {
+        this.pos = pos;
+        this.lastFieldId = 0;
+    }
+
+    /** Copy a byte range out of the backing buffer; caller owns the slice. */
+    public #int8[] slice(int64 start, int64 len) {
+        int8[] out = heap int8[len];
+        int64 k = (int64) 0;
+        while (k < len) {
+            int64 si = start + k;
+            out[k] = this.b[si];
+            k = k + 1;
+        }
+        return out;
+    }
+
+    /** Little-endian unsigned 32-bit read at an absolute offset. */
+    public int64 readLE32At(int64 at) {
+        int64 b0 = (int64) (((int32) this.b[at]) & 0xFF);
+        int64 a1 = at + (int64) 1;
+        int64 a2 = at + (int64) 2;
+        int64 a3 = at + (int64) 3;
+        int64 b1 = (int64) (((int32) this.b[a1]) & 0xFF);
+        int64 b2 = (int64) (((int32) this.b[a2]) & 0xFF);
+        int64 b3 = (int64) (((int32) this.b[a3]) & 0xFF);
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
     /** Unsigned base-128 varint. */
     public int64 readVarint() {
         int64 result = (int64) 0;

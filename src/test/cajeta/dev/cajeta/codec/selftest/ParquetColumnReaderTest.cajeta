@@ -1,0 +1,27 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.parquet.ParquetColumnReader;
+
+/**
+ * Phase 7.1c — single INT32 column read from a real pyarrow file (`x` = [1..5]).
+ */
+public class ParquetColumnReaderTest {
+
+    public ParquetColumnReaderTest() {
+        return;
+    }
+
+    @Test
+    public void readsInt32Column() {
+        int8[] f = ParquetMetadataTest.simpleParquet();
+        int32[] vals = ParquetColumnReader.readInt32Column(f, (int64) f.count(), 0);
+        Assert.that((int64) vals.count()).isEqualTo((int64) 5);
+        int32 i = 0;
+        while (i < 5) {
+            Assert.that((int64) vals[i]).isEqualTo((int64) (i + 1));
+            i = i + 1;
+        }
+        return;
+    }
+}
