@@ -9,6 +9,62 @@ package dev.cajeta.codec.columnar;
  */
 public final class Dictionary {
 
+    /** Build a dictionary of distinct values in first-seen order. */
+    public static #int32[] buildDict(int32[] values, int32 count) {
+        int32[] tmp = heap int32[count];
+        int32 size = 0;
+        int32 i = 0;
+        while (i < count) {
+            int32 v = values[i];
+            boolean found = false;
+            int32 j = 0;
+            while (j < size) {
+                if (tmp[j] == v) { found = true; }
+                j = j + 1;
+            }
+            if (!found) { tmp[size] = v; size = size + 1; }
+            i = i + 1;
+        }
+        int32[] dict = heap int32[size];
+        int32 k = 0;
+        while (k < size) { dict[k] = tmp[k]; k = k + 1; }
+        return dict;
+    }
+
+    /** Map each value to its dictionary index. */
+    public static #int32[] indicesFor(int32[] values, int32 count,
+                                      int32[] dict, int32 dictSize) {
+        int32[] idx = heap int32[count];
+        int32 i = 0;
+        while (i < count) {
+            int32 v = values[i];
+            int32 at = 0;
+            int32 j = 0;
+            while (j < dictSize) {
+                if (dict[j] == v) { at = j; }
+                j = j + 1;
+            }
+            idx[i] = at;
+            i = i + 1;
+        }
+        return idx;
+    }
+
+    /** Build a Parquet dictionary data page: bit-width byte + hybrid indices. */
+    public static #int8[] encodePage(int32[] indices, int32 count, int32 w) {
+        int8[] body = Rle.encode(indices, w, count);
+        int64 bn = (int64) body.count();
+        int8[] page = heap int8[bn + (int64) 1];
+        page[0] = (int8) (w & 0xFF);
+        int64 j = (int64) 0;
+        while (j < bn) {
+            int64 di = (int64) 1 + j;
+            page[di] = body[j];
+            j = j + 1;
+        }
+        return page;
+    }
+
     /** Gather `n` dictionary values by index. */
     public static #int32[] gather(int32[] indices, int32 n, int32[] dict) {
         int32[] out = heap int32[n];

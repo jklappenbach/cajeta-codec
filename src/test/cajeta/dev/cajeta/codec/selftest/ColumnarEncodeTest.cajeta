@@ -1,0 +1,108 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.columnar.BitPack;
+import dev.cajeta.codec.columnar.Rle;
+import dev.cajeta.codec.columnar.Dictionary;
+import dev.cajeta.codec.columnar.FrameOfReference;
+import dev.cajeta.codec.columnar.Delta;
+
+/**
+ * Phase 6.2 — columnar encode kernels, validated by encode→decode round-trip
+ * (the kernel encoders mirror the 6.1 decoders).
+ */
+public class ColumnarEncodeTest {
+
+    public ColumnarEncodeTest() {
+        return;
+    }
+
+    @Test
+    public void bitPackRoundTrips() {
+        int32[] vals = { 5, 0, 9, 3, 14, 7, 1, 12, 8 };
+        int32 w = BitPack.minWidth(vals, 9);   // max 14 -> 4 bits
+        Assert.that((int64) w).isEqualTo((int64) 4);
+        int8[] packed = BitPack.pack(vals, w, 9);
+        int32[] got = BitPack.unpack(packed, (int64) 0, w, 9);
+        int32 i = 0;
+        while (i < 9) {
+            Assert.that((int64) got[i]).isEqualTo((int64) vals[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void rleAllEqualRoundTrips() {
+        int32[] vals = { 7, 7, 7, 7, 7, 7 };
+        int8[] enc = Rle.encode(vals, 3, 6);
+        int32[] got = Rle.decode(enc, (int64) 0, 3, 6);
+        int32 i = 0;
+        while (i < 6) {
+            Assert.that((int64) got[i]).isEqualTo((int64) 7);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void rleBitPackedRoundTrips() {
+        int32[] vals = { 0, 1, 2, 3, 4, 5, 6, 7, 2, 4 };
+        int8[] enc = Rle.encode(vals, 3, 10);
+        int32[] got = Rle.decode(enc, (int64) 0, 3, 10);
+        int32 i = 0;
+        while (i < 10) {
+            Assert.that((int64) got[i]).isEqualTo((int64) vals[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void dictionaryRoundTrips() {
+        int32[] vals = { 100, 200, 300, 400, 400, 300, 200, 100 };
+        int32[] dict = Dictionary.buildDict(vals, 8);
+        Assert.that((int64) dict.count()).isEqualTo((int64) 4);
+        int32[] idx = Dictionary.indicesFor(vals, 8, dict, (int32) dict.count());
+        int32 w = BitPack.minWidth(idx, 8);     // max index 3 -> 2 bits
+        int8[] page = Dictionary.encodePage(idx, 8, w);
+        int32[] got = Dictionary.decode(page, (int64) 0, 8, dict);
+        int32 i = 0;
+        while (i < 8) {
+            Assert.that((int64) got[i]).isEqualTo((int64) vals[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void forRoundTrips() {
+        int32[] vals = { 1000, 1005, 1003, 1010, 1000, 1015 };
+        int32 ref = FrameOfReference.referenceOf(vals, 6);
+        Assert.that((int64) ref).isEqualTo((int64) 1000);
+        int32[] res = { 0, 5, 3, 10, 0, 15 };
+        int32 w = BitPack.minWidth(res, 6);     // 4 bits
+        int8[] enc = FrameOfReference.encode(vals, 6, ref, w);
+        int32[] got = FrameOfReference.decode(enc, (int64) 0, w, 6, ref);
+        int32 i = 0;
+        while (i < 6) {
+            Assert.that((int64) got[i]).isEqualTo((int64) vals[i]);
+            i = i + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void deltaRoundTrips() {
+        int32[] vals = { 10, 12, 15, 14, 19, 19, 25 };
+        int32 first = Delta.firstOf(vals, 7);
+        int32[] deltas = Delta.encode(vals, 7);
+        int32[] got = Delta.decode(first, deltas, 7);
+        int32 i = 0;
+        while (i < 7) {
+            Assert.that((int64) got[i]).isEqualTo((int64) vals[i]);
+            i = i + 1;
+        }
+        return;
+    }
+}

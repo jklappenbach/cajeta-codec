@@ -47,4 +47,49 @@ public final class BitPack {
         int64 bits = (int64) w * (int64) count;
         return (bits + (int64) 7) >> 3;
     }
+
+    /**
+     * Pack `count` width-`w` values (LSB-first) into a fresh byte array, the
+     * inverse of `unpack`. Caller owns the result.
+     */
+    public static #int8[] pack(int32[] values, int32 w, int32 count) {
+        int64 nbytes = BitPack.packedBytes(w, count);
+        int8[] out = heap int8[nbytes];
+        int64 z = (int64) 0;
+        while (z < nbytes) { out[z] = (int8) 0; z = z + 1; }
+        if (w == 0) { return out; }
+        int64 bp = (int64) 0;
+        int32 i = 0;
+        while (i < count) {
+            int32 v = values[i];
+            int32 b = 0;
+            while (b < w) {
+                int32 bit = (v >> b) & 1;
+                if (bit != 0) {
+                    int64 byteIdx = bp >> 3;
+                    int32 bitIdx = (int32) (bp & (int64) 7);
+                    int32 cur = ((int32) out[byteIdx]) & 0xFF;
+                    out[byteIdx] = (int8) (cur | (1 << bitIdx));
+                }
+                bp = bp + 1;
+                b = b + 1;
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    /** Minimum bit width (0..32) needed to represent the max of `count` values. */
+    public static int32 minWidth(int32[] values, int32 count) {
+        int32 maxv = 0;
+        int32 i = 0;
+        while (i < count) {
+            int32 v = values[i];
+            if (v > maxv) { maxv = v; }
+            i = i + 1;
+        }
+        int32 w = 0;
+        while (maxv != 0) { maxv = maxv >> 1; w = w + 1; }
+        return w;
+    }
 }

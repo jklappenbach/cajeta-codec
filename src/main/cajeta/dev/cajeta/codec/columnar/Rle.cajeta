@@ -13,6 +13,67 @@ package dev.cajeta.codec.columnar;
  */
 public final class Rle {
 
+    static int64 writeUleb(int8[] buf, int64 o, int64 v) {
+        int64 t = v;
+        while (t >= (int64) 128) {
+            buf[o] = (int8) ((t & (int64) 0x7F) | (int64) 0x80);
+            o = o + 1;
+            t = t >> 7;
+        }
+        buf[o] = (int8) (t & (int64) 0x7F);
+        o = o + 1;
+        return o;
+    }
+
+    /**
+     * Encode `count` width-`w` values as a hybrid stream: one RLE run if all
+     * values are equal, else a single bit-packed run of `ceil(count/8)` groups
+     * (padded with zeros). Both are spec-valid; round-trips with `decode`.
+     */
+    public static #int8[] encode(int32[] values, int32 w, int32 count) {
+        int64 cap = (int64) 32 + BitPack.packedBytes(w, count);
+        int8[] buf = heap int8[cap];
+        int64 o = (int64) 0;
+        boolean allSame = count > 0;
+        int32 v0 = 0;
+        if (count > 0) {
+            v0 = values[0];
+            int32 i = 1;
+            while (i < count) {
+                if (values[i] != v0) { allSame = false; }
+                i = i + 1;
+            }
+        }
+        if (allSame) {
+            int64 header = (((int64) count) << 1) | (int64) 1;
+            o = Rle.writeUleb(buf, o, header);
+            int32 byteW = (w + 7) / 8;
+            int32 k = 0;
+            while (k < byteW) {
+                buf[o] = (int8) ((v0 >> (k * 8)) & 0xFF);
+                o = o + 1;
+                k = k + 1;
+            }
+        } else {
+            int32 groups = (count + 7) / 8;
+            int32 n = groups * 8;
+            int64 header = ((int64) groups) << 1;
+            o = Rle.writeUleb(buf, o, header);
+            int32[] padded = heap int32[n];
+            int32 i = 0;
+            while (i < count) { padded[i] = values[i]; i = i + 1; }
+            while (i < n) { padded[i] = 0; i = i + 1; }
+            int8[] packed = BitPack.pack(padded, w, n);
+            int64 pn = (int64) packed.count();
+            int64 j = (int64) 0;
+            while (j < pn) { buf[o] = packed[j]; o = o + 1; j = j + 1; }
+        }
+        int8[] r = heap int8[o];
+        int64 m = (int64) 0;
+        while (m < o) { r[m] = buf[m]; m = m + 1; }
+        return r;
+    }
+
     public static #int32[] decode(int8[] src, int64 off, int32 w, int32 count) {
         int32[] out = heap int32[count];
         int32 produced = 0;
