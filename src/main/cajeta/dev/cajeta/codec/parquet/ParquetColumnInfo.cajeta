@@ -1,0 +1,104 @@
+package dev.cajeta.codec.parquet;
+
+/**
+ * One Parquet column chunk's `ColumnMetaData` (Phase 7.1b) — scalar fields only,
+ * so the `#`-moved return is sound. `read(file, n, col)` re-walks the footer to
+ * the `col`-th column of the first row group. v1 covers the fields a single-column
+ * read (7.1c) needs: physical type, codec, value count, page offsets, sizes.
+ */
+public final class ParquetColumnInfo {
+    public int32 type;                  // parquet.thrift Type
+    public int32 codec;                 // CompressionCodec
+    public int64 numValues;
+    public int64 dataPageOffset;
+    public int64 dictPageOffset;        // -1 when absent
+    public int64 totalCompressedSize;
+
+    public ParquetColumnInfo() {
+        this.type = 0;
+        this.codec = 0;
+        this.numValues = (int64) 0;
+        this.dataPageOffset = (int64) 0;
+        this.dictPageOffset = (int64) 0 - (int64) 1;
+        this.totalCompressedSize = (int64) 0;
+    }
+
+    public static #ParquetColumnInfo read(int8[] file, int64 n, int32 col) {
+        int64 off = ParquetMetadata.footerOffset(file, n);
+        ParquetColumnInfo info = heap ParquetColumnInfo();
+        ThriftCompactReader r = heap ThriftCompactReader(file, off);
+        r.enterStruct();
+        int32 t = r.readFieldHeader();
+        while (t != (int32) 0) {
+            int32 fid = r.fieldId();
+            if (fid == 4) {
+                int32 nGroups = r.readListHeader();
+                int32 g = 0;
+                while (g < nGroups) {
+                    if (g != 0) {
+                        r.skip((int32) 12);
+                    } else {
+                        int32 rgSaved = r.enterStruct();
+                        int32 rt = r.readFieldHeader();
+                        while (rt != (int32) 0) {
+                            int32 rfid = r.fieldId();
+                            if (rfid == 1) {
+                                int32 nCols = r.readListHeader();
+                                int32 c = 0;
+                                while (c < nCols) {
+                                    if (c != col) {
+                                        r.skip((int32) 12);
+                                    } else {
+                                        int32 ccSaved = r.enterStruct();
+                                        int32 ct = r.readFieldHeader();
+                                        while (ct != (int32) 0) {
+                                            int32 cfid = r.fieldId();
+                                            if (cfid == 3) {
+                                                int32 cmSaved = r.enterStruct();
+                                                int32 mt = r.readFieldHeader();
+                                                while (mt != (int32) 0) {
+                                                    int32 mfid = r.fieldId();
+                                                    if (mfid == 1) {
+                                                        info.type = r.readI32();
+                                                    } else if (mfid == 4) {
+                                                        info.codec = r.readI32();
+                                                    } else if (mfid == 5) {
+                                                        info.numValues = r.readI64();
+                                                    } else if (mfid == 7) {
+                                                        info.totalCompressedSize = r.readI64();
+                                                    } else if (mfid == 9) {
+                                                        info.dataPageOffset = r.readI64();
+                                                    } else if (mfid == 11) {
+                                                        info.dictPageOffset = r.readI64();
+                                                    } else {
+                                                        r.skip(mt);
+                                                    }
+                                                    mt = r.readFieldHeader();
+                                                }
+                                                r.exitStruct(cmSaved);
+                                            } else {
+                                                r.skip(ct);
+                                            }
+                                            ct = r.readFieldHeader();
+                                        }
+                                        r.exitStruct(ccSaved);
+                                    }
+                                    c = c + 1;
+                                }
+                            } else {
+                                r.skip(rt);
+                            }
+                            rt = r.readFieldHeader();
+                        }
+                        r.exitStruct(rgSaved);
+                    }
+                    g = g + 1;
+                }
+            } else {
+                r.skip(t);
+            }
+            t = r.readFieldHeader();
+        }
+        return #info;
+    }
+}

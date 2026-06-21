@@ -1,0 +1,108 @@
+package dev.cajeta.codec.parquet;
+
+/**
+ * Decoded Parquet `FileMetaData` header (Phase 7.1b) — **scalar fields only**:
+ * version, num_rows, and the first row group's column count. Per-column details
+ * are fetched via `ParquetColumnInfo.read(file, n, c)`, which re-walks the footer.
+ *
+ * Why scalars only: returning a `#`-moved object that owns array fields corrupts
+ * it at the move boundary (a compiler gap — the inner buffers double-free); a
+ * scalar-only object moves cleanly. Re-walking the (small) footer per column read
+ * is cheap and sidesteps the gap. Multi-row-group spanning → P-PARQUET-MULTIRG.
+ *
+ * parquet.thrift enums: Type INT32=1/INT64=2/.../BYTE_ARRAY=6; CompressionCodec
+ * UNCOMPRESSED=0/SNAPPY=1/GZIP=2/.../ZSTD=6.
+ */
+public final class ParquetMetadata {
+    public int32 version;
+    public int64 numRows;
+    public int32 numColumns;
+
+    public ParquetMetadata() {
+        this.version = 0;
+        this.numRows = (int64) 0;
+        this.numColumns = 0;
+    }
+
+    /** Byte offset of the FileMetaData footer; validates the PAR1 magics. */
+    public static int64 footerOffset(int8[] file, int64 n) {
+        int32 a = ((int32) file[0]) & 0xFF;
+        int32 b = ((int32) file[1]) & 0xFF;
+        int32 c = ((int32) file[2]) & 0xFF;
+        int32 d = ((int32) file[3]) & 0xFF;
+        if (a != 0x50 || b != 0x41 || c != 0x52 || d != 0x31) {
+            throw heap ParquetParseException("bad Parquet head magic PAR1", (int64) 0);
+        }
+        int64 tail = n - (int64) 4;
+        int32 ta = ((int32) file[tail]) & 0xFF;
+        int64 t1 = tail + (int64) 1;
+        int64 t2 = tail + (int64) 2;
+        int64 t3 = tail + (int64) 3;
+        int32 tb = ((int32) file[t1]) & 0xFF;
+        int32 tc = ((int32) file[t2]) & 0xFF;
+        int32 td = ((int32) file[t3]) & 0xFF;
+        if (ta != 0x50 || tb != 0x41 || tc != 0x52 || td != 0x31) {
+            throw heap ParquetParseException("bad Parquet tail magic PAR1", n);
+        }
+        int64 lenPos = n - (int64) 8;
+        int64 l0 = (int64) (((int32) file[lenPos]) & 0xFF);
+        int64 p1 = lenPos + (int64) 1;
+        int64 p2 = lenPos + (int64) 2;
+        int64 p3 = lenPos + (int64) 3;
+        int64 l1 = (int64) (((int32) file[p1]) & 0xFF);
+        int64 l2 = (int64) (((int32) file[p2]) & 0xFF);
+        int64 l3 = (int64) (((int32) file[p3]) & 0xFF);
+        int64 footLen = l0 | (l1 << 8) | (l2 << 16) | (l3 << 24);
+        return n - (int64) 8 - footLen;
+    }
+
+    /** Parse the footer header (version, num_rows, column count). */
+    public static #ParquetMetadata parse(int8[] file, int64 n) {
+        int64 off = ParquetMetadata.footerOffset(file, n);
+        ParquetMetadata meta = heap ParquetMetadata();
+        ThriftCompactReader r = heap ThriftCompactReader(file, off);
+        r.enterStruct();
+        int32 t = r.readFieldHeader();
+        while (t != (int32) 0) {
+            int32 fid = r.fieldId();
+            if (fid == 1) {
+                meta.version = r.readI32();
+            } else if (fid == 3) {
+                meta.numRows = r.readI64();
+            } else if (fid == 4) {
+                // row_groups: list<RowGroup>; count columns in the first group.
+                int32 nGroups = r.readListHeader();
+                int32 g = 0;
+                while (g < nGroups) {
+                    if (g != 0) {
+                        r.skip((int32) 12);
+                    } else {
+                        int32 rgSaved = r.enterStruct();
+                        int32 rt = r.readFieldHeader();
+                        while (rt != (int32) 0) {
+                            int32 rfid = r.fieldId();
+                            if (rfid == 1) {
+                                int32 nCols = r.readListHeader();
+                                meta.numColumns = nCols;
+                                int32 c = 0;
+                                while (c < nCols) {
+                                    r.skip((int32) 12);
+                                    c = c + 1;
+                                }
+                            } else {
+                                r.skip(rt);
+                            }
+                            rt = r.readFieldHeader();
+                        }
+                        r.exitStruct(rgSaved);
+                    }
+                    g = g + 1;
+                }
+            } else {
+                r.skip(t);
+            }
+            t = r.readFieldHeader();
+        }
+        return #meta;
+    }
+}
