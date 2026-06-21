@@ -219,6 +219,106 @@ public final class OrcRleV2 {
         }
     }
 
+    // ---- encode (Phase 8.4) ----
+
+    static int32 bitLen(uint64 z) {
+        if (z == (uint64) 0) { return 1; }
+        int32 n = 0;
+        uint64 x = z;
+        while (x != (uint64) 0) { x = x >> 1; n = n + 1; }
+        return n;
+    }
+
+    // Round up to a width representable by the ORC width table.
+    static int32 roundWidth(int32 w) {
+        if (w <= 24) { return w; }
+        if (w <= 26) { return 26; }
+        if (w <= 28) { return 28; }
+        if (w <= 30) { return 30; }
+        if (w <= 32) { return 32; }
+        if (w <= 40) { return 40; }
+        if (w <= 48) { return 48; }
+        if (w <= 56) { return 56; }
+        return 64;
+    }
+
+    // Inverse of decodeWidth: a table width → its 5-bit encoded form.
+    static int32 encodeWidth(int32 w) {
+        if (w <= 24) { return w - 1; }
+        if (w == 26) { return 24; }
+        if (w == 28) { return 25; }
+        if (w == 30) { return 26; }
+        if (w == 32) { return 27; }
+        if (w == 40) { return 28; }
+        if (w == 48) { return 29; }
+        if (w == 56) { return 30; }
+        return 31;
+    }
+
+    /**
+     * Encode `count` signed integers as RLE v2 **DIRECT** runs (zigzag values,
+     * fixed width, MSB-first bit-packing, runs of ≤512). The simplest correct
+     * v2 encoding for arbitrary data; decodes via `decodeInto`. Returns the
+     * stream bytes.
+     */
+    public static #int8[] encodeDirect(int64[] vals, int32 count) {
+        int32 width = 1;
+        int32 i = 0;
+        while (i < count) {
+            int64 v = vals[i];
+            uint64 z = ((uint64) (v << 1)) ^ ((uint64) (v >> 63));
+            int32 bits = OrcRleV2.bitLen(z);
+            if (bits > width) { width = bits; }
+            i = i + 1;
+        }
+        width = OrcRleV2.roundWidth(width);
+        int32 encW = OrcRleV2.encodeWidth(width);
+
+        int64 capB = (int64) count * (int64) 8 + (int64) 64;
+        int8[] out = heap int8[capB];
+        int64 outLen = (int64) 0;
+
+        int32 p = 0;
+        while (p < count) {
+            int32 runLen = count - p;
+            if (runLen > 512) { runLen = 512; }
+            int32 h0 = (1 << 6) | (encW << 1) | (((runLen - 1) >> 8) & 1);
+            out[outLen] = (int8) h0; outLen = outLen + 1;
+            out[outLen] = (int8) ((runLen - 1) & 0xFF); outLen = outLen + 1;
+
+            int32 bitBuf = 0;
+            int32 bitCnt = 0;
+            int32 r = 0;
+            while (r < runLen) {
+                int32 pr = p + r;
+                int64 v = vals[pr];
+                uint64 z = ((uint64) (v << 1)) ^ ((uint64) (v >> 63));
+                int32 b = width - 1;
+                while (b >= 0) {
+                    int32 bit = (int32) ((z >> (uint64) b) & (uint64) 1);
+                    bitBuf = (bitBuf << 1) | bit;
+                    bitCnt = bitCnt + 1;
+                    if (bitCnt == 8) {
+                        out[outLen] = (int8) bitBuf; outLen = outLen + 1;
+                        bitBuf = 0; bitCnt = 0;
+                    }
+                    b = b - 1;
+                }
+                r = r + 1;
+            }
+            if (bitCnt > 0) {
+                bitBuf = bitBuf << (8 - bitCnt);
+                out[outLen] = (int8) bitBuf; outLen = outLen + 1;
+            }
+            p = p + runLen;
+        }
+
+        int8[] res = heap int8[outLen];
+        int64 k = (int64) 0;
+        while (k < outLen) { res[k] = out[k]; k = k + 1; }
+        return #res;
+    }
+
     /** Sum `count` decoded integers (scalar — sidesteps int64[]-return-to-test). */
     public static int64 decodeSum(int8[] src, int64 off, int32 count) {
         OrcRleV2 cur = heap OrcRleV2(src, off);
