@@ -62,6 +62,38 @@ public class IonTypedTest {
     }
 
     @Test
+    public void decodesNestedStruct() {
+        // BVM + LST {10:id,11:inner,12:x,13:tag} + outer { id:5, inner:{ x:77, tag:"hi" } }.
+        // Exercises stepIn/stepOut with the shared stream-global symbol table.
+        int8[] b = {
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xEE, (int8) 0x96,
+            (int8) 0x81, (int8) 0x83,
+            (int8) 0xDE, (int8) 0x92,
+            (int8) 0x87,
+            (int8) 0xBE, (int8) 0x8F,
+            (int8) 0x82, (int8) 0x69, (int8) 0x64,
+            (int8) 0x85, (int8) 0x69, (int8) 0x6E, (int8) 0x6E, (int8) 0x65,
+            (int8) 0x72,
+            (int8) 0x81, (int8) 0x78,
+            (int8) 0x83, (int8) 0x74, (int8) 0x61, (int8) 0x67,
+            (int8) 0xDC,
+            (int8) 0x8A, (int8) 0x21, (int8) 0x05,
+            (int8) 0x8B,
+            (int8) 0xD7,
+            (int8) 0x8C, (int8) 0x21, (int8) 0x4D,
+            (int8) 0x8D, (int8) 0x82, (int8) 0x68, (int8) 0x69
+        };
+        IonOuterMsg m = Ion.parse<IonOuterMsg>(b, (int64) b.count());
+
+        Assert.that(m.id).isEqualTo((int64) 5);
+        Assert.isTrue(m.inner != null);
+        Assert.that(m.inner.x).isEqualTo((int64) 77);
+        Assert.isTrue(m.inner.tag.equals("hi"));
+        return;
+    }
+
+    @Test
     public void absentFieldsKeepConstructorDefaults() {
         // A struct with only `count` (SID 13) present — others stay at ctor
         // defaults. Reuses the same LST so field names resolve.

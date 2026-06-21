@@ -3,48 +3,78 @@ package dev.cajeta.codec.ion;
 import cajeta.lang.String;
 
 /**
- * Lazy cursor over an Ion 1.0 binary struct (Phase 3.2a). Builds the structural
- * index once (`IonIndex` — symbol table + per-field bounds), then decodes only
- * the fields you ask for, looked up by **name** (`slotOf` / `has`) since Ion is
- * self-describing. The eager typed bind (3.2b, `Ion.parse<T>`) drives this.
+ * Streaming cursor over an Ion 1.0 binary document (Phase 3.2). Follows the
+ * production Ion-reader pattern (`ion-java`/`ion-c`/`ion-rust`): a SINGLE cursor
+ * holds the one stream-global symbol table plus a **container stack** of indexes
+ * (`frames`).
+ * `stepIn(slot)` descends into a nested struct (re-indexing it against the same
+ * shared table — no reparse, no slice), `stepOut()` ascends. Field lookup is by
+ * **name** (`slotOf` / `has`) since Ion is self-describing; the eager typed bind
+ * (`Ion.parse<T>`) drives this.
  *
- * Readers by index slot: `readInt` (pos/neg magnitude), `readBool` (value is in
- * the type-descriptor nibble), `readString` (UTF-8), `readBytes` (blob payload),
- * `readSymbol` (a symbol ID resolved through the table). `readFloat` is parked
- * (P-ION-FLOAT — bit-reinterpret) and not in any v1 fixture.
+ * Readers act on the current (innermost) container: `readInt` (pos/neg
+ * magnitude), `readBool` (value in the TD nibble), `readString` (UTF-8),
+ * `readBytes` (blob), `readSymbol` (a symbol ID resolved through the table).
+ * `readFloat` is parked (P-ION-FLOAT). Max nesting depth is fixed (32).
  */
 public final class IonCursor {
     int8[] b;
-    IonIndex idx;
+    IonSymbolTable table;
+    IonIndex[] frames;
+    int32 depth;
 
     public IonCursor(int8[] b, int64 n) {
         this.b = b;
-        this.idx = IonIndex.build(b, n);
+        this.table = IonSymbolTable.parse(b, n);
+        this.frames = heap IonIndex[32];
+        int64 start = this.table.userValueStart();
+        this.frames[0] = IonIndex.buildAt(b, start, this.table);
+        this.depth = 1;
     }
 
-    /** Number of top-level struct fields. */
-    public int32 fieldCount() { return this.idx.fieldCount(); }
-    /** Ion type code of the value at slot `i`. */
-    public int32 typeCode(int32 i) { return this.idx.typeCode(i); }
+    // The current (innermost) container index.
+    IonIndex cur() {
+        int32 t = this.depth - 1;
+        return this.frames[t];
+    }
 
-    /** Index slot of the first field named `name`, or -1 if absent. */
-    public int32 slotOf(String name) { return this.idx.indexOfName(name); }
-    /** True iff a field named `name` is present. */
-    public boolean has(String name) { return this.idx.indexOfName(name) >= 0; }
+    /** Descend into the struct at slot `i`, sharing the one symbol table. */
+    public void stepIn(int32 i) {
+        int64 tdPos = this.cur().valueTd(i);
+        IonIndex child = IonIndex.buildAt(this.b, tdPos, this.table);
+        this.frames[this.depth] = child;
+        this.depth = this.depth + 1;
+    }
+
+    /** Ascend to the enclosing container. */
+    public void stepOut() {
+        this.depth = this.depth - 1;
+    }
+
+    /** Number of fields in the current container. */
+    public int32 fieldCount() { return this.cur().fieldCount(); }
+    /** Ion type code of the value at slot `i` in the current container. */
+    public int32 typeCode(int32 i) { return this.cur().typeCode(i); }
+
+    /** Index slot of the first field named `name` here, or -1 if absent. */
+    public int32 slotOf(String name) { return this.cur().indexOfName(name); }
+    /** True iff a field named `name` is present in the current container. */
+    public boolean has(String name) { return this.cur().indexOfName(name) >= 0; }
 
     /** True iff the value at slot `i` is a typed null. */
     public boolean isNull(int32 i) {
-        int64 tdPos = this.idx.valueTd(i);
+        int64 tdPos = this.cur().valueTd(i);
         int8 td = this.b[tdPos];
         return IonWire.isNull(td);
     }
 
     /** Decode the integer at slot `i` (negint type code negates the magnitude). */
     public int64 readInt(int32 i) {
-        int64 s = this.idx.valueStart(i);
-        int64 e = this.idx.valueEnd(i);
+        IonIndex ix = this.cur();
+        int64 s = ix.valueStart(i);
+        int64 e = ix.valueEnd(i);
         int64 mag = IonWire.decodeUIntMag(this.b, s, e - s);
-        if (this.idx.typeCode(i) == IonWire.tcNegInt()) {
+        if (ix.typeCode(i) == IonWire.tcNegInt()) {
             return (int64) 0 - mag;
         }
         return mag;
@@ -52,7 +82,7 @@ public final class IonCursor {
 
     /** Decode the bool at slot `i` — the value is the type-descriptor nibble. */
     public boolean readBool(int32 i) {
-        int64 tdPos = this.idx.valueTd(i);
+        int64 tdPos = this.cur().valueTd(i);
         int8 td = this.b[tdPos];
         return IonWire.lengthNibble(td) == 1;
     }
@@ -60,8 +90,9 @@ public final class IonCursor {
     /** Decode the UTF-8 string at slot `i` (caller owns the result). */
     public #String readString(int32 i) {
         int8[] bb = this.b;
-        int64 s = this.idx.valueStart(i);
-        int64 e = this.idx.valueEnd(i);
+        IonIndex ix = this.cur();
+        int64 s = ix.valueStart(i);
+        int64 e = ix.valueEnd(i);
         int64 len = e - s;
         int8[] out = heap int8[len];
         int64 k = (int64) 0;
@@ -76,8 +107,9 @@ public final class IonCursor {
     /** Copy the blob payload bytes at slot `i` (caller owns them). */
     public #int8[] readBytes(int32 i) {
         int8[] bb = this.b;
-        int64 s = this.idx.valueStart(i);
-        int64 e = this.idx.valueEnd(i);
+        IonIndex ix = this.cur();
+        int64 s = ix.valueStart(i);
+        int64 e = ix.valueEnd(i);
         int64 len = e - s;
         int8[] out = heap int8[len];
         int64 k = (int64) 0;
@@ -91,9 +123,10 @@ public final class IonCursor {
 
     /** Resolve the symbol value at slot `i` (a symbol ID) to its text. */
     public String readSymbol(int32 i) {
-        int64 s = this.idx.valueStart(i);
-        int64 e = this.idx.valueEnd(i);
+        IonIndex ix = this.cur();
+        int64 s = ix.valueStart(i);
+        int64 e = ix.valueEnd(i);
         int64 sid = IonWire.decodeUIntMag(this.b, s, e - s);
-        return this.idx.symbols().resolve(sid);
+        return this.table.resolve(sid);
     }
 }

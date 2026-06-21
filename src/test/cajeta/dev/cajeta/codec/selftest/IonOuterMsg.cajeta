@@ -1,0 +1,12 @@
+package dev.cajeta.codec.selftest;
+
+/** Phase 3.2c nested fixture — an outer struct embedding `IonInnerMsg`. */
+public class IonOuterMsg {
+    public int64 id;
+    public IonInnerMsg inner;
+
+    public IonOuterMsg() {
+        this.id = (int64) 0;
+        this.inner = null;
+    }
+}
