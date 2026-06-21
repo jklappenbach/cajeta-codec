@@ -1,0 +1,107 @@
+package dev.cajeta.codec.orc;
+
+import dev.cajeta.codec.protobuf.ProtobufIndex;
+import dev.cajeta.codec.protobuf.ProtobufWire;
+
+/**
+ * ORC per-column statistics (Phase 8.2) — the Footer's repeated `ColumnStatistics`
+ * (field 7), indexed by column id (0 = root struct). For integer columns the
+ * `intStatistics` (field 2) carries sint64 (zigzag) min/max/sum. Scalar-only so
+ * the `#`-moved return is sound (mirrors Parquet's `ParquetColumnInfo`). v1 reads
+ * integer min/max; `mightContainRange` is the stripe-skip predicate for pushdown.
+ */
+public final class OrcColumnStats {
+    public boolean hasStats;
+    public int64 minValue;
+    public int64 maxValue;
+    public int64 numValues;
+
+    public OrcColumnStats() {
+        this.hasStats = false;
+        this.minValue = (int64) 0;
+        this.maxValue = (int64) 0;
+        this.numValues = (int64) 0;
+    }
+
+    /** Pushdown predicate: could this column hold a value in [lo, hi]? */
+    public boolean mightContainRange(int64 lo, int64 hi) {
+        if (!this.hasStats) { return true; }
+        if (hi < this.minValue) { return false; }
+        if (lo > this.maxValue) { return false; }
+        return true;
+    }
+
+    static int64 zigzag(int64 v) {
+        return ((v >> 1) & (int64) 0x7FFFFFFFFFFFFFFF) ^ ((int64) 0 - (v & (int64) 1));
+    }
+
+    public static #OrcColumnStats forColumn(int8[] file, int64 n, int32 col) {
+        OrcColumnStats st = heap OrcColumnStats();
+
+        // PostScript → footerLength → Footer slice.
+        int64 lastPos = n - (int64) 1;
+        int64 pslen = (int64) (((int32) file[lastPos]) & 0xFF);
+        int64 psStart = n - (int64) 1 - pslen;
+        int8[] ps = OrcMetadata.slice(file, psStart, pslen);
+        ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
+        int64 footerLength = (int64) 0;
+        int32 pc = psIdx.fieldCount();
+        int32 i = 0;
+        while (i < pc) {
+            if (psIdx.fieldNumber(i) == 1) {
+                footerLength = ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            }
+            i = i + 1;
+        }
+        int64 footerStart = psStart - footerLength;
+        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+
+        // field 7 = repeated ColumnStatistics, in column-id order.
+        int32 statsSeen = 0;
+        int32 fc = fIdx.fieldCount();
+        i = 0;
+        while (i < fc) {
+            if (fIdx.fieldNumber(i) == 7) {
+                if (statsSeen == col) {
+                    int64 cvs = fIdx.valueStart(i);
+                    int64 cve = fIdx.valueEnd(i);
+                    int8[] cs = OrcMetadata.slice(footer, cvs, cve - cvs);
+                    ProtobufIndex csIdx = ProtobufIndex.build(cs, cve - cvs);
+                    int32 cc = csIdx.fieldCount();
+                    int32 j = 0;
+                    while (j < cc) {
+                        int32 fn = csIdx.fieldNumber(j);
+                        if (fn == 1) {
+                            st.numValues = ProtobufWire.decodeVarint(cs, csIdx.valueStart(j));
+                        } else if (fn == 2) {
+                            int64 ivs = csIdx.valueStart(j);
+                            int64 ive = csIdx.valueEnd(j);
+                            int8[] iv = OrcMetadata.slice(cs, ivs, ive - ivs);
+                            ProtobufIndex ivIdx = ProtobufIndex.build(iv, ive - ivs);
+                            int32 ic = ivIdx.fieldCount();
+                            int32 k = 0;
+                            while (k < ic) {
+                                int32 ifn = ivIdx.fieldNumber(k);
+                                if (ifn == 1) {
+                                    int64 rv = ProtobufWire.decodeVarint(iv, ivIdx.valueStart(k));
+                                    st.minValue = OrcColumnStats.zigzag(rv);
+                                    st.hasStats = true;
+                                } else if (ifn == 2) {
+                                    int64 rv = ProtobufWire.decodeVarint(iv, ivIdx.valueStart(k));
+                                    st.maxValue = OrcColumnStats.zigzag(rv);
+                                    st.hasStats = true;
+                                }
+                                k = k + 1;
+                            }
+                        }
+                        j = j + 1;
+                    }
+                }
+                statsSeen = statsSeen + 1;
+            }
+            i = i + 1;
+        }
+        return #st;
+    }
+}

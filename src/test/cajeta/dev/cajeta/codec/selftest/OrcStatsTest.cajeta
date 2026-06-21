@@ -1,0 +1,50 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.orc.OrcColumnStats;
+
+/**
+ * Phase 8.2 — ORC predicate pushdown. Reads the Footer `ColumnStatistics`
+ * (field 7) for a column and exposes min/max + `mightContainRange`. Golden
+ * values from the real pyarrow file (`x` = [5,10,15,20] → min 5, max 20),
+ * decoded via the Phase-2 protobuf reader (sint64 zigzag).
+ */
+public class OrcStatsTest {
+
+    public OrcStatsTest() {
+        return;
+    }
+
+    @Test
+    public void readsIntMinMax() {
+        int8[] f = OrcMetadataTest.simpleOrc();
+        OrcColumnStats s = OrcColumnStats.forColumn(f, (int64) f.count(), 1);
+        Assert.that(s.hasStats).isTrue();
+        Assert.that(s.minValue).isEqualTo((int64) 5);
+        Assert.that(s.maxValue).isEqualTo((int64) 20);
+        Assert.that(s.numValues).isEqualTo((int64) 4);
+        return;
+    }
+
+    @Test
+    public void pushdownSkipsAndKeeps() {
+        int8[] f = OrcMetadataTest.simpleOrc();
+        OrcColumnStats s = OrcColumnStats.forColumn(f, (int64) f.count(), 1);
+        // [5,20] overlaps [0,7] and [10,15] → keep; disjoint → skip.
+        Assert.that(s.mightContainRange((int64) 0, (int64) 7)).isTrue();
+        Assert.that(s.mightContainRange((int64) 10, (int64) 15)).isTrue();
+        Assert.that(s.mightContainRange((int64) 100, (int64) 200)).isFalse();
+        Assert.that(s.mightContainRange((int64) 25, (int64) 30)).isFalse();
+        return;
+    }
+
+    @Test
+    public void noStatsKeepsAll() {
+        // The root struct column (0) carries no integer stats → conservative keep.
+        int8[] f = OrcMetadataTest.simpleOrc();
+        OrcColumnStats s = OrcColumnStats.forColumn(f, (int64) f.count(), 0);
+        Assert.that(s.hasStats).isFalse();
+        Assert.that(s.mightContainRange((int64) 100, (int64) 200)).isTrue();
+        return;
+    }
+}

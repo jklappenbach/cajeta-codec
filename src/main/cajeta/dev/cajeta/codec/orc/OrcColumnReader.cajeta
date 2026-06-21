@@ -111,4 +111,113 @@ public final class OrcColumnReader {
         }
         return OrcRleV2.decodeSum(file, dataOffset, (int32) numRows);
     }
+
+    /**
+     * Projection by name (Phase 8.2). Resolves a top-level struct field name to
+     * its ORC column id via the root `Type` (first Footer `type`, field 4): its
+     * `fieldNames` (field 3) are matched in order, and the matched ordinal indexes
+     * the packed `subtypes` (field 2) for the column id. Returns -1 if absent.
+     */
+    public static int32 columnIdByName(int8[] file, int64 n, String name) {
+        int8[] nb = name.bytes;
+        int32 nameLen = (int32) nb.count();
+
+        int64 lastPos = n - (int64) 1;
+        int64 pslen = (int64) (((int32) file[lastPos]) & 0xFF);
+        int64 psStart = n - (int64) 1 - pslen;
+        int8[] ps = OrcMetadata.slice(file, psStart, pslen);
+        ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
+        int64 footerLength = (int64) 0;
+        int32 pc = psIdx.fieldCount();
+        int32 i = 0;
+        while (i < pc) {
+            if (psIdx.fieldNumber(i) == 1) {
+                footerLength = ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            }
+            i = i + 1;
+        }
+        int64 footerStart = psStart - footerLength;
+        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+
+        // First field 4 = root Type (column 0, the struct).
+        int64 rootVs = (int64) 0 - (int64) 1;
+        int64 rootVe = (int64) 0;
+        int32 fc = fIdx.fieldCount();
+        i = 0;
+        while (i < fc) {
+            if (fIdx.fieldNumber(i) == 4) {
+                if (rootVs < (int64) 0) {
+                    rootVs = fIdx.valueStart(i);
+                    rootVe = fIdx.valueEnd(i);
+                }
+            }
+            i = i + 1;
+        }
+        if (rootVs < (int64) 0) { return (int32) 0 - 1; }
+        int8[] rt = OrcMetadata.slice(footer, rootVs, rootVe - rootVs);
+        ProtobufIndex rtIdx = ProtobufIndex.build(rt, rootVe - rootVs);
+
+        // Match the name's ordinal among fieldNames; capture the subtypes blob.
+        int32 matchK = (int32) 0 - 1;
+        int32 nameOrd = 0;
+        int64 subVs = (int64) 0 - (int64) 1;
+        int32 rc = rtIdx.fieldCount();
+        i = 0;
+        while (i < rc) {
+            int32 fn = rtIdx.fieldNumber(i);
+            if (fn == 3) {
+                int64 vs = rtIdx.valueStart(i);
+                int64 ve = rtIdx.valueEnd(i);
+                if ((ve - vs) == (int64) nameLen) {
+                    boolean eq = true;
+                    int32 t = 0;
+                    while (t < nameLen) {
+                        int64 ri = vs + (int64) t;
+                        int8 a = rt[ri];
+                        int8 bv = nb[t];
+                        if (a != bv) { eq = false; }
+                        t = t + 1;
+                    }
+                    if (eq) { matchK = nameOrd; }
+                }
+                nameOrd = nameOrd + 1;
+            } else if (fn == 2) {
+                if (subVs < (int64) 0) { subVs = rtIdx.valueStart(i); }
+            }
+            i = i + 1;
+        }
+        if (matchK < 0) { return (int32) 0 - 1; }
+        if (subVs < (int64) 0) { return matchK + 1; }   // flat fallback
+
+        // Read the matchK-th varint from the packed subtypes blob.
+        int64 p = subVs;
+        int32 idx = 0;
+        int64 colId = (int64) 0;
+        while (idx <= matchK) {
+            int64 r = (int64) 0;
+            int32 shift = 0;
+            boolean go = true;
+            while (go) {
+                int32 bb = ((int32) rt[p]) & 0xFF;
+                p = p + 1;
+                int64 chunk = (int64) (bb & 0x7F);
+                r = r | (chunk << shift);
+                if ((bb & 0x80) == 0) { go = false; }
+                shift = shift + 7;
+            }
+            colId = r;
+            idx = idx + 1;
+        }
+        return (int32) colId;
+    }
+
+    /** Projection convenience: resolve `name` then sum that column. */
+    public static int64 int32ColumnSumByName(int8[] file, int64 n, String name) {
+        int32 col = OrcColumnReader.columnIdByName(file, n, name);
+        if (col < 0) {
+            throw heap OrcParseException("no such column", (int64) 0);
+        }
+        return OrcColumnReader.int32ColumnSum(file, n, col);
+    }
 }

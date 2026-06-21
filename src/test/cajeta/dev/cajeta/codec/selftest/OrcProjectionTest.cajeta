@@ -1,0 +1,40 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.orc.OrcColumnReader;
+
+/**
+ * Phase 8.2 — ORC projection by name. Resolves a struct field name to its
+ * column id via the root `Type` (fieldNames/subtypes), then reads only that
+ * column's DATA stream. Real pyarrow file: field `x` → column 1 → [5,10,15,20].
+ */
+public class OrcProjectionTest {
+
+    public OrcProjectionTest() {
+        return;
+    }
+
+    @Test
+    public void resolvesNameToColumnId() {
+        int8[] f = OrcMetadataTest.simpleOrc();
+        int32 col = OrcColumnReader.columnIdByName(f, (int64) f.count(), "x");
+        Assert.that((int64) col).isEqualTo((int64) 1);
+        return;
+    }
+
+    @Test
+    public void unknownNameIsMinusOne() {
+        int8[] f = OrcMetadataTest.simpleOrc();
+        int32 col = OrcColumnReader.columnIdByName(f, (int64) f.count(), "missing");
+        Assert.that((int64) col).isEqualTo((int64) 0 - (int64) 1);
+        return;
+    }
+
+    @Test
+    public void readsProjectedColumnByName() {
+        int8[] f = OrcMetadataTest.simpleOrc();
+        int64 sum = OrcColumnReader.int32ColumnSumByName(f, (int64) f.count(), "x");
+        Assert.that(sum).isEqualTo((int64) 50);
+        return;
+    }
+}
