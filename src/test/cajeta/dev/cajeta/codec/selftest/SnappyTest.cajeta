@@ -1,0 +1,85 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.compress.Snappy;
+import cajeta.lang.String;
+
+/**
+ * Phase 4.1a — Snappy decompression, against hand-encoded golden blobs from the
+ * Snappy format (uncompressed-length varint + literal/copy elements). Covers a
+ * pure literal, a back-reference copy, an overlapping run, and the extended
+ * (60–63) literal-length form.
+ */
+public class SnappyTest {
+
+    public SnappyTest() {
+        return;
+    }
+
+    @Test
+    public void decompressesPureLiteral() {
+        // "hello": varint(5)=05, literal tag (len-1=4)=0x10, then 'hello'.
+        int8[] blob = {
+            (int8) 0x05, (int8) 0x10,
+            (int8) 0x68, (int8) 0x65, (int8) 0x6C, (int8) 0x6C, (int8) 0x6F
+        };
+        int8[] out = Snappy.decompress(blob, (int64) blob.count());
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals("hello"));
+        return;
+    }
+
+    @Test
+    public void decompressesBackReference() {
+        // "abcabc": varint(6)=06, literal "abc" (tag 0x08), copy offset 3 len 3
+        // (copy-2 tag 0x0A, offset 03 00).
+        int8[] blob = {
+            (int8) 0x06,
+            (int8) 0x08, (int8) 0x61, (int8) 0x62, (int8) 0x63,
+            (int8) 0x0A, (int8) 0x03, (int8) 0x00
+        };
+        int8[] out = Snappy.decompress(blob, (int64) blob.count());
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals("abcabc"));
+        return;
+    }
+
+    @Test
+    public void decompressesOverlappingRun() {
+        // "aaaa": varint(4)=04, literal 'a' (tag 0x00), copy offset 1 len 3
+        // (copy-2 tag 0x0A, offset 01 00) — overlapping byte-by-byte run.
+        int8[] blob = {
+            (int8) 0x04,
+            (int8) 0x00, (int8) 0x61,
+            (int8) 0x0A, (int8) 0x01, (int8) 0x00
+        };
+        int8[] out = Snappy.decompress(blob, (int64) blob.count());
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals("aaaa"));
+        return;
+    }
+
+    @Test
+    public void decompressesExtendedLiteralLength() {
+        // 70-byte literal: varint(70)=0x46, literal tag L=60 (0xF0) + 1 extra
+        // byte (len-1=69=0x45), then 70 bytes 'A'+(i%26).
+        int8[] blob = heap int8[73];
+        blob[0] = (int8) 0x46;
+        blob[1] = (int8) 0xF0;
+        blob[2] = (int8) 0x45;
+        int32 i = 0;
+        while (i < 70) {
+            int32 v = 0x41 + (i % 26);
+            int32 at = 3 + i;
+            blob[at] = (int8) v;
+            i = i + 1;
+        }
+        int8[] out = Snappy.decompress(blob, (int64) 73);
+        Assert.that((int64) out.count()).isEqualTo((int64) 70);
+        int8 c0 = out[0];
+        Assert.that((int64) (((int32) c0) & 0xFF)).isEqualTo((int64) 0x41);
+        int8 c69 = out[69];
+        Assert.that((int64) (((int32) c69) & 0xFF)).isEqualTo((int64) 0x52);
+        return;
+    }
+}

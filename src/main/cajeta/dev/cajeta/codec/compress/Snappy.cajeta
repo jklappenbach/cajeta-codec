@@ -1,0 +1,131 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * Snappy block-format codec (Phase 4.1), our own implementation — a prerequisite
+ * for the Avro/Parquet/ORC column codecs. A Snappy block is an uncompressed-
+ * length **varint** (little-endian base-128) followed by a sequence of elements:
+ * a **literal** (tag low 2 bits = 00; upper 6 bits are length-1, or 60–63 select
+ * 1–4 trailing little-endian length bytes) copies bytes straight through; a
+ * **copy** (low 2 bits 01/10/11 for a 1/2/4-byte offset) is an LZ77 back-
+ * reference into the already-produced output, byte-by-byte so overlapping runs
+ * work.
+ *
+ * Index/compute layout follows the codec gotchas: every compound array index is
+ * hoisted to a named local before the access.
+ */
+public final class Snappy {
+
+    // Little-endian unsigned integer over `n` bytes at `pos`.
+    static int64 readLE(int8[] b, int64 pos, int64 n) {
+        int64 r = (int64) 0;
+        int64 i = (int64) 0;
+        while (i < n) {
+            int64 at = pos + i;
+            int64 bv = (int64) (((int32) b[at]) & 0xFF);
+            int64 shift = i * (int64) 8;
+            r = r | (bv << shift);
+            i = i + 1;
+        }
+        return r;
+    }
+
+    // Byte length of the varint at `pos` (low 7 bits per byte, 0x80 continues).
+    static int64 varintLen(int8[] b, int64 pos) {
+        int64 i = pos;
+        boolean go = true;
+        while (go) {
+            int8 c = b[i];
+            i = i + 1;
+            if ((((int32) c) & 0x80) == 0) { go = false; }
+        }
+        return i - pos;
+    }
+
+    // Decode the little-endian base-128 varint at `pos`.
+    static int64 decodeVarint(int8[] b, int64 pos) {
+        int64 r = (int64) 0;
+        int32 shift = 0;
+        int64 i = pos;
+        boolean go = true;
+        while (go) {
+            int8 c = b[i];
+            int64 lo7 = (int64) (((int32) c) & 0x7F);
+            r = r | (lo7 << shift);
+            shift = shift + 7;
+            i = i + 1;
+            if ((((int32) c) & 0x80) == 0) { go = false; }
+        }
+        return r;
+    }
+
+    /** Uncompressed byte length recorded in the block header. */
+    public static int64 uncompressedLength(int8[] src, int64 n) {
+        return Snappy.decodeVarint(src, (int64) 0);
+    }
+
+    /** Decompress a Snappy block (first `n` bytes of `src`); caller owns result. */
+    public static #int8[] decompress(int8[] src, int64 n) {
+        int64 ulen = Snappy.decodeVarint(src, (int64) 0);
+        int64 hlen = Snappy.varintLen(src, (int64) 0);
+        int8[] out = heap int8[ulen];
+        int64 op = (int64) 0;
+        int64 ip = hlen;
+
+        while (ip < n) {
+            int32 tag = ((int32) src[ip]) & 0xFF;
+            int32 t = tag & 0x03;
+            if (t == 0) {
+                int32 litField = tag >> 2;
+                ip = ip + 1;
+                int64 len;
+                if (litField < 60) {
+                    len = (int64) litField + 1;
+                } else {
+                    int64 extra = (int64) litField - (int64) 59;
+                    len = Snappy.readLE(src, ip, extra) + 1;
+                    ip = ip + extra;
+                }
+                int64 k = (int64) 0;
+                while (k < len) {
+                    int64 si = ip + k;
+                    int64 di = op + k;
+                    out[di] = src[si];
+                    k = k + 1;
+                }
+                ip = ip + len;
+                op = op + len;
+            } else {
+                int64 len;
+                int64 offset;
+                if (t == 1) {
+                    len = (int64) ((tag >> 2) & 0x07) + (int64) 4;
+                    int32 offHigh = (tag >> 5) & 0x07;
+                    int64 ip1 = ip + 1;
+                    int32 offLow = ((int32) src[ip1]) & 0xFF;
+                    offset = (int64) ((offHigh << 8) | offLow);
+                    ip = ip + 2;
+                } else if (t == 2) {
+                    len = (int64) (tag >> 2) + 1;
+                    int64 ip1 = ip + 1;
+                    offset = Snappy.readLE(src, ip1, (int64) 2);
+                    ip = ip + 3;
+                } else {
+                    len = (int64) (tag >> 2) + 1;
+                    int64 ip1 = ip + 1;
+                    offset = Snappy.readLE(src, ip1, (int64) 4);
+                    ip = ip + 5;
+                }
+                int64 from = op - offset;
+                int64 k = (int64) 0;
+                while (k < len) {
+                    int8 v = out[from];
+                    out[op] = v;
+                    op = op + 1;
+                    from = from + 1;
+                    k = k + 1;
+                }
+            }
+        }
+        return out;
+    }
+}
