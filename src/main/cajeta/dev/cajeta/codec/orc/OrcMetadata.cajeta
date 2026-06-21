@@ -1,0 +1,98 @@
+package dev.cajeta.codec.orc;
+
+import dev.cajeta.codec.protobuf.ProtobufIndex;
+import dev.cajeta.codec.protobuf.ProtobufWire;
+
+/**
+ * ORC file metadata (Phase 8.1a) — scalar-only so the `#`-moved return is sound.
+ * ORC ends with a one-byte PostScript length; the PostScript (protobuf) carries
+ * `footerLength` + `compression`; the Footer (protobuf, just before it) carries
+ * `numberOfRows`, the stripe list, and the type list. Parsed by reusing the
+ * Phase-2 `ProtobufIndex`. v1 assumes an uncompressed (NONE) footer; compressed
+ * footers (ZLIB/SNAPPY block headers) are a follow-up.
+ *
+ * `typeCount` includes the root struct (data columns = typeCount - 1).
+ */
+public final class OrcMetadata {
+    public int64 numberOfRows;
+    public int32 compression;           // 0=NONE,1=ZLIB,2=SNAPPY,3=LZO,4=LZ4,5=ZSTD
+    public int32 stripeCount;
+    public int32 typeCount;
+    public int64 footerLength;
+
+    public OrcMetadata() {
+        this.numberOfRows = (int64) 0;
+        this.compression = 0;
+        this.stripeCount = 0;
+        this.typeCount = 0;
+        this.footerLength = (int64) 0;
+    }
+
+    static #int8[] slice(int8[] b, int64 start, int64 len) {
+        int8[] out = heap int8[len];
+        int64 k = (int64) 0;
+        while (k < len) {
+            int64 si = start + k;
+            out[k] = b[si];
+            k = k + 1;
+        }
+        return out;
+    }
+
+    public static #OrcMetadata parse(int8[] file, int64 n) {
+        int32 m0 = ((int32) file[0]) & 0xFF;
+        int32 m1 = ((int32) file[1]) & 0xFF;
+        int32 m2 = ((int32) file[2]) & 0xFF;
+        if (m0 != 0x4F || m1 != 0x52 || m2 != 0x43) {
+            throw heap OrcParseException("bad ORC head magic", (int64) 0);
+        }
+        OrcMetadata meta = heap OrcMetadata();
+
+        int64 lastPos = n - (int64) 1;
+        int64 pslen = (int64) (((int32) file[lastPos]) & 0xFF);
+        int64 psStart = n - (int64) 1 - pslen;
+        int8[] ps = OrcMetadata.slice(file, psStart, pslen);
+        ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
+
+        int64 footerLength = (int64) 0;
+        int32 compression = 0;
+        int32 pc = psIdx.fieldCount();
+        int32 i = 0;
+        while (i < pc) {
+            int32 fn = psIdx.fieldNumber(i);
+            if (fn == 1) {
+                footerLength = ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            } else if (fn == 2) {
+                compression = (int32) ProtobufWire.decodeVarint(ps, psIdx.valueStart(i));
+            }
+            i = i + 1;
+        }
+        meta.footerLength = footerLength;
+        meta.compression = compression;
+
+        int64 footerStart = psStart - footerLength;
+        int8[] footer = OrcMetadata.slice(file, footerStart, footerLength);
+        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerLength);
+
+        int64 numRows = (int64) 0;
+        int32 stripeCount = 0;
+        int32 typeCount = 0;
+        int32 fc = fIdx.fieldCount();
+        i = 0;
+        while (i < fc) {
+            int32 fn = fIdx.fieldNumber(i);
+            if (fn == 6) {
+                numRows = ProtobufWire.decodeVarint(footer, fIdx.valueStart(i));
+            } else if (fn == 3) {
+                stripeCount = stripeCount + 1;
+            } else if (fn == 4) {
+                typeCount = typeCount + 1;
+            }
+            i = i + 1;
+        }
+        meta.numberOfRows = numRows;
+        meta.stripeCount = stripeCount;
+        meta.typeCount = typeCount;
+        return #meta;
+    }
+}

@@ -1,0 +1,18 @@
+package dev.cajeta.codec.orc;
+
+import cajeta.error.RecoverableException;
+
+/**
+ * Thrown when an ORC file cannot be parsed — a bad `ORC` magic, a malformed
+ * protobuf PostScript/Footer, or an unsupported stream/encoding. `position` is the
+ * byte offset (0-based) where the problem was noticed.
+ */
+public class OrcParseException extends RecoverableException {
+    public int64 position;
+
+    public OrcParseException(String message, int64 position) {
+        this.message = message;
+        this.cause = 0;
+        this.position = position;
+    }
+}
