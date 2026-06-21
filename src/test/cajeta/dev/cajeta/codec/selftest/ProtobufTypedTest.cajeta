@@ -71,6 +71,38 @@ public class ProtobufTypedTest {
         return;
     }
 
+    // Encode one ProtoScalarMsg with id=`id`, count=`count` and return its bytes.
+    static #int8[] encodeScalar(int64 id, int64 count) {
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(1, id);
+        w.writeVarintField(4, count);
+        return w.toBytes();
+    }
+
+    @Test
+    public void decodesDelimitedStream() {
+        // Three length-delimited messages → Protobuf.parse<ProtoScalarMsg[]>.
+        ProtobufWriter s = heap ProtobufWriter();
+        int8[] m0 = ProtobufTypedTest.encodeScalar((int64) 10, (int64) 1);
+        s.writeDelimited(m0, (int32) m0.count());
+        int8[] m1 = ProtobufTypedTest.encodeScalar((int64) 20, (int64) 2);
+        s.writeDelimited(m1, (int32) m1.count());
+        int8[] m2 = ProtobufTypedTest.encodeScalar((int64) 30, (int64) 3);
+        s.writeDelimited(m2, (int32) m2.count());
+        int8[] bytes = s.toBytes();
+
+        ProtoScalarMsg[] msgs = Protobuf.parse<ProtoScalarMsg[]>(
+            bytes, (int64) bytes.count());
+
+        Assert.that((int64) msgs.count()).isEqualTo((int64) 3);
+        Assert.that(msgs[0].id).isEqualTo((int64) 10);
+        Assert.that(msgs[1].id).isEqualTo((int64) 20);
+        Assert.that(msgs[2].id).isEqualTo((int64) 30);
+        Assert.that((int64) msgs[0].count).isEqualTo((int64) 1);
+        Assert.that((int64) msgs[2].count).isEqualTo((int64) 3);
+        return;
+    }
+
     @Test
     public void absentFieldsKeepConstructorDefaults() {
         // Only field 4 present — the rest stay at the ctor defaults (0 / false /
