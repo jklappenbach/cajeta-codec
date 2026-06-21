@@ -1,0 +1,18 @@
+package dev.cajeta.codec.selftest;
+
+import cajeta.lang.String;
+
+/**
+ * Phase 5.1c test fixture — an Avro record `{ id: long, name: string }`. Avro is
+ * positional, so field **declaration order** must match the Avro schema's field
+ * order; `Avro.parse<AvroRec>` reads `id` then `name`.
+ */
+public class AvroRec {
+    public int64 id;
+    public String name;
+
+    public AvroRec() {
+        this.id = (int64) 0;
+        this.name = null;
+    }
+}

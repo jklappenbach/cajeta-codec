@@ -1,0 +1,70 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.avro.AvroContainer;
+import dev.cajeta.codec.avro.AvroCursor;
+import cajeta.lang.String;
+
+/**
+ * Phase 5.1b — Avro Object Container File header + block framing. The hand-built
+ * fixture is a `null`-codec file: magic, a metadata map
+ * (`avro.schema`="X", `avro.codec`="null"), a 16-byte sync, then one data block
+ * holding a single record `{ id: 42 (long), name: "hi" (string) }`.
+ */
+public class AvroContainerTest {
+
+    public AvroContainerTest() {
+        return;
+    }
+
+    static #int8[] fixture() {
+        int8[] b = {
+            (int8) 0x4F, (int8) 0x62, (int8) 0x6A, (int8) 0x01,
+            (int8) 0x04,
+            (int8) 0x16, (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F,
+            (int8) 0x2E, (int8) 0x73, (int8) 0x63, (int8) 0x68, (int8) 0x65,
+            (int8) 0x6D, (int8) 0x61,
+            (int8) 0x02, (int8) 0x58,
+            (int8) 0x14, (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F,
+            (int8) 0x2E, (int8) 0x63, (int8) 0x6F, (int8) 0x64, (int8) 0x65,
+            (int8) 0x63,
+            (int8) 0x08, (int8) 0x6E, (int8) 0x75, (int8) 0x6C, (int8) 0x6C,
+            (int8) 0x00,
+            (int8) 0x00, (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04,
+            (int8) 0x05, (int8) 0x06, (int8) 0x07, (int8) 0x08, (int8) 0x09,
+            (int8) 0x0A, (int8) 0x0B, (int8) 0x0C, (int8) 0x0D, (int8) 0x0E,
+            (int8) 0x0F,
+            (int8) 0x02, (int8) 0x08,
+            (int8) 0x54, (int8) 0x04, (int8) 0x68, (int8) 0x69,
+            (int8) 0x00, (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04,
+            (int8) 0x05, (int8) 0x06, (int8) 0x07, (int8) 0x08, (int8) 0x09,
+            (int8) 0x0A, (int8) 0x0B, (int8) 0x0C, (int8) 0x0D, (int8) 0x0E,
+            (int8) 0x0F
+        };
+        return b;
+    }
+
+    @Test
+    public void parsesHeaderAndCodec() {
+        int8[] b = AvroContainerTest.fixture();
+        AvroContainer ct = heap AvroContainer(b, (int64) b.count());
+        Assert.isTrue(ct.codec().equals("null"));
+        return;
+    }
+
+    @Test
+    public void iteratesBlockAndDecodesRecord() {
+        int8[] b = AvroContainerTest.fixture();
+        AvroContainer ct = heap AvroContainer(b, (int64) b.count());
+        Assert.isTrue(ct.nextBlock());
+        Assert.that(ct.currentObjectCount()).isEqualTo((int64) 1);
+
+        int8[] data = ct.currentData();
+        AvroCursor rc = heap AvroCursor(data, (int64) 0);
+        Assert.that(rc.readLong()).isEqualTo((int64) 42);
+        Assert.isTrue(rc.readString().equals("hi"));
+
+        Assert.isFalse(ct.nextBlock());
+        return;
+    }
+}

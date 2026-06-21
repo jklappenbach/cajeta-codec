@@ -1,0 +1,59 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.avro.Avro;
+import cajeta.lang.String;
+
+/**
+ * Phase 5.1c — Avro typed decode (`Avro.parse<T>` positional). A single datum
+ * `{ id: 42, name: "hi" }`, and the same record inside a null-codec Object
+ * Container File via `Avro.parse<T[]>`.
+ */
+public class AvroTypedTest {
+
+    public AvroTypedTest() {
+        return;
+    }
+
+    @Test
+    public void decodesSingleDatum() {
+        // id=42 (zigzag 0x54), name="hi" (len 0x04 + 'h','i').
+        int8[] b = { (int8) 0x54, (int8) 0x04, (int8) 0x68, (int8) 0x69 };
+        AvroRec r = Avro.parse<AvroRec>(b, (int64) b.count());
+        Assert.that(r.id).isEqualTo((int64) 42);
+        Assert.isTrue(r.name.equals("hi"));
+        return;
+    }
+
+    @Test
+    public void decodesContainerFile() {
+        int8[] b = {
+            (int8) 0x4F, (int8) 0x62, (int8) 0x6A, (int8) 0x01,
+            (int8) 0x04,
+            (int8) 0x16, (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F,
+            (int8) 0x2E, (int8) 0x73, (int8) 0x63, (int8) 0x68, (int8) 0x65,
+            (int8) 0x6D, (int8) 0x61,
+            (int8) 0x02, (int8) 0x58,
+            (int8) 0x14, (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F,
+            (int8) 0x2E, (int8) 0x63, (int8) 0x6F, (int8) 0x64, (int8) 0x65,
+            (int8) 0x63,
+            (int8) 0x08, (int8) 0x6E, (int8) 0x75, (int8) 0x6C, (int8) 0x6C,
+            (int8) 0x00,
+            (int8) 0x00, (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04,
+            (int8) 0x05, (int8) 0x06, (int8) 0x07, (int8) 0x08, (int8) 0x09,
+            (int8) 0x0A, (int8) 0x0B, (int8) 0x0C, (int8) 0x0D, (int8) 0x0E,
+            (int8) 0x0F,
+            (int8) 0x02, (int8) 0x08,
+            (int8) 0x54, (int8) 0x04, (int8) 0x68, (int8) 0x69,
+            (int8) 0x00, (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04,
+            (int8) 0x05, (int8) 0x06, (int8) 0x07, (int8) 0x08, (int8) 0x09,
+            (int8) 0x0A, (int8) 0x0B, (int8) 0x0C, (int8) 0x0D, (int8) 0x0E,
+            (int8) 0x0F
+        };
+        AvroRec[] recs = Avro.parse<AvroRec[]>(b, (int64) b.count());
+        Assert.that((int64) recs.count()).isEqualTo((int64) 1);
+        Assert.that(recs[0].id).isEqualTo((int64) 42);
+        Assert.isTrue(recs[0].name.equals("hi"));
+        return;
+    }
+}
