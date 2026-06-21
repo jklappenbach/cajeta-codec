@@ -340,27 +340,142 @@ public final class Deflate {
         return r;
     }
 
+    // Emit one fixed-Huffman literal (0..255) to the bit writer.
+    static void emitLiteral(BitWriter bw, int32 b) {
+        int32 code = 0;
+        int32 len = 0;
+        if (b < 144) { code = 0x30 + b; len = 8; }
+        else { code = 0x190 + (b - 144); len = 9; }
+        bw.writeHuff(code, len);
+    }
+
     /**
      * Encode `src` (first `n` bytes) as a single fixed-Huffman DEFLATE block
-     * (BTYPE 01), literals only — no LZ77 matching yet (4.3b adds it). Real
-     * entropy coding: the 7/8/9-bit fixed literal codes already shrink most
-     * text. Validated by round-tripping our own decoder and python
-     * `zlib.decompress(-15)`. Caller owns the result.
+     * (BTYPE 01) with LZ77 back-references (RFC 1951). A 32 KB hash-chain match
+     * finder (hash of 3 bytes → chain of prior positions) finds the longest
+     * match (3..258 bytes, distance ≤32768); matches emit length/distance
+     * symbols + extra bits, the rest emit fixed literal codes. Validated by
+     * round-tripping our own decoder and python `zlib.decompress(-15)`. Caller
+     * owns the result.
      */
     public static #int8[] deflateFixed(int8[] src, int64 n) {
-        int64 cap = n + (n >> 2) + (int64) 16;
+        int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
+        int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
+        int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
+        int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+
+        int32 HASHSIZE = 32768;
+        int32 HASHMASK = 32767;
+        int32 WSIZE = 32768;
+        int32 WMASK = 32767;
+        int32 MAXCHAIN = 128;
+        int32 MINMATCH = 3;
+        int32 MAXMATCH = 258;
+
+        int32 nLen = (int32) n;
+        int32[] head = heap int32[HASHSIZE];
+        int32[] prev = heap int32[WSIZE];
+        int32 t = 0;
+        while (t < HASHSIZE) { head[t] = -1; t = t + 1; }
+        t = 0;
+        while (t < WSIZE) { prev[t] = -1; t = t + 1; }
+
+        int64 cap = n + (n >> 1) + (int64) 16;
         BitWriter bw = heap BitWriter(cap);
         bw.writeBits(1, 1);   // BFINAL = 1 (single block)
         bw.writeBits(1, 2);   // BTYPE  = 01 (fixed Huffman)
-        int64 i = (int64) 0;
-        while (i < n) {
-            int32 b = ((int32) src[i]) & 0xFF;   // hoist array element (4.2a gotcha)
-            int32 code = 0;
-            int32 len = 0;
-            if (b < 144) { code = 0x30 + b; len = 8; }
-            else { code = 0x190 + (b - 144); len = 9; }
-            bw.writeHuff(code, len);
-            i = i + 1;
+
+        int32 pos = 0;
+        while (pos < nLen) {
+            int32 bestLen = 0;
+            int32 bestDist = 0;
+
+            // Hash + match only when 3 bytes remain.
+            boolean canHash = (pos + MINMATCH) <= nLen;
+            int32 h = 0;
+            if (canHash) {
+                int32 i1 = pos + 1;
+                int32 i2 = pos + 2;
+                int32 c0 = ((int32) src[pos]) & 0xFF;
+                int32 c1 = ((int32) src[i1]) & 0xFF;
+                int32 c2 = ((int32) src[i2]) & 0xFF;
+                h = ((c0 << 10) ^ (c1 << 5) ^ c2) & HASHMASK;
+                int32 cand = head[h];
+                int32 depth = 0;
+                while (cand >= 0 && depth < MAXCHAIN) {
+                    int32 dist = pos - cand;
+                    if (dist > WSIZE) { depth = MAXCHAIN; }
+                    else {
+                        int32 mlen = 0;
+                        boolean go = true;
+                        while (go) {
+                            if (mlen >= MAXMATCH) { go = false; }
+                            else {
+                                int32 pp = pos + mlen;
+                                if (pp >= nLen) { go = false; }
+                                else {
+                                    int32 cc = cand + mlen;
+                                    int32 a = ((int32) src[pp]) & 0xFF;
+                                    int32 b = ((int32) src[cc]) & 0xFF;
+                                    if (a != b) { go = false; }
+                                    else { mlen = mlen + 1; }
+                                }
+                            }
+                        }
+                        if (mlen > bestLen) { bestLen = mlen; bestDist = dist; }
+                        int32 slot = cand & WMASK;
+                        cand = prev[slot];
+                        depth = depth + 1;
+                    }
+                }
+                // Insert current position into the chain.
+                int32 cs = pos & WMASK;
+                prev[cs] = head[h];
+                head[h] = pos;
+            }
+
+            if (bestLen >= MINMATCH) {
+                // length symbol
+                int32 li = 28;
+                while (li > 0 && lengthBase[li] > bestLen) { li = li - 1; }
+                int32 lsym = 257 + li;
+                int32 lbase = lengthBase[li];
+                int32 lebits = lengthExtra[li];
+                int32 lextra = bestLen - lbase;
+                if (lsym <= 279) { bw.writeHuff(lsym - 256, 7); }
+                else { bw.writeHuff(0xC0 + (lsym - 280), 8); }
+                if (lebits > 0) { bw.writeBits(lextra, lebits); }
+                // distance symbol
+                int32 di = 29;
+                while (di > 0 && distBase[di] > bestDist) { di = di - 1; }
+                int32 dbase = distBase[di];
+                int32 debits = distExtra[di];
+                int32 dextra = bestDist - dbase;
+                bw.writeHuff(di, 5);
+                if (debits > 0) { bw.writeBits(dextra, debits); }
+                // Insert the interior positions of the match into the chain.
+                int32 end = pos + bestLen;
+                int32 q = pos + 1;
+                while (q < end) {
+                    if ((q + MINMATCH) <= nLen) {
+                        int32 q1 = q + 1;
+                        int32 q2 = q + 2;
+                        int32 d0 = ((int32) src[q]) & 0xFF;
+                        int32 d1 = ((int32) src[q1]) & 0xFF;
+                        int32 d2 = ((int32) src[q2]) & 0xFF;
+                        int32 hq = ((d0 << 10) ^ (d1 << 5) ^ d2) & HASHMASK;
+                        int32 qs = q & WMASK;
+                        prev[qs] = head[hq];
+                        head[hq] = q;
+                    }
+                    q = q + 1;
+                }
+                pos = end;
+            } else {
+                int32 lit = ((int32) src[pos]) & 0xFF;
+                Deflate.emitLiteral(bw, lit);
+                pos = pos + 1;
+            }
         }
         bw.writeHuff(0, 7);   // end-of-block symbol 256 (7-bit code 0)
         bw.flushByte();

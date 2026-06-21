@@ -6,7 +6,7 @@ import cajeta.io.file.FileWriter;
 import cajeta.io.file.OpenMode;
 import cajeta.lang.String;
 
-/** Emits /tmp/our_fixed.deflate (fixed-Huffman) for the python zlib(-15) check. */
+/** Emits /tmp/our_fixed.deflate (fixed-Huffman + LZ77) for the python zlib(-15) check. */
 public final class DeflateFixedMain {
     public static int32 run() {
         String text = "the quick brown fox jumps over the lazy dog. " +
