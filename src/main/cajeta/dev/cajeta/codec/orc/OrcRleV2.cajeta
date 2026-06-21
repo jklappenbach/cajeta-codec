@@ -1,0 +1,182 @@
+package dev.cajeta.codec.orc;
+
+/**
+ * ORC integer **RLE v2** decoder (Phase 8.1b/8.3) — the dominant ORC integer
+ * encoding. A stateful cursor over the stream; each run's first byte's top 2 bits
+ * select the sub-encoding:
+ *   - 0 SHORT_REPEAT — a value (1..8 big-endian bytes) repeated 3..10 times;
+ *   - 1 DIRECT — `runLen` fixed-width values, **MSB-first** bit-packed;
+ *   - 2 PATCHED_BASE — base + patched bit-packing (fail loud in v1);
+ *   - 3 DELTA — base + delta-base + monotonic deltas (fixed or bit-packed).
+ * Signed values are zigzag-decoded. ORC bit-packing is MSB-first (opposite of the
+ * Parquet/columnar LSB-first `BitPack`). `decodeInto` fills a buffer in-library;
+ * `decodeSum` returns a scalar (int64[]-return into the test exe miscompiles —
+ * see [[int64-array-return-test-exe-miscompile]]).
+ */
+public final class OrcRleV2 {
+    int8[] src;
+    int64 bp;
+
+    public OrcRleV2(int8[] src, int64 off) {
+        this.src = src;
+        this.bp = off;
+    }
+
+    int32 readByte() {
+        int32 v = ((int32) this.src[this.bp]) & 0xFF;
+        this.bp = this.bp + 1;
+        return v;
+    }
+
+    // Unsigned base-128 varint (LSB-first).
+    int64 readVarint() {
+        int64 r = (int64) 0;
+        int32 shift = 0;
+        boolean go = true;
+        while (go) {
+            int32 b = this.readByte();
+            int64 chunk = (int64) (b & 0x7F);
+            r = r | (chunk << shift);
+            if ((b & 0x80) == 0) { go = false; }
+            shift = shift + 7;
+        }
+        return r;
+    }
+
+    int64 readZigZag() {
+        int64 v = this.readVarint();
+        int64 logical = (v >> 1) & (int64) 0x7FFFFFFFFFFFFFFF;
+        return logical ^ ((int64) 0 - (v & (int64) 1));
+    }
+
+    // ORC encoded-width (5 bits) → actual bit width.
+    static int32 decodeWidth(int32 nv) {
+        if (nv <= 23) { return nv + 1; }
+        if (nv == 24) { return 26; }
+        if (nv == 25) { return 28; }
+        if (nv == 26) { return 30; }
+        if (nv == 27) { return 32; }
+        if (nv == 28) { return 40; }
+        if (nv == 29) { return 48; }
+        if (nv == 30) { return 56; }
+        return 64;
+    }
+
+    // Read `n` unsigned width-bit values MSB-first into out[start..]; advances bp
+    // to the next byte boundary.
+    void readBitsInto(int64[] out, int32 start, int32 n, int32 width) {
+        int64 bitpos = this.bp * (int64) 8;
+        int32 i = 0;
+        while (i < n) {
+            int64 v = (int64) 0;
+            int32 b = 0;
+            while (b < width) {
+                int64 byteIdx = bitpos >> 3;
+                int32 bitIdx = 7 - (int32) (bitpos & (int64) 7);
+                int32 bit = (((int32) this.src[byteIdx]) >> bitIdx) & 1;
+                v = (v << 1) | (int64) bit;
+                bitpos = bitpos + 1;
+                b = b + 1;
+            }
+            out[start + i] = v;
+            i = i + 1;
+        }
+        this.bp = (bitpos + (int64) 7) >> 3;
+    }
+
+    /** Decode `count` signed integers into `out` (must hold `count`). */
+    public void decodeInto(int64[] out, int32 count) {
+        int32 produced = 0;
+        while (produced < count) {
+            int32 b0 = this.readByte();
+            int32 enc = (b0 >> 6) & 3;
+            if (enc == 0) {
+                // SHORT_REPEAT
+                int32 widthBytes = ((b0 >> 3) & 7) + 1;
+                int32 runLen = (b0 & 7) + 3;
+                int64 val = (int64) 0;
+                int32 k = 0;
+                while (k < widthBytes) {
+                    val = (val << 8) | (int64) this.readByte();
+                    k = k + 1;
+                }
+                int64 sval = ((val >> 1) & (int64) 0x7FFFFFFFFFFFFFFF)
+                    ^ ((int64) 0 - (val & (int64) 1));
+                int32 r = 0;
+                while (r < runLen) {
+                    out[produced] = sval;
+                    produced = produced + 1;
+                    r = r + 1;
+                }
+            } else if (enc == 1) {
+                // DIRECT
+                int32 encW = (b0 >> 1) & 0x1F;
+                int32 width = OrcRleV2.decodeWidth(encW);
+                int32 b1 = this.readByte();
+                int32 runLen = (((b0 & 1) << 8) | b1) + 1;
+                this.readBitsInto(out, produced, runLen, width);
+                int32 r = 0;
+                while (r < runLen) {
+                    int64 u = out[produced + r];
+                    out[produced + r] = ((u >> 1) & (int64) 0x7FFFFFFFFFFFFFFF)
+                        ^ ((int64) 0 - (u & (int64) 1));
+                    r = r + 1;
+                }
+                produced = produced + runLen;
+            } else if (enc == 3) {
+                // DELTA
+                int32 encW = (b0 >> 1) & 0x1F;
+                int32 b1 = this.readByte();
+                int32 runLen = (((b0 & 1) << 8) | b1) + 1;
+                int64 base = this.readZigZag();
+                int64 deltaBase = this.readZigZag();
+                out[produced] = base;
+                int32 start = produced;
+                produced = produced + 1;
+                if (runLen > 1) {
+                    int64 prev = base + deltaBase;
+                    out[produced] = prev;
+                    produced = produced + 1;
+                    int32 remaining = runLen - 2;
+                    if (encW == 0) {
+                        int32 r = 0;
+                        while (r < remaining) {
+                            prev = prev + deltaBase;
+                            out[produced] = prev;
+                            produced = produced + 1;
+                            r = r + 1;
+                        }
+                    } else {
+                        int32 width = OrcRleV2.decodeWidth(encW);
+                        int64[] deltas = heap int64[remaining];
+                        this.readBitsInto(deltas, 0, remaining, width);
+                        boolean inc = deltaBase >= (int64) 0;
+                        int32 r = 0;
+                        while (r < remaining) {
+                            int64 d = deltas[r];
+                            if (inc) { prev = prev + d; } else { prev = prev - d; }
+                            out[produced] = prev;
+                            produced = produced + 1;
+                            r = r + 1;
+                        }
+                    }
+                }
+                int32 unused = start;
+            } else {
+                throw heap OrcParseException(
+                    "ORC RLE v2 PATCHED_BASE unsupported (v1)", this.bp);
+            }
+        }
+    }
+
+    /** Sum `count` decoded integers (scalar — sidesteps int64[]-return-to-test). */
+    public static int64 decodeSum(int8[] src, int64 off, int32 count) {
+        OrcRleV2 cur = heap OrcRleV2(src, off);
+        int64[] out = heap int64[count];
+        cur.decodeInto(out, count);
+        int64 sum = (int64) 0;
+        int32 i = 0;
+        while (i < count) { sum = sum + out[i]; i = i + 1; }
+        return sum;
+    }
+}

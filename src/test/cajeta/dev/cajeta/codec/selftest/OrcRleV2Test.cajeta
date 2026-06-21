@@ -1,0 +1,49 @@
+package dev.cajeta.codec.selftest;
+
+import org.cajeta.unit.Assert;
+import dev.cajeta.codec.orc.OrcRleV2;
+
+/**
+ * Phase 8.1b/8.3 — ORC integer RLE v2 decode. Hand-encoded (spec) vectors for
+ * SHORT_REPEAT, DIRECT, and DELTA (fixed + bit-packed). Validated by the decoded
+ * sum (returning int64[] to the test exe miscompiles); each vector was
+ * cross-checked against a python reference decoder.
+ */
+public class OrcRleV2Test {
+
+    public OrcRleV2Test() {
+        return;
+    }
+
+    @Test
+    public void shortRepeat() {
+        // [7,7,7,7,7]
+        int8[] b = { (int8) 0x02, (int8) 0x0E };
+        Assert.that(OrcRleV2.decodeSum(b, (int64) 0, 5)).isEqualTo((int64) 35);
+        return;
+    }
+
+    @Test
+    public void deltaFixed() {
+        // [5,10,15,20]
+        int8[] b = { (int8) 0xC0, (int8) 0x03, (int8) 0x0A, (int8) 0x0A };
+        Assert.that(OrcRleV2.decodeSum(b, (int64) 0, 4)).isEqualTo((int64) 50);
+        return;
+    }
+
+    @Test
+    public void deltaBitPacked() {
+        // [1,2,4,7]
+        int8[] b = { (int8) 0xC2, (int8) 0x03, (int8) 0x02, (int8) 0x02, (int8) 0xB0 };
+        Assert.that(OrcRleV2.decodeSum(b, (int64) 0, 4)).isEqualTo((int64) 14);
+        return;
+    }
+
+    @Test
+    public void direct() {
+        // [1,3,5]
+        int8[] b = { (int8) 0x46, (int8) 0x02, (int8) 0x26, (int8) 0xA0 };
+        Assert.that(OrcRleV2.decodeSum(b, (int64) 0, 3)).isEqualTo((int64) 9);
+        return;
+    }
+}
