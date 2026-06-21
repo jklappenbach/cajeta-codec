@@ -60,6 +60,50 @@ public class SnappyTest {
     }
 
     @Test
+    public void roundTripsRepetitiveText() {
+        // Highly repetitive → the hash-matcher should emit copies and shrink it.
+        String text = "the quick brown fox the quick brown fox the quick brown fox";
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] comp = Snappy.compress(in, inLen);
+        Assert.isTrue((int64) comp.count() < inLen);          // actually compressed
+        int8[] out = Snappy.decompress(comp, (int64) comp.count());
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals(
+            "the quick brown fox the quick brown fox the quick brown fox"));
+        return;
+    }
+
+    @Test
+    public void roundTripsLongRun() {
+        // 50 identical bytes → overlapping back-reference; compresses heavily.
+        int8[] in = heap int8[50];
+        int32 i = 0;
+        while (i < 50) { in[i] = (int8) 0x7A; i = i + 1; }
+        int8[] comp = Snappy.compress(in, (int64) 50);
+        Assert.isTrue((int64) comp.count() < (int64) 50);
+        int8[] out = Snappy.decompress(comp, (int64) comp.count());
+        Assert.that((int64) out.count()).isEqualTo((int64) 50);
+        int8 first = out[0];
+        int8 last = out[49];
+        Assert.that((int64) (((int32) first) & 0xFF)).isEqualTo((int64) 0x7A);
+        Assert.that((int64) (((int32) last) & 0xFF)).isEqualTo((int64) 0x7A);
+        return;
+    }
+
+    @Test
+    public void roundTripsIncompressibleShort() {
+        // No 4-byte repeats → all literals; must still round-trip exactly.
+        String text = "abcdefg";
+        int8[] in = text.bytes;
+        int8[] comp = Snappy.compress(in, (int64) in.count());
+        int8[] out = Snappy.decompress(comp, (int64) comp.count());
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("abcdefg"));
+        return;
+    }
+
+    @Test
     public void decompressesExtendedLiteralLength() {
         // 70-byte literal: varint(70)=0x46, literal tag L=60 (0xF0) + 1 extra
         // byte (len-1=69=0x45), then 70 bytes 'A'+(i%26).

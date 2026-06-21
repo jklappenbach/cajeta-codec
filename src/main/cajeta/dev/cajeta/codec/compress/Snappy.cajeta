@@ -63,6 +63,209 @@ public final class Snappy {
         return Snappy.decodeVarint(src, (int64) 0);
     }
 
+    // --- compression -------------------------------------------------------
+
+    // Little-endian 4-byte load at `pos` (the hash key).
+    static int64 readLE4(int8[] src, int64 pos) {
+        int64 p0 = pos;
+        int64 p1 = pos + 1;
+        int64 p2 = pos + 2;
+        int64 p3 = pos + 3;
+        int64 b0 = (int64) (((int32) src[p0]) & 0xFF);
+        int64 b1 = (int64) (((int32) src[p1]) & 0xFF);
+        int64 b2 = (int64) (((int32) src[p2]) & 0xFF);
+        int64 b3 = (int64) (((int32) src[p3]) & 0xFF);
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    static int32 hashKey(int64 key, int32 tsize) {
+        int64 hh = key * (int64) 0x1e35a7bd;
+        int64 idx = (hh >> (int64) 20) & (int64) (tsize - 1);
+        return (int32) idx;
+    }
+
+    static boolean match4(int8[] src, int64 a, int64 b) {
+        int32 j = 0;
+        boolean ok = true;
+        while (j < 4) {
+            int64 ai = a + (int64) j;
+            int64 bi = b + (int64) j;
+            int8 ca = src[ai];
+            int8 cb = src[bi];
+            if (ca != cb) { ok = false; }
+            j = j + 1;
+        }
+        return ok;
+    }
+
+    static int64 writeVarintInto(int8[] out, int64 olen, int64 v) {
+        int64 o = olen;
+        int64 t = v;
+        while (t >= (int64) 128) {
+            int32 part = (int32) ((t & (int64) 0x7F) | (int64) 0x80);
+            out[o] = (int8) part;
+            o = o + 1;
+            t = t >> 7;
+        }
+        out[o] = (int8) (t & (int64) 0x7F);
+        o = o + 1;
+        return o;
+    }
+
+    static int64 emitLiteral(int8[] out, int64 olen, int8[] src,
+                             int64 start, int64 len) {
+        if (len <= (int64) 0) { return olen; }
+        int64 o = olen;
+        int64 lm1 = len - 1;
+        if (lm1 < (int64) 60) {
+            int32 tag = ((int32) lm1) << 2;
+            out[o] = (int8) tag;
+            o = o + 1;
+        } else {
+            int64 nbytes;
+            if (lm1 < (int64) 256) { nbytes = (int64) 1; }
+            else if (lm1 < (int64) 65536) { nbytes = (int64) 2; }
+            else if (lm1 < (int64) 16777216) { nbytes = (int64) 3; }
+            else { nbytes = (int64) 4; }
+            int32 tagval = (int32) ((int64) 59 + nbytes);
+            int32 tag = tagval << 2;
+            out[o] = (int8) tag;
+            o = o + 1;
+            int64 j = (int64) 0;
+            while (j < nbytes) {
+                int64 shift = j * (int64) 8;
+                int32 part = (int32) ((lm1 >> shift) & (int64) 0xFF);
+                out[o] = (int8) part;
+                o = o + 1;
+                j = j + 1;
+            }
+        }
+        int64 k = (int64) 0;
+        while (k < len) {
+            int64 si = start + k;
+            int64 di = o + k;
+            out[di] = src[si];
+            k = k + 1;
+        }
+        return o + len;
+    }
+
+    static int64 emitCopyOne(int8[] out, int64 olen, int64 offset, int64 len) {
+        int64 o = olen;
+        if (offset < (int64) 2048 && len >= (int64) 4 && len <= (int64) 11) {
+            int32 lenField = (int32) (len - (int64) 4);
+            int32 offHigh = (int32) ((offset >> 8) & (int64) 0x07);
+            int32 tag = (lenField << 2) | (offHigh << 5) | 1;
+            out[o] = (int8) tag;
+            o = o + 1;
+            out[o] = (int8) (offset & (int64) 0xFF);
+            o = o + 1;
+        } else if (offset < (int64) 65536) {
+            int32 tag = (((int32) (len - 1)) << 2) | 2;
+            out[o] = (int8) tag;
+            o = o + 1;
+            out[o] = (int8) (offset & (int64) 0xFF);
+            o = o + 1;
+            out[o] = (int8) ((offset >> 8) & (int64) 0xFF);
+            o = o + 1;
+        } else {
+            int32 tag = (((int32) (len - 1)) << 2) | 3;
+            out[o] = (int8) tag;
+            o = o + 1;
+            out[o] = (int8) (offset & (int64) 0xFF);
+            o = o + 1;
+            out[o] = (int8) ((offset >> 8) & (int64) 0xFF);
+            o = o + 1;
+            out[o] = (int8) ((offset >> 16) & (int64) 0xFF);
+            o = o + 1;
+            out[o] = (int8) ((offset >> 24) & (int64) 0xFF);
+            o = o + 1;
+        }
+        return o;
+    }
+
+    static int64 emitCopy(int8[] out, int64 olen, int64 offset, int64 len) {
+        int64 o = olen;
+        int64 remaining = len;
+        while (remaining >= (int64) 68) {
+            o = Snappy.emitCopyOne(out, o, offset, (int64) 64);
+            remaining = remaining - (int64) 64;
+        }
+        if (remaining > (int64) 64) {
+            o = Snappy.emitCopyOne(out, o, offset, (int64) 60);
+            remaining = remaining - (int64) 60;
+        }
+        o = Snappy.emitCopyOne(out, o, offset, remaining);
+        return o;
+    }
+
+    /**
+     * Compress `src` (first `n` bytes) into a Snappy block via LZ77 hash-match
+     * (4-byte hash table → back-references), emitting literal + copy elements.
+     * Caller owns the result.
+     */
+    public static #int8[] compress(int8[] src, int64 n) {
+        int64 cap = (int64) 32 + n + (n / (int64) 6);
+        int8[] out = heap int8[cap];
+        int64 olen = Snappy.writeVarintInto(out, (int64) 0, n);
+
+        int32 tsize = 4096;
+        int64[] table = heap int64[tsize];   // 0 = empty, else pos+1
+        int32 ti = 0;
+        while (ti < tsize) {
+            table[ti] = (int64) 0;
+            ti = ti + 1;
+        }
+
+        int64 nextEmit = (int64) 0;
+        int64 ip = (int64) 0;
+        int64 limit = n - (int64) 3;          // need 4 bytes at ip
+        while (ip < limit) {
+            int64 key = Snappy.readLE4(src, ip);
+            int32 h = Snappy.hashKey(key, tsize);
+            int64 cand = table[h] - 1;        // -1 when empty
+            table[h] = ip + 1;
+
+            boolean matched = false;
+            if (cand >= (int64) 0) {
+                if (Snappy.match4(src, cand, ip)) { matched = true; }
+            }
+
+            if (matched) {
+                olen = Snappy.emitLiteral(out, olen, src, nextEmit, ip - nextEmit);
+                int64 mlen = (int64) 4;
+                int64 maxLen = n - ip;
+                boolean go = true;
+                while (go) {
+                    if (mlen >= maxLen) { go = false; }
+                    else {
+                        int64 a = cand + mlen;
+                        int64 b = ip + mlen;
+                        int8 ca = src[a];
+                        int8 cb = src[b];
+                        if (ca != cb) { go = false; }
+                        else { mlen = mlen + 1; }
+                    }
+                }
+                int64 offset = ip - cand;
+                olen = Snappy.emitCopy(out, olen, offset, mlen);
+                ip = ip + mlen;
+                nextEmit = ip;
+            } else {
+                ip = ip + 1;
+            }
+        }
+        olen = Snappy.emitLiteral(out, olen, src, nextEmit, n - nextEmit);
+
+        int8[] result = heap int8[olen];
+        int64 i = (int64) 0;
+        while (i < olen) {
+            result[i] = out[i];
+            i = i + 1;
+        }
+        return result;
+    }
+
     /** Decompress a Snappy block (first `n` bytes of `src`); caller owns result. */
     public static #int8[] decompress(int8[] src, int64 n) {
         int64 ulen = Snappy.decodeVarint(src, (int64) 0);
