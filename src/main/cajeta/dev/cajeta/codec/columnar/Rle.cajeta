@@ -1,0 +1,71 @@
+package dev.cajeta.codec.columnar;
+
+/**
+ * Parquet RLE / bit-packing **hybrid** decode (Phase 6.1b) — the dominant Parquet
+ * encoding (definition/repetition levels, dictionary indices, boolean columns).
+ * The stream is a sequence of runs, each prefixed by a ULEB128 header:
+ *   - header & 1 == 0 → **bit-packed** run of `(header >> 1)` groups of 8 values,
+ *     each width `w` (LSB-first via `BitPack`);
+ *   - header & 1 == 1 → **RLE** run repeating one `ceil(w/8)`-byte little-endian
+ *     value `(header >> 1)` times.
+ * `w` is fixed for the stream. Decoding stops once `count` values are produced
+ * (the final bit-packed group may carry padding values, which are ignored).
+ */
+public final class Rle {
+
+    public static #int32[] decode(int8[] src, int64 off, int32 w, int32 count) {
+        int32[] out = heap int32[count];
+        int32 produced = 0;
+        int64 bp = off;
+        while (produced < count) {
+            // ULEB128 run header.
+            int64 header = (int64) 0;
+            int32 shift = 0;
+            boolean more = true;
+            while (more) {
+                int32 byteVal = ((int32) src[bp]) & 0xFF;
+                bp = bp + 1;
+                int64 chunk = (int64) (byteVal & 0x7F);
+                header = header | (chunk << shift);
+                if ((byteVal & 0x80) == 0) { more = false; }
+                shift = shift + 7;
+            }
+            int64 mode = header & (int64) 1;
+            int64 runLen = header >> 1;
+            if (mode == (int64) 0) {
+                int32 n = (int32) (runLen * (int64) 8);
+                int32[] vals = BitPack.unpack(src, bp << 3, w, n);
+                bp = bp + BitPack.packedBytes(w, n);
+                int32 k = 0;
+                while (k < n) {
+                    if (produced < count) {
+                        out[produced] = vals[k];
+                        produced = produced + 1;
+                    }
+                    k = k + 1;
+                }
+            } else {
+                int32 byteW = (w + 7) / 8;
+                int32 value = 0;
+                int32 bidx = 0;
+                while (bidx < byteW) {
+                    int64 si = bp + (int64) bidx;
+                    int32 bv = ((int32) src[si]) & 0xFF;
+                    value = value | (bv << (bidx * 8));
+                    bidx = bidx + 1;
+                }
+                bp = bp + (int64) byteW;
+                int32 rl = (int32) runLen;
+                int32 r = 0;
+                while (r < rl) {
+                    if (produced < count) {
+                        out[produced] = value;
+                        produced = produced + 1;
+                    }
+                    r = r + 1;
+                }
+            }
+        }
+        return out;
+    }
+}
