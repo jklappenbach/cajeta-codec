@@ -44,6 +44,18 @@ public class DeflateTest {
     }
 
     @Test
+    public void deflateInflateRoundTrips() {
+        String text = "the quick brown fox jumps over the lazy dog";
+        int8[] in = text.bytes;
+        int64 inLen = (int64) in.count();
+        int8[] comp = Deflate.deflate(in, inLen);
+        int8[] out = Deflate.inflate(comp, (int64) comp.count(), inLen);
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("the quick brown fox jumps over the lazy dog"));
+        return;
+    }
+
+    @Test
     public void inflatesDynamicHuffman() {
         // zlib level 9, "the quick brown fox jumps over the lazy dog. " x4 (180).
         int8[] blob = {
