@@ -109,3 +109,15 @@ jobs:
           name: cajeta-codec ${{ steps.build.outputs.version }}
           generate_release_notes: true
           files: ${{ steps.build.outputs.artifact }}
+
+      # Signed publish to the Olla registry (olla.cajeta.dev). Requires the
+      # OLLA_* repo/org secrets; see cajeta/docs/olla-ci-publish.md.
+      - name: Publish to Olla
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'production')
+        uses: jklappenbach/cajeta/.github/actions/olla-publish@main
+        with:
+          cja-path: ${{ steps.build.outputs.artifact }}
+          version: ${{ steps.build.outputs.version }}
+          token: ${{ secrets.OLLA_TOKEN }}
+          signing-key-pem: ${{ secrets.OLLA_SIGNING_KEY_PEM }}
+          signing-key-id: ${{ secrets.OLLA_SIGNING_KEY_ID }}
