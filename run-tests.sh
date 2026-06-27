@@ -2,7 +2,7 @@
 # Build + run the cajeta-codec unit tests.
 #
 # The suite lives under src/test/cajeta and is driven by cajeta-unit's
-# reflective @Test discovery (org.cajeta.unit.Runner). It compiles ONLY the
+# reflective @Test discovery (dev.cajeta.unit.Runner). It compiles ONLY the
 # test sources into an executable, with the codec library and cajeta-unit both
 # supplied as .cja classpath dependencies — the compiler links their bitcode
 # into the test binary (requires a toolchain with classpath-bitcode linking,
@@ -23,7 +23,7 @@ UNIT_REPO="${UNIT_REPO:-$here/../cajeta-unit}"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 
-unit_cja="$UNIT_REPO/build/archive/org.cajeta.unit-0.1.0.cja"
+unit_cja="$UNIT_REPO/build/archive/dev.cajeta.unit-0.1.0.cja"
 if [[ ! -f "$unit_cja" ]]; then
     echo ">> building cajeta-unit .cja ($UNIT_REPO)"
     ( cd "$UNIT_REPO" && "$CAJETA" build >/dev/null )

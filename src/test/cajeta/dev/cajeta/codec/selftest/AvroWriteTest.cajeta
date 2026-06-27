@@ -1,6 +1,6 @@
 package dev.cajeta.codec.selftest;
 
-import org.cajeta.unit.Assert;
+import dev.cajeta.unit.Assert;
 import dev.cajeta.codec.avro.Avro;
 import dev.cajeta.codec.avro.AvroContainer;
 import dev.cajeta.codec.avro.AvroContainerWriter;
