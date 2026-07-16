@@ -31,7 +31,7 @@ public class IonWriterTest {
         w.writeIntValue((int64) 150);
         w.writeFieldSid(w.intern("name"));
         String nm = "hi";
-        int8[] nb = nm.bytes;
+        int8[] nb = nm.toBytes();
         w.writeStringValue(nb, (int32) nb.count());
         w.writeFieldSid(w.intern("count"));
         w.writeIntValue((int64) 0 - (int64) 42);
@@ -59,7 +59,7 @@ public class IonWriterTest {
         w.beginContainer();
         w.writeFieldSid(w.intern("msg"));
         String msg = "abcdefghijklmnopqrst";
-        int8[] mb = msg.bytes;
+        int8[] mb = msg.toBytes();
         w.writeStringValue(mb, (int32) mb.count());
         w.endContainer(13);
         int8[] bytes = w.toBytes();

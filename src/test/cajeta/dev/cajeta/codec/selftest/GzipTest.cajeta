@@ -35,7 +35,7 @@ public class GzipTest {
     @Test
     public void roundTripsThroughGzip() {
         String text = "the quick brown fox jumps over the lazy dog";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] gz = Gzip.compress(in, inLen);
         int8[] out = Gzip.decompress(gz, (int64) gz.count());
@@ -50,7 +50,7 @@ public class GzipTest {
         // round-trip through our gzip container.
         String unit = "the quick brown fox jumps over the lazy dog. ";
         String text = unit + unit + unit + unit + unit + unit + unit + unit;
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] gz = Gzip.compress(in, inLen);
         int64 gzLen = (int64) gz.count();   // capture before the move into decompress
@@ -64,7 +64,7 @@ public class GzipTest {
     @Test
     public void computesCrc32() {
         String text = "hello hello hello hello world\n";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 crc = Gzip.crc32(in, (int64) in.count());
         Assert.that(crc).isEqualTo((int64) 0x8D3353E0);
         return;

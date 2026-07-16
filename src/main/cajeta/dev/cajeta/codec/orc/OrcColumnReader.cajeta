@@ -128,7 +128,7 @@ public final class OrcColumnReader {
      * the packed `subtypes` (field 2) for the column id. Returns -1 if absent.
      */
     public static int32 columnIdByName(int8[] file, int64 n, String name) {
-        int8[] nb = name.bytes;
+        int8[] nb = name.toBytes();
         int32 nameLen = (int32) nb.count();
 
         int64 lastPos = n - (int64) 1;

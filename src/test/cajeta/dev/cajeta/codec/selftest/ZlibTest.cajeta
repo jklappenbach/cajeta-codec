@@ -17,7 +17,7 @@ public class ZlibTest {
     @Test
     public void computesAdler32() {
         String text = "hello hello hello hello world\n";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 ad = Zlib.adler32(in, (int64) in.count());
         Assert.that(ad).isEqualTo((int64) 0xAE8D0B03);
         return;
@@ -28,7 +28,7 @@ public class ZlibTest {
         // 4.3c — repetitive corpus must shrink (real DEFLATE) and round-trip.
         String unit = "the quick brown fox jumps over the lazy dog. ";
         String text = unit + unit + unit + unit + unit + unit + unit + unit;
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] z = Zlib.compress(in, inLen);
         int64 zLen = (int64) z.count();   // capture before the move into decompress
@@ -42,7 +42,7 @@ public class ZlibTest {
     @Test
     public void roundTripsThroughZlib() {
         String text = "the quick brown fox jumps over the lazy dog";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] z = Zlib.compress(in, inLen);
         int8[] out = Zlib.decompress(z, (int64) z.count(), inLen);

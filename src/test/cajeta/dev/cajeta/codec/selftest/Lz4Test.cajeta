@@ -61,7 +61,7 @@ public class Lz4Test {
     @Test
     public void roundTripsRepetitiveText() {
         String text = "the quick brown fox the quick brown fox the quick brown fox";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] comp = Lz4.compress(in, inLen);
         Assert.isTrue((int64) comp.count() < inLen);
@@ -89,7 +89,7 @@ public class Lz4Test {
     @Test
     public void roundTripsIncompressibleShort() {
         String text = "abcdefg";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int8[] comp = Lz4.compress(in, (int64) in.count());
         int8[] out = Lz4.decompress(comp, (int64) comp.count(), (int64) in.count());
         String back = heap cajeta.lang.String(#out, (int32) out.count());

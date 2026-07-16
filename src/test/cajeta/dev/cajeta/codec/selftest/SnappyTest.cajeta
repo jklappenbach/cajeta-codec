@@ -63,7 +63,7 @@ public class SnappyTest {
     public void roundTripsRepetitiveText() {
         // Highly repetitive → the hash-matcher should emit copies and shrink it.
         String text = "the quick brown fox the quick brown fox the quick brown fox";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] comp = Snappy.compress(in, inLen);
         Assert.isTrue((int64) comp.count() < inLen);          // actually compressed
@@ -95,7 +95,7 @@ public class SnappyTest {
     public void roundTripsIncompressibleShort() {
         // No 4-byte repeats → all literals; must still round-trip exactly.
         String text = "abcdefg";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int8[] comp = Snappy.compress(in, (int64) in.count());
         int8[] out = Snappy.decompress(comp, (int64) comp.count());
         String back = heap cajeta.lang.String(#out, (int32) out.count());

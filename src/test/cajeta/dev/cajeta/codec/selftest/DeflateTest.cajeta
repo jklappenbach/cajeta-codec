@@ -46,7 +46,7 @@ public class DeflateTest {
     @Test
     public void deflateInflateRoundTrips() {
         String text = "the quick brown fox jumps over the lazy dog";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] comp = Deflate.deflate(in, inLen);
         int8[] out = Deflate.inflate(comp, (int64) comp.count(), inLen);
@@ -59,7 +59,7 @@ public class DeflateTest {
     public void deflateFixedRoundTrips() {
         // 4.3a — fixed-Huffman literal block, round-tripped through our decoder.
         String text = "the quick brown fox jumps over the lazy dog";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] comp = Deflate.deflateFixed(in, inLen);
         int8[] out = Deflate.inflate(comp, (int64) comp.count(), inLen);
@@ -118,7 +118,7 @@ public class DeflateTest {
         // 4.3b — repeated phrases produce matches; round-trips and shrinks.
         String text = "the quick brown fox. the quick brown fox. " +
             "the quick brown fox. the quick brown fox.";
-        int8[] in = text.bytes;
+        int8[] in = text.toBytes();
         int64 inLen = (int64) in.count();
         int8[] comp = Deflate.deflateFixed(in, inLen);
         int64 compLen = (int64) comp.count();   // capture before the move into inflate

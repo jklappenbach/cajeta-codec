@@ -282,7 +282,7 @@ public final class IonWriter {
         int32 k = 0;
         while (k < this.localCount) {
             String s = this.locals[k];
-            int8[] sb = s.bytes;
+            int8[] sb = s.toBytes();
             this.writeStringValue(sb, (int32) sb.count());
             k = k + 1;
         }

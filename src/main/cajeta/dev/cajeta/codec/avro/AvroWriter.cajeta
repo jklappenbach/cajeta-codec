@@ -71,8 +71,8 @@ public final class AvroWriter {
 
     /** UTF-8 string: same wire shape as `writeBytes` over the String's bytes. */
     public void writeString(String s) {
-        int32 n = s.byteLength;
-        this.writeBytes(s.bytes, n);
+        int32 n = s.byteLength();
+        this.writeBytes(s.toBytes(), n);
     }
 
     /** Raw magic / sync bytes (no length prefix). */
