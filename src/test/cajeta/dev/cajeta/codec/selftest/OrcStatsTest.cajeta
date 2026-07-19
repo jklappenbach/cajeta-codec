@@ -19,7 +19,7 @@ public class OrcStatsTest {
     public void readsIntMinMax() {
         int8[] f = OrcMetadataTest.simpleOrc();
         OrcColumnStats s = OrcColumnStats.forColumn(f, (int64) f.count(), 1);
-        Assert.that(s.hasStats).isTrue();
+        Assert.that(s.hasStats).isNotEqualTo((int64) 0);
         Assert.that(s.minValue).isEqualTo((int64) 5);
         Assert.that(s.maxValue).isEqualTo((int64) 20);
         Assert.that(s.numValues).isEqualTo((int64) 4);
@@ -31,10 +31,10 @@ public class OrcStatsTest {
         int8[] f = OrcMetadataTest.simpleOrc();
         OrcColumnStats s = OrcColumnStats.forColumn(f, (int64) f.count(), 1);
         // [5,20] overlaps [0,7] and [10,15] → keep; disjoint → skip.
-        Assert.that(s.mightContainRange((int64) 0, (int64) 7)).isTrue();
-        Assert.that(s.mightContainRange((int64) 10, (int64) 15)).isTrue();
-        Assert.that(s.mightContainRange((int64) 100, (int64) 200)).isFalse();
-        Assert.that(s.mightContainRange((int64) 25, (int64) 30)).isFalse();
+        Assert.that(s.mightContainRange((int64) 0, (int64) 7)).isNotEqualTo((int64) 0);
+        Assert.that(s.mightContainRange((int64) 10, (int64) 15)).isNotEqualTo((int64) 0);
+        Assert.that(s.mightContainRange((int64) 100, (int64) 200)).isEqualTo((int64) 0);
+        Assert.that(s.mightContainRange((int64) 25, (int64) 30)).isEqualTo((int64) 0);
         return;
     }
 
@@ -43,8 +43,8 @@ public class OrcStatsTest {
         // The root struct column (0) carries no integer stats → conservative keep.
         int8[] f = OrcMetadataTest.simpleOrc();
         OrcColumnStats s = OrcColumnStats.forColumn(f, (int64) f.count(), 0);
-        Assert.that(s.hasStats).isFalse();
-        Assert.that(s.mightContainRange((int64) 100, (int64) 200)).isTrue();
+        Assert.that(s.hasStats).isEqualTo((int64) 0);
+        Assert.that(s.mightContainRange((int64) 100, (int64) 200)).isNotEqualTo((int64) 0);
         return;
     }
 }

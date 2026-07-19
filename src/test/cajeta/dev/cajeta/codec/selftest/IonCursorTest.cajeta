@@ -34,7 +34,7 @@ public class IonCursorTest {
             (int8) 0x88, (int8) 0xA2, (int8) 0x07, (int8) 0x09,
             (int8) 0x89, (int8) 0x71, (int8) 0x04
         };
-        return b;
+        return #b;
     }
 
     @Test

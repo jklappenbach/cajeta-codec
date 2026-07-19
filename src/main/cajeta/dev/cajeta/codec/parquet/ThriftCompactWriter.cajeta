@@ -121,6 +121,6 @@ public final class ThriftCompactWriter {
         int8[] r = heap int8[this.len];
         int64 i = (int64) 0;
         while (i < this.len) { r[i] = this.buf[i]; i = i + 1; }
-        return r;
+        return #r;
     }
 }

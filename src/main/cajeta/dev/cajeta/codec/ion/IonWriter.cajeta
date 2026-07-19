@@ -299,6 +299,6 @@ public final class IonWriter {
             out[i] = this.buf[i];
             i = i + 1;
         }
-        return out;
+        return #out;
     }
 }

@@ -132,6 +132,6 @@ public final class ProtobufWriter {
         int8[] bb = this.buf;
         int32 i = 0;
         while (i < n) { out[i] = bb[i]; i = i + 1; }
-        return out;
+        return #out;
     }
 }

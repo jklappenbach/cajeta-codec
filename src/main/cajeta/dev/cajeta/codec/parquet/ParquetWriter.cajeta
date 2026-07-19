@@ -104,11 +104,11 @@ public final class ParquetWriter {
     static #int8[] schemaName() {
         int8[] s = { (int8) 0x73, (int8) 0x63, (int8) 0x68,
                      (int8) 0x65, (int8) 0x6D, (int8) 0x61 };   // "schema"
-        return s;
+        return #s;
     }
 
     static #int8[] colName() {
         int8[] s = { (int8) 0x78 };                              // "x"
-        return s;
+        return #s;
     }
 }

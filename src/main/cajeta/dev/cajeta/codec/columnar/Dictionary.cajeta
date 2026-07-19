@@ -28,7 +28,7 @@ public final class Dictionary {
         int32[] dict = heap int32[size];
         int32 k = 0;
         while (k < size) { dict[k] = tmp[k]; k = k + 1; }
-        return dict;
+        return #dict;
     }
 
     /** Map each value to its dictionary index. */
@@ -62,7 +62,7 @@ public final class Dictionary {
             page[di] = body[j];
             j = j + 1;
         }
-        return page;
+        return #page;
     }
 
     /** Gather `n` dictionary values by index. */
@@ -74,7 +74,7 @@ public final class Dictionary {
             out[i] = dict[idx];
             i = i + 1;
         }
-        return out;
+        return #out;
     }
 
     /**

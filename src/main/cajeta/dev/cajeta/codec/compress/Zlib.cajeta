@@ -55,6 +55,6 @@ public final class Zlib {
         out[o1] = (int8) ((ad >> 16) & (int64) 0xFF);
         out[o2] = (int8) ((ad >> 8) & (int64) 0xFF);
         out[o3] = (int8) (ad & (int64) 0xFF);
-        return out;
+        return #out;
     }
 }

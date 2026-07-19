@@ -11,7 +11,7 @@ final class HuffTable {
     int32[] symbol;
 
     HuffTable(#int32[] count, #int32[] symbol) {
-        this.count = count;
-        this.symbol = symbol;
+        this.count = #count;
+        this.symbol = #symbol;
     }
 }

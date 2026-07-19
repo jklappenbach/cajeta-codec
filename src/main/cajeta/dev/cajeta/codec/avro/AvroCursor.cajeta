@@ -48,7 +48,7 @@ public final class AvroCursor {
             k = k + 1;
         }
         this.pos = this.pos + len;
-        return out;
+        return #out;
     }
 
     /** Read a length-prefixed UTF-8 string (caller owns the result). */

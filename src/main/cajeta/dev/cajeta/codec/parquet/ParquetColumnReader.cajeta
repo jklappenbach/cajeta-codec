@@ -290,7 +290,7 @@ public final class ParquetColumnReader {
                 out[gi] = dict[ix];
                 gi = gi + 1;
             }
-            return out;
+            return #out;
         }
         throw heap ParquetParseException("unsupported value encoding (v1)", dataPageOffset);
     }
@@ -302,7 +302,7 @@ public final class ParquetColumnReader {
         int32[] out = heap int32[m];
         int32 i = 0;
         while (i < m) { out[i] = (int32) longs[i]; i = i + 1; }
-        return out;
+        return #out;
     }
 
     /** Sum an INT64 column's values (scalar return — validates the int64 path
@@ -323,6 +323,6 @@ public final class ParquetColumnReader {
         int64[] out = heap int64[m];
         int32 i = 0;
         while (i < m) { out[i] = longs[i]; i = i + 1; }
-        return out;
+        return #out;
     }
 }

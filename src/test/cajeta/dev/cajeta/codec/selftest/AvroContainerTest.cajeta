@@ -41,7 +41,7 @@ public class AvroContainerTest {
             (int8) 0x0A, (int8) 0x0B, (int8) 0x0C, (int8) 0x0D, (int8) 0x0E,
             (int8) 0x0F
         };
-        return b;
+        return #b;
     }
 
     @Test

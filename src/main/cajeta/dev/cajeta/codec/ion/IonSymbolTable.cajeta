@@ -20,7 +20,7 @@ public final class IonSymbolTable {
     int64 userStart;     // first user value, after BVM + LST
 
     public IonSymbolTable(#String[] locals, int32 localCount, int64 userStart) {
-        this.locals = locals;
+        this.locals = #locals;
         this.localCount = localCount;
         this.userStart = userStart;
     }

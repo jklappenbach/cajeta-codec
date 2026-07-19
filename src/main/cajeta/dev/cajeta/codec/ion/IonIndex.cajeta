@@ -33,12 +33,12 @@ public final class IonIndex {
     public IonIndex(#int64[] nameSids, #String[] names, #int32[] typeCodes,
                     #int64[] valueTds, #int64[] valueStarts, #int64[] valueEnds,
                     int32 count) {
-        this.nameSids = nameSids;
-        this.names = names;
-        this.typeCodes = typeCodes;
-        this.valueTds = valueTds;
-        this.valueStarts = valueStarts;
-        this.valueEnds = valueEnds;
+        this.nameSids = #nameSids;
+        this.names = #names;
+        this.typeCodes = #typeCodes;
+        this.valueTds = #valueTds;
+        this.valueStarts = #valueStarts;
+        this.valueEnds = #valueEnds;
         this.count = count;
     }
 

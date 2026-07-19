@@ -41,7 +41,7 @@ public class IonTypedTest {
             (int8) 0x8D, (int8) 0x21, (int8) 0x2A,
             (int8) 0x8E, (int8) 0xA2, (int8) 0x07, (int8) 0x09
         };
-        return b;
+        return #b;
     }
 
     @Test

@@ -25,10 +25,10 @@ public final class ProtobufIndex {
 
     public ProtobufIndex(#int32[] fieldNumbers, #int32[] wireTypes,
                          #int64[] valueStarts, #int64[] valueEnds, int32 count) {
-        this.fieldNumbers = fieldNumbers;
-        this.wireTypes = wireTypes;
-        this.valueStarts = valueStarts;
-        this.valueEnds = valueEnds;
+        this.fieldNumbers = #fieldNumbers;
+        this.wireTypes = #wireTypes;
+        this.valueStarts = #valueStarts;
+        this.valueEnds = #valueEnds;
         this.count = count;
     }
 

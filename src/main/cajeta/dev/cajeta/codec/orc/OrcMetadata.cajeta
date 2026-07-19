@@ -36,7 +36,7 @@ public final class OrcMetadata {
             out[k] = b[si];
             k = k + 1;
         }
-        return out;
+        return #out;
     }
 
     public static #OrcMetadata parse(int8[] file, int64 n) {

@@ -139,6 +139,6 @@ public final class AvroContainer {
             out[k] = this.b[si];
             k = k + 1;
         }
-        return out;
+        return #out;
     }
 }

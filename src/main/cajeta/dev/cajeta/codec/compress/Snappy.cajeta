@@ -263,7 +263,7 @@ public final class Snappy {
             result[i] = out[i];
             i = i + 1;
         }
-        return result;
+        return #result;
     }
 
     /** Decompress a Snappy block (first `n` bytes of `src`); caller owns result. */
@@ -329,6 +329,6 @@ public final class Snappy {
                 }
             }
         }
-        return out;
+        return #out;
     }
 }

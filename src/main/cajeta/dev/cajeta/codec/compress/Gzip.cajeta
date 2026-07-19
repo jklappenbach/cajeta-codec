@@ -47,7 +47,7 @@ public final class Gzip {
             out[k] = src[si];
             k = k + 1;
         }
-        return out;
+        return #out;
     }
 
     /** Decompress a gzip member (first `n` bytes); ISIZE gives the output size. */
@@ -120,6 +120,6 @@ public final class Gzip {
         out[q1] = (int8) ((isize >> 8) & (int64) 0xFF);
         out[q2] = (int8) ((isize >> 16) & (int64) 0xFF);
         out[q3] = (int8) ((isize >> 24) & (int64) 0xFF);
-        return out;
+        return #out;
     }
 }

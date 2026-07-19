@@ -177,7 +177,7 @@ public final class Lz4 {
             result[i] = out[i];
             i = i + 1;
         }
-        return result;
+        return #result;
     }
 
     /** Decompress an LZ4 block (first `n` bytes of `src`) into `destLen` bytes. */
@@ -241,6 +241,6 @@ public final class Lz4 {
                 }
             }
         }
-        return out;
+        return #out;
     }
 }

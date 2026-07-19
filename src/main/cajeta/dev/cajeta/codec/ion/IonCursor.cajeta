@@ -28,7 +28,8 @@ public final class IonCursor {
     public IonCursor(int8[] b, int64 n) {
         this.b = b;
         this.n = n;
-        this.table = IonSymbolTable.parse(b, n);
+        IonSymbolTable t = IonSymbolTable.parse(b, n);
+        this.table = #t;
         this.frames = heap IonIndex[32];
         this.topTd = this.table.userValueStart();
         this.frames[0] = IonIndex.buildAt(b, this.topTd, this.table);
@@ -144,7 +145,7 @@ public final class IonCursor {
             out[k] = bb[src];
             k = k + 1;
         }
-        return out;
+        return #out;
     }
 
     /** Resolve the symbol value at slot `i` (a symbol ID) to its text. */

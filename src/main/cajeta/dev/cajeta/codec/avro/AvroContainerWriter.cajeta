@@ -22,7 +22,8 @@ public final class AvroContainerWriter {
      */
     public AvroContainerWriter(int8[] data, int64 dataLen, int64 count,
                                String schemaJson) {
-        this.bytes = AvroContainerWriter.wrap(data, dataLen, count, schemaJson);
+        int8[] w = AvroContainerWriter.wrap(data, dataLen, count, schemaJson);
+        this.bytes = #w;
     }
 
     /** The built OCF bytes (a fresh, caller-owned copy). */
@@ -31,7 +32,7 @@ public final class AvroContainerWriter {
         int8[] r = heap int8[m];
         int64 i = (int64) 0;
         while (i < m) { r[i] = this.bytes[i]; i = i + 1; }
-        return r;
+        return #r;
     }
 
     /** Fixed 16-byte sync marker (bytes 0x00..0x0F). */
@@ -39,7 +40,7 @@ public final class AvroContainerWriter {
         int8[] s = heap int8[16];
         int32 i = 0;
         while (i < 16) { s[i] = (int8) i; i = i + 1; }
-        return s;
+        return #s;
     }
 
     public static #int8[] wrap(int8[] data, int64 dataLen, int64 count,

@@ -80,6 +80,6 @@ public final class BitWriter {
         int8[] r = heap int8[this.op];
         int64 i = (int64) 0;
         while (i < this.op) { r[i] = this.out[i]; i = i + 1; }
-        return r;
+        return #r;
     }
 }

@@ -53,7 +53,7 @@ public final class Deflate {
             r[i] = this.out[i];
             i = i + 1;
         }
-        return r;
+        return #r;
     }
 
     // Read `cnt` bits LSB-first. Hot state (bitpos) hoisted to a stack local.
@@ -351,7 +351,7 @@ public final class Deflate {
             r[i] = out[i];
             i = i + 1;
         }
-        return r;
+        return #r;
     }
 
     // Emit one fixed-Huffman literal (0..255) to the bit writer.

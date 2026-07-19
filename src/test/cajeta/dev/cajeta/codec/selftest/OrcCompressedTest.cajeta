@@ -39,7 +39,7 @@ public class OrcCompressedTest {
             (int8) 0x80, (int8) 0x80, (int8) 0x04, (int8) 0x22, (int8) 0x02, (int8) 0x00, (int8) 0x0C, (int8) 0x28, (int8) 0x1A, (int8) 0x30, (int8) 0x06, (int8) 0x82,
             (int8) 0xF4, (int8) 0x03, (int8) 0x03, (int8) 0x4F, (int8) 0x52, (int8) 0x43, (int8) 0x17
         };
-        return b;
+        return #b;
     }
 
     @Test
@@ -90,7 +90,7 @@ public class OrcCompressedTest {
             (int8) 0x22, (int8) 0x02, (int8) 0x00, (int8) 0x0C, (int8) 0x28, (int8) 0x1A, (int8) 0x30, (int8) 0x06, (int8) 0x82, (int8) 0xF4, (int8) 0x03, (int8) 0x03,
             (int8) 0x4F, (int8) 0x52, (int8) 0x43, (int8) 0x17
         };
-        return b;
+        return #b;
     }
 
     @Test

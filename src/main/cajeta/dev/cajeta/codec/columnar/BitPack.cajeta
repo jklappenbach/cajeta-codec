@@ -20,7 +20,7 @@ public final class BitPack {
         if (w == 0) {
             int32 z = 0;
             while (z < count) { out[z] = 0; z = z + 1; }
-            return out;
+            return #out;
         }
         int64 bp = bitOff;
         int32 i = 0;
@@ -39,7 +39,7 @@ public final class BitPack {
             out[i] = val;
             i = i + 1;
         }
-        return out;
+        return #out;
     }
 
     /** Byte length of `count` width-`w` packed values, rounded up to whole bytes. */
@@ -76,7 +76,7 @@ public final class BitPack {
             }
             i = i + 1;
         }
-        return out;
+        return #out;
     }
 
     /** Minimum bit width (0..32) needed to represent the max of `count` values. */

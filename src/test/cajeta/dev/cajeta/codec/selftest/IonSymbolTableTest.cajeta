@@ -39,7 +39,7 @@ public class IonSymbolTableTest {
             (int8) 0x82, (int8) 0x69, (int8) 0x64,
             (int8) 0x84, (int8) 0x6E, (int8) 0x61, (int8) 0x6D, (int8) 0x65
         };
-        return b;
+        return #b;
     }
 
     @Test

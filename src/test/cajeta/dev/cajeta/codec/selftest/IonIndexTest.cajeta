@@ -49,7 +49,7 @@ public class IonIndexTest {
             (int8) 0x8B, (int8) 0x82, (int8) 0x68, (int8) 0x69,
             (int8) 0x8C, (int8) 0x11
         };
-        return b;
+        return #b;
     }
 
     @Test

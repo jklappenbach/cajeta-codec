@@ -19,7 +19,8 @@ public final class ProtobufCursor {
 
     public ProtobufCursor(int8[] b, int64 n) {
         this.b = b;
-        this.idx = ProtobufIndex.build(b, n);
+        ProtobufIndex ix = ProtobufIndex.build(b, n);
+        this.idx = #ix;
     }
 
     /** Number of top-level fields. */
@@ -65,7 +66,7 @@ public final class ProtobufCursor {
             out[k] = bb[s + (int64) k];
             k = k + 1;
         }
-        return out;
+        return #out;
     }
 
     /** Decode the I32 (fixed32) value of the field at `slot`, little-endian. */
