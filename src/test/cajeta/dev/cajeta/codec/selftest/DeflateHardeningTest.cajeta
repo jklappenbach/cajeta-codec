@@ -1,0 +1,213 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.compress.Deflate;
+import dev.cajeta.codec.compress.DeflateException;
+import dev.cajeta.codec.compress.Gzip;
+import dev.cajeta.codec.compress.Zlib;
+import cajeta.lang.String;
+
+/**
+ * Hostile-input hardening (found by cajeta-http 1.6a): every malformed
+ * stream must raise a catchable `DeflateException` — truncation used to
+ * be an uncatchable array-bounds abort, an invalid Huffman code used to
+ * END the block silently with partial output, and the gzip/zlib
+ * envelopes verified nothing. Also pins the system-gzip regression that
+ * hid behind the pre-`017ded2` ownership bugs: a stock `gzip -c` member
+ * (fixed-Huffman + LZ77 back-references) must inflate exactly.
+ */
+public class DeflateHardeningTest {
+
+    public DeflateHardeningTest() {
+        return;
+    }
+
+    /** Stock `gzip -c` of the 47-byte initialize JSON-RPC line. */
+    static #int8[] gzipFixture() {
+        int8[] g = heap int8[65];
+        g[0]=(int8)0x1f; g[1]=(int8)0x8b; g[2]=(int8)0x08; g[3]=(int8)0x00;
+        g[4]=(int8)0x00; g[5]=(int8)0x00; g[6]=(int8)0x00; g[7]=(int8)0x00;
+        g[8]=(int8)0x00; g[9]=(int8)0x03; g[10]=(int8)0xab; g[11]=(int8)0x56;
+        g[12]=(int8)0xca; g[13]=(int8)0x2a; g[14]=(int8)0xce; g[15]=(int8)0xcf;
+        g[16]=(int8)0x2b; g[17]=(int8)0x2a; g[18]=(int8)0x48; g[19]=(int8)0x56;
+        g[20]=(int8)0xb2; g[21]=(int8)0x52; g[22]=(int8)0x32; g[23]=(int8)0xd2;
+        g[24]=(int8)0x33; g[25]=(int8)0x50; g[26]=(int8)0xd2; g[27]=(int8)0x51;
+        g[28]=(int8)0xca; g[29]=(int8)0x4c; g[30]=(int8)0x51; g[31]=(int8)0xb2;
+        g[32]=(int8)0x32; g[33]=(int8)0xd4; g[34]=(int8)0x51; g[35]=(int8)0xca;
+        g[36]=(int8)0x4d; g[37]=(int8)0x2d; g[38]=(int8)0xc9; g[39]=(int8)0xc8;
+        g[40]=(int8)0x07; g[41]=(int8)0x32; g[42]=(int8)0x95; g[43]=(int8)0x32;
+        g[44]=(int8)0xf3; g[45]=(int8)0x32; g[46]=(int8)0x4b; g[47]=(int8)0x32;
+        g[48]=(int8)0x13; g[49]=(int8)0x73; g[50]=(int8)0x32; g[51]=(int8)0xab;
+        g[52]=(int8)0x52; g[53]=(int8)0x95; g[54]=(int8)0x6a; g[55]=(int8)0xb9;
+        g[56]=(int8)0x00; g[57]=(int8)0x57; g[58]=(int8)0x38; g[59]=(int8)0xa4;
+        g[60]=(int8)0x80; g[61]=(int8)0x2f; g[62]=(int8)0x00; g[63]=(int8)0x00;
+        g[64]=(int8)0x00;
+        return #g;
+    }
+
+    @Test
+    public void systemGzipMemberInflatesExactly() {
+        int8[] gz = DeflateHardeningTest.gzipFixture();
+        int8[] out = Gzip.decompress(gz, (int64) 65);
+        String s = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(s.equals(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n"));
+        return;
+    }
+
+    @Test
+    public void truncatedStreamRaises() {
+        // First 3 bytes of the "abcabc..." fixed-Huffman blob.
+        int8[] blob = { (int8) 0x4B, (int8) 0x4C, (int8) 0x4A };
+        boolean caught = false;
+        try {
+            int8[] out = Deflate.inflateGrow(blob, (int64) 3);
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void reservedBlockTypeRaises() {
+        // BFINAL=1, BTYPE=11 (reserved).
+        int8[] blob = { (int8) 0x07 };
+        boolean caught = false;
+        try {
+            int8[] out = Deflate.inflateGrow(blob, (int64) 1);
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void backReferenceBeforeOutputRaises() {
+        // Fixed block whose FIRST symbol is a length code (257, len 3)
+        // followed by distance code 4 (dist 5) — a back-reference with
+        // nothing produced yet (the historical `index -4` abort).
+        int8[] blob = { (int8) 0x03, (int8) 0x12 };
+        boolean caught = false;
+        try {
+            int8[] out = Deflate.inflateGrow(blob, (int64) 2);
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void storedNlenMismatchRaises() {
+        // The stored-block "hello world" blob with NLEN's low byte flipped.
+        int8[] blob = {
+            (int8) 0x01, (int8) 0x0B, (int8) 0x00, (int8) 0xF3, (int8) 0xFF,
+            (int8) 0x68, (int8) 0x65, (int8) 0x6C, (int8) 0x6C, (int8) 0x6F,
+            (int8) 0x20, (int8) 0x77, (int8) 0x6F, (int8) 0x72, (int8) 0x6C,
+            (int8) 0x64
+        };
+        boolean caught = false;
+        try {
+            int8[] out = Deflate.inflateGrow(blob, (int64) blob.count());
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void gzipCrcMismatchRaises() {
+        int8[] gz = DeflateHardeningTest.gzipFixture();
+        gz[57] = (int8) 0x00;               // corrupt a CRC byte
+        boolean caught = false;
+        try {
+            int8[] out = Gzip.decompress(gz, (int64) 65);
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void gzipTrailingGarbageRaises() {
+        // Four junk bytes appended INSIDE the claimed member length shift
+        // the trailer read — CRC/ISIZE no longer line up.
+        int8[] gz = DeflateHardeningTest.gzipFixture();
+        int8[] padded = heap int8[69];
+        int32 i = 0;
+        while (i < 65) { padded[i] = gz[i]; i = i + 1; }
+        while (i < 69) { padded[i] = (int8) 0x55; i = i + 1; }
+        boolean caught = false;
+        try {
+            int8[] out = Gzip.decompress(padded, (int64) 69);
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void gzipBadMagicRaises() {
+        int8[] gz = DeflateHardeningTest.gzipFixture();
+        gz[0] = (int8) 0x1E;
+        boolean caught = false;
+        try {
+            int8[] out = Gzip.decompress(gz, (int64) 65);
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void gzipRoundTripStillGreen() {
+        // compress -> decompress through the hardened envelope (CRC +
+        // ISIZE now verified on the way back).
+        String text = "the quick brown fox jumps over the lazy dog";
+        int8[] in = text.toBytes();
+        int64 inLen = (int64) in.count();
+        int8[] gz = Gzip.compress(in, inLen);
+        int8[] out = Gzip.decompress(gz, (int64) gz.count());
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("the quick brown fox jumps over the lazy dog"));
+        return;
+    }
+
+    @Test
+    public void zlibAdlerMismatchRaises() {
+        String text = "the quick brown fox jumps over the lazy dog";
+        int8[] in = text.toBytes();
+        int64 inLen = (int64) in.count();
+        int8[] z = Zlib.compress(in, inLen);
+        int64 zn = (int64) z.count();
+        int64 lastIdx = zn - (int64) 1;
+        z[lastIdx] = (int8) 0x00;           // corrupt the Adler trailer
+        boolean caught = false;
+        try {
+            int8[] out = Zlib.decompress(z, zn, inLen);
+        } catch (DeflateException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    @Test
+    public void zlibWrongDestLenSelfCorrects() {
+        // A too-small destLen hint must GROW, not truncate or trap.
+        String text = "the quick brown fox jumps over the lazy dog";
+        int8[] in = text.toBytes();
+        int64 inLen = (int64) in.count();
+        int8[] z = Zlib.compress(in, inLen);
+        int8[] out = Zlib.decompress(z, (int64) z.count(), (int64) 1);
+        String back = heap cajeta.lang.String(#out, (int32) out.count());
+        Assert.isTrue(back.equals("the quick brown fox jumps over the lazy dog"));
+        return;
+    }
+}

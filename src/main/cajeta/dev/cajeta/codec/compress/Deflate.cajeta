@@ -23,7 +23,8 @@ public final class Deflate {
         this.src = src;
         this.n = n;
         this.bitpos = (int64) 0;
-        this.out = heap int8[destLen];
+        int8[] ob = heap int8[destLen];
+        this.out = #ob;
         this.op = (int64) 0;
     }
 
@@ -42,7 +43,11 @@ public final class Deflate {
             nb[i] = this.out[i];
             i = i + 1;
         }
-        this.out = nb;
+        // `#=` — the plain `this.out = nb` this used to be silently
+        // dropped the fresh buffer at ensure()'s exit and left the field
+        // dangling (the 0.9 ownership rule); the growth path was
+        // untested until the zlib wrong-destLen case exercised it.
+        this.out #= nb;
     }
 
     // Copy the produced bytes into a fresh, caller-owned array.
@@ -57,12 +62,20 @@ public final class Deflate {
     }
 
     // Read `cnt` bits LSB-first. Hot state (bitpos) hoisted to a stack local.
+    // Reading past the input is a MALFORMED stream (truncation), reported as
+    // a catchable DeflateException — never an array-bounds trap: an HTTP peer
+    // can hand this decoder a cut-off body at any bit.
     int32 getBits(int32 cnt) {
         int64 bp = this.bitpos;
         int8[] s = this.src;
+        int64 limit = this.n << 3;
         int32 val = 0;
         int32 i = 0;
         while (i < cnt) {
+            if (bp >= limit) {
+                throw heap DeflateException(
+                    "unexpected end of DEFLATE input", this.n);
+            }
             int64 byteIdx = bp >> 3;
             int32 bitIdx = (int32) (bp & (int64) 7);
             int32 byteVal = ((int32) s[byteIdx]) & 0xFF;
@@ -76,6 +89,9 @@ public final class Deflate {
     }
 
     // Canonical Huffman decode (puff.c): pull bits MSB-into-code until matched.
+    // A code longer than 15 bits matches nothing in any DEFLATE table — the
+    // stream is malformed; raise rather than return a sentinel a caller could
+    // mistake for end-of-block (silent partial output was the old failure).
     int32 decodeSym(HuffTable t) {
         int32 code = 0;
         int32 first = 0;
@@ -84,22 +100,23 @@ public final class Deflate {
         int32 result = -1;
         boolean go = true;
         while (go) {
-            if (len > 15) { go = false; }
-            else {
-                int32 bit = this.getBits(1);
-                code = code | bit;
-                int32 cnt = t.count[len];
-                int32 diff = code - first;
-                if (diff < cnt) {
-                    int32 si = index + diff;
-                    result = t.symbol[si];
-                    go = false;
-                } else {
-                    index = index + cnt;
-                    first = (first + cnt) << 1;
-                    code = code << 1;
-                    len = len + 1;
-                }
+            if (len > 15) {
+                throw heap DeflateException(
+                    "invalid Huffman code", this.bitpos >> 3);
+            }
+            int32 bit = this.getBits(1);
+            code = code | bit;
+            int32 cnt = t.count[len];
+            int32 diff = code - first;
+            if (diff < cnt) {
+                int32 si = index + diff;
+                result = t.symbol[si];
+                go = false;
+            } else {
+                index = index + cnt;
+                first = (first + cnt) << 1;
+                code = code << 1;
+                len = len + 1;
             }
         }
         return result;
@@ -141,11 +158,31 @@ public final class Deflate {
     void storedBlock() {
         this.bitpos = ((this.bitpos + (int64) 7) >> 3) << 3;
         int64 bp = this.bitpos >> 3;
+        // LEN + NLEN header (4 bytes) plus the LEN payload must all fit
+        // inside the input, and NLEN must be LEN's one's complement
+        // (RFC 1951 §3.2.4) — anything else is truncation/corruption.
+        if (bp + (int64) 4 > this.n) {
+            throw heap DeflateException(
+                "unexpected end of DEFLATE input in stored-block header", bp);
+        }
         int64 bp1 = bp + 1;
+        int64 bp2 = bp + 2;
+        int64 bp3 = bp + 3;
         int32 lo = ((int32) this.src[bp]) & 0xFF;
         int32 hi = ((int32) this.src[bp1]) & 0xFF;
         int32 len = lo | (hi << 8);
+        int32 nlo = ((int32) this.src[bp2]) & 0xFF;
+        int32 nhi = ((int32) this.src[bp3]) & 0xFF;
+        int32 nlen = nlo | (nhi << 8);
+        if ((len ^ nlen) != 0xFFFF) {
+            throw heap DeflateException(
+                "stored-block NLEN is not LEN's complement", bp);
+        }
         bp = bp + 4;
+        if (bp + (int64) len > this.n) {
+            throw heap DeflateException(
+                "unexpected end of DEFLATE input in stored-block data", bp);
+        }
         this.ensure(this.op + (int64) len);
         int32 k = 0;
         while (k < len) {
@@ -167,22 +204,33 @@ public final class Deflate {
         boolean go = true;
         while (go) {
             int32 sym = this.decodeSym(litTable);
-            if (sym < 0) { go = false; }
-            else if (sym == 256) { go = false; }
-            else if (sym < 256) {
+            if (sym == 256) { go = false; }
+            else if (sym >= 0 && sym < 256) {
                 this.ensure(this.op + (int64) 1);
                 int8[] o = this.out;
                 o[this.op] = (int8) sym;
                 this.op = this.op + 1;
-            } else if (sym <= 285) {
+            } else if (sym >= 257 && sym <= 285) {
                 int32 li = sym - 257;
                 int32 leBits = lengthExtra[li];
                 int32 lenE = this.getBits(leBits);
                 int32 len = lengthBase[li] + lenE;
                 int32 dsym = this.decodeSym(distTable);
+                if (dsym < 0 || dsym > 29) {
+                    throw heap DeflateException(
+                        "invalid distance symbol", this.bitpos >> 3);
+                }
                 int32 deBits = distExtra[dsym];
                 int32 distE = this.getBits(deBits);
                 int32 dist = distBase[dsym] + distE;
+                // A back-reference may only reach into bytes already
+                // produced — dist > op walks before the output's start
+                // (the historical uncatchable `index -4` abort).
+                if ((int64) dist > this.op) {
+                    throw heap DeflateException(
+                        "back-reference distance exceeds output produced",
+                        this.bitpos >> 3);
+                }
                 this.ensure(this.op + (int64) len);
                 int8[] o = this.out;
                 int64 op = this.op;
@@ -196,7 +244,11 @@ public final class Deflate {
                     c = c + 1;
                 }
                 this.op = op;
-            } else { go = false; }
+            } else {
+                // 286/287 are reserved, and decodeSym no longer returns -1.
+                throw heap DeflateException(
+                    "invalid literal/length symbol", this.bitpos >> 3);
+            }
         }
     }
 
@@ -238,23 +290,46 @@ public final class Deflate {
         int32 idx = 0;
         while (idx < nsym) {
             int32 sym = this.decodeSym(clTable);
-            if (sym < 16) {
+            if (sym >= 0 && sym < 16) {
                 lengths[idx] = sym;
                 idx = idx + 1;
             } else if (sym == 16) {
+                if (idx == 0) {
+                    throw heap DeflateException(
+                        "code-length repeat with no previous length",
+                        this.bitpos >> 3);
+                }
                 int32 pi = idx - 1;
                 int32 prev = lengths[pi];
                 int32 rep = this.getBits(2) + 3;
+                if (idx + rep > nsym) {
+                    throw heap DeflateException(
+                        "code-length repeat overruns the table",
+                        this.bitpos >> 3);
+                }
                 int32 r = 0;
                 while (r < rep) { lengths[idx] = prev; idx = idx + 1; r = r + 1; }
             } else if (sym == 17) {
                 int32 rep = this.getBits(3) + 3;
+                if (idx + rep > nsym) {
+                    throw heap DeflateException(
+                        "code-length repeat overruns the table",
+                        this.bitpos >> 3);
+                }
+                int32 r = 0;
+                while (r < rep) { lengths[idx] = 0; idx = idx + 1; r = r + 1; }
+            } else if (sym == 18) {
+                int32 rep = this.getBits(7) + 11;
+                if (idx + rep > nsym) {
+                    throw heap DeflateException(
+                        "code-length repeat overruns the table",
+                        this.bitpos >> 3);
+                }
                 int32 r = 0;
                 while (r < rep) { lengths[idx] = 0; idx = idx + 1; r = r + 1; }
             } else {
-                int32 rep = this.getBits(7) + 11;
-                int32 r = 0;
-                while (r < rep) { lengths[idx] = 0; idx = idx + 1; r = r + 1; }
+                throw heap DeflateException(
+                    "invalid code-length symbol", this.bitpos >> 3);
             }
         }
 
@@ -285,6 +360,13 @@ public final class Deflate {
             if (btype == 0) { this.storedBlock(); }
             else if (btype == 1) { this.fixedBlock(); }
             else if (btype == 2) { this.dynamicBlock(); }
+            else {
+                // BTYPE 11 is reserved (RFC 1951 §3.2.3); the old loop
+                // silently skipped it and spun until the bit reader ran
+                // off the end of the input.
+                throw heap DeflateException(
+                    "reserved block type 3", this.bitpos >> 3);
+            }
         }
     }
 

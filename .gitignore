@@ -3,3 +3,4 @@ gen/
 *.cja
 *.o
 *.exe
+.cajeta/

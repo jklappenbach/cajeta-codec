@@ -1,0 +1,31 @@
+package dev.cajeta.codec.compress;
+
+import cajeta.error.RecoverableException;
+
+/**
+ * Thrown when a DEFLATE stream cannot be inflated — truncated input (the
+ * bit reader ran off the end), an invalid block type (`BTYPE == 3`), a
+ * stored block whose `NLEN` is not `LEN`'s complement, an over-long or
+ * invalid Huffman code, or a back-reference reaching further back than
+ * the bytes produced so far. `position` is the byte offset (0-based) in
+ * the compressed input where the problem was noticed.
+ *
+ * Before this type existed every one of those conditions was either an
+ * **uncatchable array-bounds trap** (truncation aborted the process —
+ * found by cajeta-http 1.6a probing hostile HTTP bodies) or **silent
+ * acceptance** (an invalid code ended the block early and returned
+ * partial output). Inflation of malformed data now always raises.
+ *
+ * ```cajeta
+ * throw heap DeflateException("unexpected end of DEFLATE input", pos);
+ * ```
+ */
+public class DeflateException extends RecoverableException {
+    public int64 position;
+
+    public DeflateException(String message, int64 position) {
+        this.message = message;
+        this.cause = 0;
+        this.position = position;
+    }
+}

@@ -23,11 +23,50 @@ public final class Zlib {
         return (b << 16) | a;
     }
 
-    /** Decompress a zlib stream (first `n` bytes) into `destLen` bytes. */
+    /**
+     * Decompress a zlib stream (first `n` bytes); `destLen` is the
+     * caller's output-size hint (the initial buffer — inflation grows it
+     * if the hint was short, so a wrong `destLen` self-corrects). The
+     * envelope is validated (RFC 1950): minimum length, `CM == 8`
+     * (deflate), the `(CMF*256+FLG) % 31` check, no preset dictionary —
+     * and the trailing big-endian Adler-32 is **verified** against the
+     * inflated output. Malformed input raises
+     * [`DeflateException`](DeflateException.cajeta), never a trap.
+     */
     public static #int8[] decompress(int8[] src, int64 n, int64 destLen) {
+        if (n < (int64) 7) {
+            throw heap DeflateException("zlib stream too short", (int64) 0);
+        }
+        int32 cmf = ((int32) src[0]) & 0xFF;
+        int32 flg = ((int32) src[1]) & 0xFF;
+        if ((cmf & 0x0F) != 8) {
+            throw heap DeflateException("zlib CM is not deflate", (int64) 0);
+        }
+        if (((cmf * 256) + flg) % 31 != 0) {
+            throw heap DeflateException("zlib header check failed", (int64) 0);
+        }
+        if ((flg & 0x20) != 0) {
+            throw heap DeflateException(
+                "zlib preset dictionary unsupported", (int64) 1);
+        }
         int64 dlen = (n - (int64) 4) - (int64) 2;
         int8[] def = Gzip.slice(src, (int64) 2, dlen);
-        return Deflate.inflate(def, dlen, destLen);
+        int8[] out = Deflate.inflate(def, dlen, destLen);
+        int64 outLen = (int64) out.count();
+        int64 adPos = n - (int64) 4;
+        int64 a3 = adPos + 1;
+        int64 a2 = adPos + 2;
+        int64 a1 = adPos + 3;
+        int64 stored =
+            (((int64) (((int32) src[adPos]) & 0xFF)) << 24)
+          | (((int64) (((int32) src[a3]) & 0xFF)) << 16)
+          | (((int64) (((int32) src[a2]) & 0xFF)) << 8)
+          |  ((int64) (((int32) src[a1]) & 0xFF));
+        int64 got = Zlib.adler32(out, outLen);
+        if (got != stored) {
+            throw heap DeflateException("zlib Adler-32 mismatch", adPos);
+        }
+        return #out;
     }
 
     /** Compress `src` (first `n` bytes) into a zlib stream (stored DEFLATE). */

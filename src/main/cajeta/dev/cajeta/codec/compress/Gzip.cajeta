@@ -50,12 +50,37 @@ public final class Gzip {
         return #out;
     }
 
-    /** Decompress a gzip member (first `n` bytes); ISIZE gives the output size. */
+    /**
+     * Decompress a gzip member (first `n` bytes). The envelope is
+     * validated (RFC 1952): magic + `CM == 8`, minimum length, every
+     * optional-field walk bounds-checked against the 8-byte trailer —
+     * and both trailer fields are **verified**: CRC-32 of the inflated
+     * output and `ISIZE` (mod 2^32) against its length. `ISIZE` is
+     * untrusted input, so inflation uses the growing path rather than
+     * pre-allocating what the member claims. Malformed input raises
+     * [`DeflateException`](DeflateException.cajeta), never a trap.
+     */
     public static #int8[] decompress(int8[] src, int64 n) {
+        if (n < (int64) 18) {
+            throw heap DeflateException("gzip member too short", (int64) 0);
+        }
+        int32 m0 = ((int32) src[0]) & 0xFF;
+        int32 m1 = ((int32) src[1]) & 0xFF;
+        int32 cm = ((int32) src[2]) & 0xFF;
+        if (m0 != 0x1F || m1 != 0x8B) {
+            throw heap DeflateException("not a gzip member (bad magic)", (int64) 0);
+        }
+        if (cm != 8) {
+            throw heap DeflateException("gzip CM is not deflate", (int64) 2);
+        }
+        int64 limit = n - (int64) 8;        // the trailer must remain
         int64 pos = (int64) 10;
         int32 flg = ((int32) src[3]) & 0xFF;
         if ((flg & 4) != 0) {
             int64 p1 = pos + 1;
+            if (p1 >= limit) {
+                throw heap DeflateException("gzip FEXTRA overruns member", pos);
+            }
             int32 lo = ((int32) src[pos]) & 0xFF;
             int32 hi = ((int32) src[p1]) & 0xFF;
             int64 xlen = (int64) (lo | (hi << 8));
@@ -63,19 +88,45 @@ public final class Gzip {
         }
         if ((flg & 8) != 0) {
             boolean go = true;
-            while (go) { int8 c = src[pos]; pos = pos + 1; if (c == (int8) 0) { go = false; } }
+            while (go) {
+                if (pos >= limit) {
+                    throw heap DeflateException("gzip FNAME overruns member", pos);
+                }
+                int8 c = src[pos]; pos = pos + 1; if (c == (int8) 0) { go = false; }
+            }
         }
         if ((flg & 16) != 0) {
             boolean go = true;
-            while (go) { int8 c = src[pos]; pos = pos + 1; if (c == (int8) 0) { go = false; } }
+            while (go) {
+                if (pos >= limit) {
+                    throw heap DeflateException("gzip FCOMMENT overruns member", pos);
+                }
+                int8 c = src[pos]; pos = pos + 1; if (c == (int8) 0) { go = false; }
+            }
         }
         if ((flg & 2) != 0) { pos = pos + (int64) 2; }
+        if (pos > limit) {
+            throw heap DeflateException("gzip header overruns member", pos);
+        }
 
+        int64 dlen = limit - pos;
+        int8[] def = Gzip.slice(src, pos, dlen);
+        int8[] out = Deflate.inflateGrow(def, dlen);
+        int64 outLen = (int64) out.count();
+
+        int64 crcPos = n - (int64) 8;
+        int64 storedCrc = Gzip.readLE4(src, crcPos);
+        int64 gotCrc = Gzip.crc32(out, outLen);
+        if (gotCrc != storedCrc) {
+            throw heap DeflateException("gzip CRC-32 mismatch", crcPos);
+        }
         int64 isPos = n - (int64) 4;
         int64 isize = Gzip.readLE4(src, isPos);
-        int64 dlen = (n - (int64) 8) - pos;
-        int8[] def = Gzip.slice(src, pos, dlen);
-        return Deflate.inflate(def, dlen, isize);
+        int64 outMod = outLen & (int64) 0xFFFFFFFF;
+        if (outMod != isize) {
+            throw heap DeflateException("gzip ISIZE mismatch", isPos);
+        }
+        return #out;
     }
 
     /** Compress `src` (first `n` bytes) into a gzip member (stored DEFLATE). */
