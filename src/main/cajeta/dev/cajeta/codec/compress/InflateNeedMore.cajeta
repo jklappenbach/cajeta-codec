@@ -1,0 +1,20 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * The [`InflateStream`](InflateStream.cajeta) INTERNAL resume signal:
+ * the trial decode of the current block ran out of fed input — not an
+ * error, just "feed me more and I will retry from the last block
+ * boundary". It extends [`DeflateException`](DeflateException.cajeta)
+ * only so a decode helper has one throw surface; `InflateStream.feed`
+ * catches THIS subtype and rolls back, while a plain
+ * `DeflateException` (real corruption) propagates to the caller.
+ * Never escapes the stream (except from `endInput`, where truncation
+ * IS the error and a plain `DeflateException` is raised instead).
+ */
+public class InflateNeedMore extends DeflateException {
+    public InflateNeedMore(int64 position) {
+        this.message = "DEFLATE input exhausted mid-block (resumable)";
+        this.cause = 0;
+        this.position = position;
+    }
+}

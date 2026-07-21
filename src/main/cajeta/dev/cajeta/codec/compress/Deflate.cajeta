@@ -455,6 +455,27 @@ public final class Deflate {
      * owns the result.
      */
     public static #int8[] deflateFixed(int8[] src, int64 n) {
+        int64 cap = n + (n >> 1) + (int64) 16;
+        BitWriter bw = heap BitWriter(cap);
+        Deflate.deflateFixedInto(bw, src, 0, (int32) n, 1);
+        bw.flushByte();
+        return bw.result();
+    }
+
+    /**
+     * The fixed-Huffman encoder core, range-parameterized for the 1.6b
+     * streaming surface: positions `[0, emitFrom)` PRIME the match
+     * finder only (they are already-transmitted history — the LZ77
+     * window a [`DeflateStream`](DeflateStream.cajeta) carries across
+     * flush boundaries), positions `[emitFrom, nLen)` are matched AND
+     * emitted as one fixed-Huffman block with the given `bfinal` bit.
+     * Matches from the emitted range may reach back into the primed
+     * history (that is the point). Ends with the end-of-block symbol;
+     * the caller owns byte alignment (`flushByte`) and any sync-flush
+     * framing.
+     */
+    static void deflateFixedInto(BitWriter bw, int8[] src, int32 emitFrom,
+                                 int32 nLen, int32 bfinal) {
         int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
         int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
         int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
@@ -468,7 +489,6 @@ public final class Deflate {
         int32 MINMATCH = 3;
         int32 MAXMATCH = 258;
 
-        int32 nLen = (int32) n;
         int32[] head = heap int32[HASHSIZE];
         int32[] prev = heap int32[WSIZE];
         int32 t = 0;
@@ -476,12 +496,27 @@ public final class Deflate {
         t = 0;
         while (t < WSIZE) { prev[t] = -1; t = t + 1; }
 
-        int64 cap = n + (n >> 1) + (int64) 16;
-        BitWriter bw = heap BitWriter(cap);
-        bw.writeBits(1, 1);   // BFINAL = 1 (single block)
-        bw.writeBits(1, 2);   // BTYPE  = 01 (fixed Huffman)
+        bw.writeBits(bfinal, 1);
+        bw.writeBits(1, 2);   // BTYPE = 01 (fixed Huffman)
 
+        // Prime the chains over the history range — inserts only, no
+        // emission (those bytes are already on the peer's side).
         int32 pos = 0;
+        while (pos < emitFrom) {
+            if ((pos + MINMATCH) <= nLen) {
+                int32 p1 = pos + 1;
+                int32 p2 = pos + 2;
+                int32 e0 = ((int32) src[pos]) & 0xFF;
+                int32 e1 = ((int32) src[p1]) & 0xFF;
+                int32 e2 = ((int32) src[p2]) & 0xFF;
+                int32 hp = ((e0 << 10) ^ (e1 << 5) ^ e2) & HASHMASK;
+                int32 ps = pos & WMASK;
+                prev[ps] = head[hp];
+                head[hp] = pos;
+            }
+            pos = pos + 1;
+        }
+
         while (pos < nLen) {
             int32 bestLen = 0;
             int32 bestDist = 0;
@@ -574,8 +609,6 @@ public final class Deflate {
             }
         }
         bw.writeHuff(0, 7);   // end-of-block symbol 256 (7-bit code 0)
-        bw.flushByte();
-        return bw.result();
     }
 
     /** Inflate a raw DEFLATE stream (first `n` bytes) into `destLen` bytes. */

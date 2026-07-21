@@ -1,0 +1,148 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * **Incremental DEFLATE encoder** (the 1.6b streaming surface): collects
+ * input via [`write`](#write) and emits ordinary RFC 1951 blocks at
+ * flush points, with the **LZ77 window carried across calls** — a
+ * segment's matches may reach up to 32 KiB back into PREVIOUS segments'
+ * bytes (permessage-deflate "context takeover", and why a repeated
+ * message compresses to almost nothing the second time).
+ *
+ *   - [`syncFlush`](#syncFlush) — emit the pending bytes as a
+ *     non-final fixed-Huffman block, then the **empty stored block**
+ *     (`Z_SYNC_FLUSH` framing) so the segment ends byte-aligned in
+ *     `00 00 FF FF` and everything before it is decodable NOW.
+ *   - [`finish`](#finish) — emit the pending bytes as the FINAL block
+ *     (`BFINAL = 1`); the stream is complete.
+ *
+ * The concatenation of every emitted segment is ONE valid DEFLATE
+ * stream — the framing is standard, not a dialect; the block core's
+ * one-shot [`Deflate.inflate`](Deflate.cajeta) decodes it whole. Each
+ * segment starts and ends byte-aligned, so segments travel
+ * independently (WebSocket messages, chunked HTTP writes).
+ *
+ * Compression is the block core's fixed-Huffman + hash-chain LZ77
+ * ([`Deflate.deflateFixedInto`](Deflate.cajeta#deflateFixedInto)), with
+ * the retained history primed into the match finder per flush.
+ */
+public final class DeflateStream {
+    /** Retained input history (≤ 32 KiB) + pending unflushed bytes. */
+    int8[] buf;
+    /** Bytes of `buf` that are HISTORY (already emitted in prior segments). */
+    int32 histLen;
+    /** Total valid bytes in `buf` (history + pending). */
+    int32 bufLen;
+    /** Set by [`finish`](#finish); further writes/flushes raise. */
+    boolean done;
+
+    /** An empty stream: no history, no pending bytes. @EntryPoint */
+    public DeflateStream() {
+        int8[] b0 = heap int8[65536];
+        this.buf = #b0;
+        this.histLen = 0;
+        this.bufLen = 0;
+        this.done = false;
+    }
+
+    /** Append `len` bytes of `data` to the pending segment. */
+    public void write(int8[] data, int32 len) {
+        if (this.done) {
+            throw heap DeflateException(
+                "write after finish() on a DeflateStream", (int64) 0);
+        }
+        this.ensure(this.bufLen + len);
+        int32 i = 0;
+        while (i < len) {
+            this.buf[this.bufLen] = data[i];
+            this.bufLen = this.bufLen + 1;
+            i = i + 1;
+        }
+    }
+
+    /**
+     * Emit the pending bytes as a non-final block followed by the
+     * `Z_SYNC_FLUSH` empty stored block — the returned segment is
+     * byte-aligned, ends `00 00 FF FF`, and decodes standalone against
+     * the receiver's carried window. Pending may be empty (a bare
+     * heartbeat flush). Caller owns the bytes.
+     */
+    public #int8[] syncFlush() {
+        if (this.done) {
+            throw heap DeflateException(
+                "syncFlush after finish() on a DeflateStream", (int64) 0);
+        }
+        int32 pend = this.bufLen - this.histLen;
+        int64 cap = (int64) pend + ((int64) pend >> 1) + (int64) 32;
+        BitWriter bw = heap BitWriter(cap);
+        if (pend > 0) {
+            Deflate.deflateFixedInto(bw, this.buf, this.histLen,
+                                     this.bufLen, 0);
+        }
+        // The sync tail: BFINAL=0, BTYPE=00, pad to the byte, LEN=0,
+        // NLEN=0xFFFF — the canonical 00 00 FF FF boundary.
+        bw.writeBits(0, 3);
+        bw.flushByte();
+        bw.writeBits(0x00, 8);
+        bw.writeBits(0x00, 8);
+        bw.writeBits(0xFF, 8);
+        bw.writeBits(0xFF, 8);
+        this.retire();
+        return bw.result();
+    }
+
+    /**
+     * Emit the pending bytes as the FINAL block (`BFINAL = 1` — an
+     * empty pending still emits the empty final block so the stream
+     * terminates). The stream is complete afterwards. Caller owns the
+     * bytes.
+     */
+    public #int8[] finish() {
+        if (this.done) {
+            throw heap DeflateException(
+                "finish() called twice on a DeflateStream", (int64) 0);
+        }
+        int32 pend = this.bufLen - this.histLen;
+        int64 cap = (int64) pend + ((int64) pend >> 1) + (int64) 32;
+        BitWriter bw = heap BitWriter(cap);
+        Deflate.deflateFixedInto(bw, this.buf, this.histLen, this.bufLen, 1);
+        bw.flushByte();
+        this.done = true;
+        return bw.result();
+    }
+
+    /** True once [`finish`](#finish) sealed the stream. */
+    public boolean finished() {
+        return this.done;
+    }
+
+    /** Everything emitted becomes history; keep at most the 32 KiB window. */
+    void retire() {
+        this.histLen = this.bufLen;
+        if (this.histLen > 32768) {
+            int32 shift = this.histLen - 32768;
+            int32 i = 0;
+            while (i < 32768) {
+                int32 si = shift + i;
+                this.buf[i] = this.buf[si];
+                i = i + 1;
+            }
+            this.histLen = 32768;
+            this.bufLen = 32768;
+        }
+    }
+
+    /** Grow `buf` to hold `need` bytes. */
+    void ensure(int32 need) {
+        int64 cap = (int64) this.buf.count();
+        if ((int64) need <= cap) { return; }
+        int64 newcap = cap * (int64) 2;
+        while (newcap < (int64) need) { newcap = newcap * (int64) 2; }
+        int8[] nb = heap int8[newcap];
+        int32 i = 0;
+        while (i < this.bufLen) {
+            nb[i] = this.buf[i];
+            i = i + 1;
+        }
+        this.buf #= nb;
+    }
+}

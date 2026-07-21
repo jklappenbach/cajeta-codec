@@ -1,0 +1,461 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * **Incremental DEFLATE decoder** (the 1.6b streaming surface):
+ * [`feed`](#feed) compressed bytes in ARBITRARY chunks — splits may land
+ * mid-symbol, mid-bit — and [`drain`](#drain) decoded output as it
+ * becomes available, with the 32 KiB LZ77 window preserved across calls
+ * (permessage-deflate context takeover: a message's back-references may
+ * reach into PREVIOUS messages' plaintext).
+ *
+ * ## The resume discipline: block-boundary checkpoint + rollback
+ *
+ * DEFLATE blocks are bit-serial; suspending a decoder mid-Huffman-symbol
+ * means a full explicit state machine. This stream takes the classic
+ * cheaper deal: it decodes a **whole block per attempt** from the last
+ * committed block boundary. If the fed input runs out mid-block, the
+ * trial's partial output is rolled back (the resume signal is the
+ * internal [`InflateNeedMore`](InflateNeedMore.cajeta) subtype — real
+ * corruption still raises [`DeflateException`](DeflateException.cajeta)
+ * to the caller) and the SAME block re-decodes from its start on the
+ * next feed. Worst case, a block is re-decoded once per feed that
+ * touches it — bounded, and irrelevant next to the I/O the feeds came
+ * from. A sync-flush boundary (`00 00 FF FF`) is just an empty stored
+ * block: it commits like any block, so everything before it drains
+ * immediately — no lookahead needed.
+ *
+ * Output before the committed point slides once drained (keeping the
+ * 32 KiB back-reference window), so a long-lived stream holds O(window
+ * + largest block), not O(total output). `finished()` turns true when a
+ * `BFINAL` block commits; a sync-flushed stream (WebSocket messages)
+ * never finishes — that is normal, don't call [`endInput`](#endInput)
+ * on it. `endInput` declares the transport ended: a stream that is not
+ * finished then IS truncated, and raises.
+ */
+public final class InflateStream {
+    /** Unconsumed compressed input (committed prefix compacted away). */
+    int8[] inbuf;
+    int64 inLen;
+    /** Committed bit position within `inbuf` (start of the next block). */
+    int64 ckBit;
+    /** Working bit cursor of the current trial decode. */
+    int64 bitpos;
+    /** Output window: committed + trial bytes; `win[0]` is `base` absolute. */
+    int8[] win;
+    int64 wp;
+    int64 committedWp;
+    int64 drainedTo;
+    int64 base;
+    /** True once a `BFINAL` block committed. */
+    boolean done;
+
+    /** A fresh stream with an empty window. @EntryPoint */
+    public InflateStream() {
+        int8[] ib = heap int8[4096];
+        this.inbuf = #ib;
+        this.inLen = (int64) 0;
+        this.ckBit = (int64) 0;
+        this.bitpos = (int64) 0;
+        int8[] wb = heap int8[65536];
+        this.win = #wb;
+        this.wp = (int64) 0;
+        this.committedWp = (int64) 0;
+        this.drainedTo = (int64) 0;
+        this.base = (int64) 0;
+        this.done = false;
+    }
+
+    // ----- the public surface ---------------------------------------------
+
+    /**
+     * Append `len` compressed bytes and decode as far as the input
+     * allows. Malformed data raises `DeflateException`; input ending
+     * mid-block is NOT an error (the block resumes on the next feed).
+     * Bytes fed after the final block are retained but ignored (a
+     * wrapper's trailer — checksums belong to the gzip/zlib layers).
+     */
+    public void feed(int8[] data, int32 len) {
+        this.inEnsure(this.inLen + (int64) len);
+        int32 i = 0;
+        while (i < len) {
+            this.inbuf[this.inLen] = data[i];
+            this.inLen = this.inLen + 1;
+            i = i + 1;
+        }
+        this.tryDecode();
+    }
+
+    /**
+     * Detach every byte decoded-and-committed since the last drain
+     * (possibly empty). Slides the window afterwards, keeping the
+     * 32 KiB the next back-reference may need.
+     */
+    public #int8[] drain() {
+        int64 n = this.committedWp - this.drainedTo;
+        int8[] out = heap int8[n];
+        int64 i = (int64) 0;
+        while (i < n) {
+            int64 si = this.drainedTo + i;
+            out[i] = this.win[si];
+            i = i + 1;
+        }
+        this.drainedTo = this.committedWp;
+        this.slide();
+        return #out;
+    }
+
+    /** True once the stream's `BFINAL` block has been decoded. */
+    public boolean finished() {
+        return this.done;
+    }
+
+    /**
+     * Declare the transport ended. A stream whose final block never
+     * arrived is TRUNCATED — that raises here (and only here: while
+     * more input may come, an incomplete tail is just "not yet").
+     */
+    public void endInput() {
+        if (!this.done) {
+            throw heap DeflateException(
+                "DEFLATE stream truncated: input ended before the final block",
+                this.ckBit >> 3);
+        }
+    }
+
+    // ----- the checkpointed decode loop ------------------------------------
+
+    /** Decode whole blocks from the checkpoint until input runs out. */
+    void tryDecode() {
+        boolean more = true;
+        while (more && !this.done) {
+            this.bitpos = this.ckBit;
+            this.wp = this.committedWp;
+            try {
+                int32 bfinal = this.sGetBits(1);
+                int32 btype = this.sGetBits(2);
+                if (btype == 0) {
+                    this.sStored();
+                } else if (btype == 1) {
+                    this.sFixed();
+                } else if (btype == 2) {
+                    this.sDynamic();
+                } else {
+                    throw heap DeflateException(
+                        "reserved block type 3", this.bitpos >> 3);
+                }
+                this.ckBit = this.bitpos;
+                this.committedWp = this.wp;
+                if (bfinal == 1) {
+                    this.done = true;
+                }
+            } catch (InflateNeedMore nm) {
+                this.wp = this.committedWp;     // roll the trial back
+                more = false;
+            }
+        }
+        // Compact the committed input prefix away (whole bytes only).
+        int64 shift = this.ckBit >> 3;
+        if (shift > (int64) 0) {
+            int64 rest = this.inLen - shift;
+            int64 i = (int64) 0;
+            while (i < rest) {
+                int64 si = shift + i;
+                this.inbuf[i] = this.inbuf[si];
+                i = i + 1;
+            }
+            this.inLen = rest;
+            this.ckBit = this.ckBit & (int64) 7;
+        }
+    }
+
+    /** Keep O(window): discard drained output beyond the 32 KiB window. */
+    void slide() {
+        if (this.drainedTo <= (int64) 65536) {
+            return;
+        }
+        int64 shift = this.drainedTo - (int64) 32768;
+        int64 rest = this.wp - shift;
+        int64 i = (int64) 0;
+        while (i < rest) {
+            int64 si = shift + i;
+            this.win[i] = this.win[si];
+            i = i + 1;
+        }
+        this.wp = this.wp - shift;
+        this.committedWp = this.committedWp - shift;
+        this.drainedTo = this.drainedTo - shift;
+        this.base = this.base + shift;
+    }
+
+    // ----- streaming twins of the block core's decode helpers --------------
+    // (Identical logic to Deflate's, except input exhaustion throws the
+    // resumable InflateNeedMore instead of the terminal DeflateException,
+    // and output goes through winEnsure/wp.)
+
+    int32 sGetBits(int32 cnt) {
+        int64 bp = this.bitpos;
+        int64 limit = this.inLen << 3;
+        int32 val = 0;
+        int32 i = 0;
+        while (i < cnt) {
+            if (bp >= limit) {
+                throw heap InflateNeedMore(bp >> 3);
+            }
+            int64 byteIdx = bp >> 3;
+            int32 bitIdx = (int32) (bp & (int64) 7);
+            int32 byteVal = ((int32) this.inbuf[byteIdx]) & 0xFF;
+            int32 bit = (byteVal >> bitIdx) & 1;
+            val = val | (bit << i);
+            bp = bp + 1;
+            i = i + 1;
+        }
+        this.bitpos = bp;
+        return val;
+    }
+
+    int32 sDecodeSym(HuffTable t) {
+        int32 code = 0;
+        int32 first = 0;
+        int32 index = 0;
+        int32 len = 1;
+        int32 result = -1;
+        boolean go = true;
+        while (go) {
+            if (len > 15) {
+                throw heap DeflateException(
+                    "invalid Huffman code", this.bitpos >> 3);
+            }
+            int32 bit = this.sGetBits(1);
+            code = code | bit;
+            int32 cnt = t.count[len];
+            int32 diff = code - first;
+            if (diff < cnt) {
+                int32 si = index + diff;
+                result = t.symbol[si];
+                go = false;
+            } else {
+                index = index + cnt;
+                first = (first + cnt) << 1;
+                code = code << 1;
+                len = len + 1;
+            }
+        }
+        return result;
+    }
+
+    void sStored() {
+        this.bitpos = ((this.bitpos + (int64) 7) >> 3) << 3;
+        int64 bp = this.bitpos >> 3;
+        if (bp + (int64) 4 > this.inLen) {
+            throw heap InflateNeedMore(bp);
+        }
+        int64 bp1 = bp + 1;
+        int64 bp2 = bp + 2;
+        int64 bp3 = bp + 3;
+        int32 lo = ((int32) this.inbuf[bp]) & 0xFF;
+        int32 hi = ((int32) this.inbuf[bp1]) & 0xFF;
+        int32 len = lo | (hi << 8);
+        int32 nlo = ((int32) this.inbuf[bp2]) & 0xFF;
+        int32 nhi = ((int32) this.inbuf[bp3]) & 0xFF;
+        int32 nlen = nlo | (nhi << 8);
+        if ((len ^ nlen) != 0xFFFF) {
+            throw heap DeflateException(
+                "stored-block NLEN is not LEN's complement", bp);
+        }
+        bp = bp + 4;
+        if (bp + (int64) len > this.inLen) {
+            throw heap InflateNeedMore(bp);
+        }
+        this.winEnsure(this.wp + (int64) len);
+        int32 k = 0;
+        while (k < len) {
+            int64 si = bp + (int64) k;
+            this.win[this.wp] = this.inbuf[si];
+            this.wp = this.wp + 1;
+            k = k + 1;
+        }
+        this.bitpos = (bp + (int64) len) << 3;
+    }
+
+    void sHuffman(HuffTable litTable, HuffTable distTable) {
+        int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
+        int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
+        int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
+        int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+        boolean go = true;
+        while (go) {
+            int32 sym = this.sDecodeSym(litTable);
+            if (sym == 256) { go = false; }
+            else if (sym >= 0 && sym < 256) {
+                this.winEnsure(this.wp + (int64) 1);
+                this.win[this.wp] = (int8) sym;
+                this.wp = this.wp + 1;
+            } else if (sym >= 257 && sym <= 285) {
+                int32 li = sym - 257;
+                int32 leBits = lengthExtra[li];
+                int32 lenE = this.sGetBits(leBits);
+                int32 len = lengthBase[li] + lenE;
+                int32 dsym = this.sDecodeSym(distTable);
+                if (dsym < 0 || dsym > 29) {
+                    throw heap DeflateException(
+                        "invalid distance symbol", this.bitpos >> 3);
+                }
+                int32 deBits = distExtra[dsym];
+                int32 distE = this.sGetBits(deBits);
+                int32 dist = distBase[dsym] + distE;
+                // The reach check is against TOTAL output (absolute),
+                // not this window's fill — context carried from prior
+                // feeds counts, which is the whole point.
+                if ((int64) dist > this.base + this.wp) {
+                    throw heap DeflateException(
+                        "back-reference distance exceeds output produced",
+                        this.bitpos >> 3);
+                }
+                this.winEnsure(this.wp + (int64) len);
+                int64 op = this.wp;
+                int64 from = op - (int64) dist;
+                int32 c = 0;
+                while (c < len) {
+                    int8 v = this.win[from];
+                    this.win[op] = v;
+                    op = op + 1;
+                    from = from + 1;
+                    c = c + 1;
+                }
+                this.wp = op;
+            } else {
+                throw heap DeflateException(
+                    "invalid literal/length symbol", this.bitpos >> 3);
+            }
+        }
+    }
+
+    void sFixed() {
+        int32[] litLengths = heap int32[288];
+        int32 i = 0;
+        while (i < 144) { litLengths[i] = 8; i = i + 1; }
+        while (i < 256) { litLengths[i] = 9; i = i + 1; }
+        while (i < 280) { litLengths[i] = 7; i = i + 1; }
+        while (i < 288) { litLengths[i] = 8; i = i + 1; }
+        HuffTable litTable = Deflate.build(litLengths, 288, 288);
+        int32[] distLengths = heap int32[30];
+        int32 d = 0;
+        while (d < 30) { distLengths[d] = 5; d = d + 1; }
+        HuffTable distTable = Deflate.build(distLengths, 30, 30);
+        this.sHuffman(litTable, distTable);
+    }
+
+    void sDynamic() {
+        int32 hlit = this.sGetBits(5) + 257;
+        int32 hdist = this.sGetBits(5) + 1;
+        int32 hclen = this.sGetBits(4) + 4;
+        int32[] clOrder = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13,
+            2, 14, 1, 15};
+        int32[] clLengths = heap int32[19];
+        int32 i = 0;
+        while (i < 19) { clLengths[i] = 0; i = i + 1; }
+        i = 0;
+        while (i < hclen) {
+            int32 v = this.sGetBits(3);
+            int32 pos = clOrder[i];
+            clLengths[pos] = v;
+            i = i + 1;
+        }
+        HuffTable clTable = Deflate.build(clLengths, 19, 19);
+
+        int32 nsym = hlit + hdist;
+        int32[] lengths = heap int32[320];
+        int32 idx = 0;
+        while (idx < nsym) {
+            int32 sym = this.sDecodeSym(clTable);
+            if (sym >= 0 && sym < 16) {
+                lengths[idx] = sym;
+                idx = idx + 1;
+            } else if (sym == 16) {
+                if (idx == 0) {
+                    throw heap DeflateException(
+                        "code-length repeat with no previous length",
+                        this.bitpos >> 3);
+                }
+                int32 pi = idx - 1;
+                int32 prev = lengths[pi];
+                int32 rep = this.sGetBits(2) + 3;
+                if (idx + rep > nsym) {
+                    throw heap DeflateException(
+                        "code-length repeat overruns the table",
+                        this.bitpos >> 3);
+                }
+                int32 r = 0;
+                while (r < rep) { lengths[idx] = prev; idx = idx + 1; r = r + 1; }
+            } else if (sym == 17) {
+                int32 rep = this.sGetBits(3) + 3;
+                if (idx + rep > nsym) {
+                    throw heap DeflateException(
+                        "code-length repeat overruns the table",
+                        this.bitpos >> 3);
+                }
+                int32 r = 0;
+                while (r < rep) { lengths[idx] = 0; idx = idx + 1; r = r + 1; }
+            } else if (sym == 18) {
+                int32 rep = this.sGetBits(7) + 11;
+                if (idx + rep > nsym) {
+                    throw heap DeflateException(
+                        "code-length repeat overruns the table",
+                        this.bitpos >> 3);
+                }
+                int32 r = 0;
+                while (r < rep) { lengths[idx] = 0; idx = idx + 1; r = r + 1; }
+            } else {
+                throw heap DeflateException(
+                    "invalid code-length symbol", this.bitpos >> 3);
+            }
+        }
+
+        int32[] litLengths = heap int32[288];
+        i = 0;
+        while (i < hlit) { litLengths[i] = lengths[i]; i = i + 1; }
+        while (i < 288) { litLengths[i] = 0; i = i + 1; }
+        int32[] distLengths = heap int32[30];
+        int32 j = 0;
+        while (j < hdist) {
+            int32 srcIdx = hlit + j;
+            distLengths[j] = lengths[srcIdx];
+            j = j + 1;
+        }
+        while (j < 30) { distLengths[j] = 0; j = j + 1; }
+
+        HuffTable litTable = Deflate.build(litLengths, 288, 288);
+        HuffTable distTable = Deflate.build(distLengths, 30, 30);
+        this.sHuffman(litTable, distTable);
+    }
+
+    // ----- growth ----------------------------------------------------------
+
+    void inEnsure(int64 need) {
+        int64 cap = (int64) this.inbuf.count();
+        if (need <= cap) { return; }
+        int64 newcap = cap * (int64) 2;
+        while (newcap < need) { newcap = newcap * (int64) 2; }
+        int8[] nb = heap int8[newcap];
+        int64 i = (int64) 0;
+        while (i < this.inLen) {
+            nb[i] = this.inbuf[i];
+            i = i + 1;
+        }
+        this.inbuf #= nb;
+    }
+
+    void winEnsure(int64 need) {
+        int64 cap = (int64) this.win.count();
+        if (need <= cap) { return; }
+        int64 newcap = cap * (int64) 2;
+        while (newcap < need) { newcap = newcap * (int64) 2; }
+        int8[] nb = heap int8[newcap];
+        int64 i = (int64) 0;
+        while (i < this.wp) {
+            nb[i] = this.win[i];
+            i = i + 1;
+        }
+        this.win #= nb;
+    }
+}
