@@ -16,7 +16,8 @@ public final class ProtobufWriter {
 
     public ProtobufWriter() {
         this.cap = 64;
-        this.buf = heap int8[64];
+        int8[] b0 = heap int8[64];
+        this.buf = #b0;
         this.len = 0;
     }
 
@@ -30,9 +31,11 @@ public final class ProtobufWriter {
         int32 n = this.len;
         int32 i = 0;
         while (i < n) { nb[i] = ob[i]; i = i + 1; }
-        // NOTE: drop-on-reassign gap leaks `ob` (same parked compiler gap as
-        // CsvWriter's buffer grow).
-        this.buf = nb;
+        // `#=` — the plain assign this used to be didn't merely leak:
+        // the fresh buffer dropped at ensure()'s exit and the field
+        // DANGLED (writes into freed heap; the AvroWriter twin of this
+        // line was the 'reflective-runner abort' root cause).
+        this.buf #= nb;
         this.cap = newCap;
     }
 

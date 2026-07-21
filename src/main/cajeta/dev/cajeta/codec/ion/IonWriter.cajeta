@@ -25,11 +25,14 @@ public final class IonWriter {
     int32 localCount;
 
     public IonWriter() {
-        this.buf = heap int8[64];
+        int8[] b0 = heap int8[64];
+        this.buf = #b0;
         this.len = (int64) 0;
-        this.starts = heap int64[16];
+        int64[] s0 = heap int64[16];
+        this.starts = #s0;
         this.openCount = 0;
-        this.locals = heap String[32];
+        String[] l0 = heap String[32];
+        this.locals = #l0;
         this.localCount = 0;
     }
 
@@ -47,7 +50,7 @@ public final class IonWriter {
                 nb[i] = this.buf[i];
                 i = i + 1;
             }
-            this.buf = nb;
+            this.buf #= nb;
         }
     }
 

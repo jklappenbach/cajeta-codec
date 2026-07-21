@@ -15,7 +15,8 @@ public final class AvroWriter {
     int64 len;
 
     public AvroWriter() {
-        this.buf = heap int8[64];
+        int8[] b0 = heap int8[64];
+        this.buf = #b0;
         this.len = (int64) 0;
     }
 
@@ -28,7 +29,7 @@ public final class AvroWriter {
         int64 cur = this.len;
         int64 i = (int64) 0;
         while (i < cur) { nb[i] = this.buf[i]; i = i + 1; }
-        this.buf = nb;
+        this.buf #= nb;
     }
 
     public void putByte(int32 b) {

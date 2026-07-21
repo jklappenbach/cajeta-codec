@@ -15,7 +15,8 @@ public final class BitWriter {
     int32 bitcnt;   // valid bits in bitbuf
 
     public BitWriter(int64 cap) {
-        this.out = heap int8[cap];
+        int8[] b0 = heap int8[cap];
+        this.out = #b0;
         this.op = (int64) 0;
         this.bitbuf = 0;
         this.bitcnt = 0;
@@ -29,7 +30,7 @@ public final class BitWriter {
         int8[] nb = heap int8[newcap];
         int64 i = (int64) 0;
         while (i < this.op) { nb[i] = this.out[i]; i = i + 1; }
-        this.out = nb;
+        this.out #= nb;
     }
 
     // Append the low `nbits` of `value`, LSB-first.
