@@ -1,0 +1,14 @@
+package dev.cajeta.codec.bridge;
+
+import dev.cajeta.unit.Runner;
+
+/**
+ * Entry for the cross-repo Arrow bridge test (U17). Reflective @Test discovery
+ * runs every bridge @Test; returns 0 when all green, 1 on any failure. Built
+ * against a from-source (unreleased) cajeta toolchain — see run-bridge-test.sh.
+ */
+public final class BridgeMain {
+    public static int32 run() {
+        return Runner.runAll();
+    }
+}

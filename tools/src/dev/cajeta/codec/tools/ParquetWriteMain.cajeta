@@ -1,0 +1,21 @@
+package dev.cajeta.codec.tools;
+
+import dev.cajeta.codec.parquet.ParquetWriter;
+import cajeta.io.file.File;
+import cajeta.io.file.FileWriter;
+import cajeta.io.file.OpenMode;
+
+/** Emits /tmp/our.parquet from ParquetWriter for the pyarrow ecosystem check
+ *  (tools/ecosystem-validate-parquet.md). Column `x` = [7,14,21,28,35]. */
+public final class ParquetWriteMain {
+    public static int32 run() {
+        int32[] v = heap int32[5];
+        v[0] = 7; v[1] = 14; v[2] = 21; v[3] = 28; v[4] = 35;
+        int8[] f = ParquetWriter.writeInt32Column(v, 5);
+        int32 n = (int32) f.count();
+        FileWriter w = File.openWrite("/tmp/our.parquet", OpenMode.WRITE);
+        w.write(f, n);
+        w.close();
+        return 0;
+    }
+}

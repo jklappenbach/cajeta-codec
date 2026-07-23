@@ -5,16 +5,23 @@ import dev.cajeta.codec.compress.Snappy;
 import dev.cajeta.codec.compress.Gzip;
 
 /**
- * Parquet single-column reader (Phase 7.1c + 7.3). Reads one INT32 column's
- * values from the first row group, covering real pyarrow files:
+ * Parquet single-column reader — widened to full fidelity (U17). Reads one
+ * column's values across ALL row groups of a real pyarrow file:
+ *   - physical types: INT32, INT64, FLOAT, DOUBLE, and BYTE_ARRAY (UTF-8);
  *   - codecs: UNCOMPRESSED, SNAPPY, GZIP (page-level, Phase-4 codecs);
  *   - value encodings: PLAIN and PLAIN_DICTIONARY / RLE_DICTIONARY (dictionary
- *     page → indices via the columnar `Rle` hybrid → `Dictionary.gather`).
- * v1 assumes no nulls (every value present); null masks (def-level decode),
- * multi-row-group spanning, and non-INT32 types are follow-ups (7.3 tail / writer).
+ *     page → indices via the columnar `Rle` hybrid → gather);
+ *   - nulls: OPTIONAL columns decode their definition levels (RLE hybrid, bit
+ *     width 1) into a per-row validity mask, and the value plane carries ONLY
+ *     the present values, scattered back into place.
+ * The typed surface wrappers (`readInt32Column`, `readFloat64Column`,
+ * `readStringColumn`, `readValidity`, …) reinterpret the widened bits — no
+ * bit-smuggling at the surface.
  *
- * One `ThriftCompactReader` over the file (its ctor consumes the buffer), reused
- * via `seek` for the footer, the dictionary page, and the data page.
+ * v1 assumption: one data page per column chunk (num_values == the chunk's
+ * num_rows); multi-page chunks and rep levels (nested/repeated) remain follow-ups.
+ * One `ThriftCompactReader` over the file, repositioned via `seek` for the
+ * footer, each dictionary page, and each data page.
  */
 public final class ParquetColumnReader {
 
@@ -52,6 +59,29 @@ public final class ParquetColumnReader {
         return out;
     }
 
+    // PLAIN BYTE_ARRAY values: each is a 4-byte-LE length prefix + that many
+    // UTF-8 bytes. Reads `count` present values starting at `start`.
+    static #String[] readPlainStrings(int8[] page, int64 start, int32 count) {
+        String[] out = heap String[count];
+        int64 p = start;
+        int32 i = 0;
+        while (i < count) {
+            int64 len = ParquetColumnReader.le32(page, p);
+            p = p + (int64) 4;
+            int8[] bytes = heap int8[len];
+            int64 k = (int64) 0;
+            while (k < len) {
+                int64 si = p + k;
+                bytes[k] = page[si];
+                k = k + 1;
+            }
+            out[i] = heap cajeta.lang.String(#bytes, (int32) len);
+            p = p + len;
+            i = i + 1;
+        }
+        return #out;
+    }
+
     static #int8[] decompress(int8[] comp, int64 compSize, int32 codec,
                               int64 uncompSize) {
         if (codec == 0) {
@@ -69,23 +99,29 @@ public final class ParquetColumnReader {
         throw heap ParquetParseException("unsupported page codec (v1)", (int64) 0);
     }
 
-    // Core reader: returns column values widened into int64 (raw bits for
-    // FLOAT/DOUBLE). Per-type wrappers narrow/reinterpret.
-    static #int64[] readLongs(int8[] file, int64 n, int32 col) {
+    /**
+     * Fully decode column `col` across every row group into a {@link ParquetColumn}
+     * (widened bits / strings + validity). This is the core over which all typed
+     * wrappers and the Arrow bridge are built.
+     */
+    public static #ParquetColumn readColumn(int8[] file, int64 n, int32 col) {
         int64 footerOff = ParquetMetadata.footerOffset(file, n);
         ThriftCompactReader r = heap ThriftCompactReader(file, footerOff);
 
-        int64 dataPageOffset = (int64) 0;
-        int64 dictPageOffset = (int64) 0 - (int64) 1;
-        int32 codec = 0;
         int32 colType = 0;
         int32 repType = 0;
+        int32 codec = 0;
+        int32 nGroups = 0;
+        int64[] dataOff = heap int64[1];
+        int64[] dictOff = heap int64[1];
+        int64[] grpRows = heap int64[1];
 
         r.enterStruct();
         int32 t = r.readFieldHeader();
         while (t != (int32) 0) {
             int32 fid = r.fieldId();
             if (fid == 2) {
+                // schema list: element (col+1) carries this column's repetition_type
                 int32 nEl = r.readListHeader();
                 int32 want = col + 1;
                 int32 e = 0;
@@ -108,60 +144,63 @@ public final class ParquetColumnReader {
                     e = e + 1;
                 }
             } else if (fid == 4) {
-                int32 nGroups = r.readListHeader();
+                nGroups = r.readListHeader();
+                dataOff = heap int64[nGroups];
+                dictOff = heap int64[nGroups];
+                grpRows = heap int64[nGroups];
                 int32 g = 0;
                 while (g < nGroups) {
-                    if (g != 0) {
-                        r.skip((int32) 12);
-                    } else {
-                        int32 rgSaved = r.enterStruct();
-                        int32 rt = r.readFieldHeader();
-                        while (rt != (int32) 0) {
-                            if (r.fieldId() == 1) {
-                                int32 nCols = r.readListHeader();
-                                int32 c = 0;
-                                while (c < nCols) {
-                                    if (c != col) {
-                                        r.skip((int32) 12);
-                                    } else {
-                                        int32 ccSaved = r.enterStruct();
-                                        int32 ct = r.readFieldHeader();
-                                        while (ct != (int32) 0) {
-                                            if (r.fieldId() == 3) {
-                                                int32 cmSaved = r.enterStruct();
-                                                int32 mt = r.readFieldHeader();
-                                                while (mt != (int32) 0) {
-                                                    int32 mfid = r.fieldId();
-                                                    if (mfid == 1) {
-                                                        colType = r.readI32();
-                                                    } else if (mfid == 4) {
-                                                        codec = r.readI32();
-                                                    } else if (mfid == 9) {
-                                                        dataPageOffset = r.readI64();
-                                                    } else if (mfid == 11) {
-                                                        dictPageOffset = r.readI64();
-                                                    } else {
-                                                        r.skip(mt);
-                                                    }
-                                                    mt = r.readFieldHeader();
+                    int32 rgSaved = r.enterStruct();
+                    dictOff[g] = (int64) 0 - (int64) 1;
+                    int32 rt = r.readFieldHeader();
+                    while (rt != (int32) 0) {
+                        int32 rfid = r.fieldId();
+                        if (rfid == 1) {
+                            int32 nCols = r.readListHeader();
+                            int32 c = 0;
+                            while (c < nCols) {
+                                if (c != col) {
+                                    r.skip((int32) 12);
+                                } else {
+                                    int32 ccSaved = r.enterStruct();
+                                    int32 ct = r.readFieldHeader();
+                                    while (ct != (int32) 0) {
+                                        if (r.fieldId() == 3) {
+                                            int32 cmSaved = r.enterStruct();
+                                            int32 mt = r.readFieldHeader();
+                                            while (mt != (int32) 0) {
+                                                int32 mfid = r.fieldId();
+                                                if (mfid == 1) {
+                                                    colType = r.readI32();
+                                                } else if (mfid == 4) {
+                                                    codec = r.readI32();
+                                                } else if (mfid == 9) {
+                                                    dataOff[g] = r.readI64();
+                                                } else if (mfid == 11) {
+                                                    dictOff[g] = r.readI64();
+                                                } else {
+                                                    r.skip(mt);
                                                 }
-                                                r.exitStruct(cmSaved);
-                                            } else {
-                                                r.skip(ct);
+                                                mt = r.readFieldHeader();
                                             }
-                                            ct = r.readFieldHeader();
+                                            r.exitStruct(cmSaved);
+                                        } else {
+                                            r.skip(ct);
                                         }
-                                        r.exitStruct(ccSaved);
+                                        ct = r.readFieldHeader();
                                     }
-                                    c = c + 1;
+                                    r.exitStruct(ccSaved);
                                 }
-                            } else {
-                                r.skip(rt);
+                                c = c + 1;
                             }
-                            rt = r.readFieldHeader();
+                        } else if (rfid == 3) {
+                            grpRows[g] = r.readI64();      // RowGroup.num_rows
+                        } else {
+                            r.skip(rt);
                         }
-                        r.exitStruct(rgSaved);
+                        rt = r.readFieldHeader();
                     }
+                    r.exitStruct(rgSaved);
                     g = g + 1;
                 }
             } else {
@@ -170,159 +209,263 @@ public final class ParquetColumnReader {
             t = r.readFieldHeader();
         }
 
+        boolean isStr = colType == (int32) 6;
         int32 valueBytes = 8;
-        if (colType == 1 || colType == 4) {
-            valueBytes = 4;                       // INT32 / FLOAT
-        } else if (colType == 2 || colType == 5) {
-            valueBytes = 8;                       // INT64 / DOUBLE
-        } else {
-            throw heap ParquetParseException(
-                "unsupported physical type (v1: INT32/INT64/FLOAT/DOUBLE)", dataPageOffset);
-        }
-        if (repType == 2) {
-            throw heap ParquetParseException("repeated/nested columns -> 7.3", dataPageOffset);
-        }
-
-
-        // --- dictionary page (optional) ---
-        int64[] dict = heap int64[0];
-        boolean hasDict = dictPageOffset >= (int64) 0;
-        if (hasDict) {
-            r.seek(dictPageOffset);
-            int32 dSaved = r.enterStruct();
-            int32 dComp = 0;
-            int32 dUncomp = 0;
-            int32 dNum = 0;
-            int32 dpt = r.readFieldHeader();
-            while (dpt != (int32) 0) {
-                int32 pf = r.fieldId();
-                if (pf == 2) {
-                    dUncomp = r.readI32();
-                } else if (pf == 3) {
-                    dComp = r.readI32();
-                } else if (pf == 7) {
-                    int32 dhSaved = r.enterStruct();
-                    int32 dh = r.readFieldHeader();
-                    while (dh != (int32) 0) {
-                        if (r.fieldId() == 1) {
-                            dNum = r.readI32();
-                        } else {
-                            r.skip(dh);
-                        }
-                        dh = r.readFieldHeader();
-                    }
-                    r.exitStruct(dhSaved);
-                } else {
-                    r.skip(dpt);
-                }
-                dpt = r.readFieldHeader();
-            }
-            r.exitStruct(dSaved);
-            int64 dStart = r.position();
-            int8[] dCompBytes = r.slice(dStart, (int64) dComp);
-            int8[] dPage = ParquetColumnReader.decompress(
-                dCompBytes, (int64) dComp, codec, (int64) dUncomp);
-            dict = ParquetColumnReader.readPlainLongs(dPage, (int64) 0, dNum, valueBytes);
-        }
-
-        // --- data page ---
-        r.seek(dataPageOffset);
-        int32 pSaved = r.enterStruct();
-        int32 compSize = 0;
-        int32 uncompSize = 0;
-        int32 pageNumValues = 0;
-        int32 encoding = 0;
-        int32 pt = r.readFieldHeader();
-        while (pt != (int32) 0) {
-            int32 pfid = r.fieldId();
-            if (pfid == 2) {
-                uncompSize = r.readI32();
-            } else if (pfid == 3) {
-                compSize = r.readI32();
-            } else if (pfid == 5) {
-                int32 dphSaved = r.enterStruct();
-                int32 dt = r.readFieldHeader();
-                while (dt != (int32) 0) {
-                    int32 dfid = r.fieldId();
-                    if (dfid == 1) {
-                        pageNumValues = r.readI32();
-                    } else if (dfid == 2) {
-                        encoding = r.readI32();
-                    } else {
-                        r.skip(dt);
-                    }
-                    dt = r.readFieldHeader();
-                }
-                r.exitStruct(dphSaved);
+        if (!isStr) {
+            if (colType == (int32) 1 || colType == (int32) 4) {
+                valueBytes = 4;                    // INT32 / FLOAT
+            } else if (colType == (int32) 2 || colType == (int32) 5) {
+                valueBytes = 8;                    // INT64 / DOUBLE
             } else {
-                r.skip(pt);
+                throw heap ParquetParseException(
+                    "unsupported physical type (v1: INT32/INT64/FLOAT/DOUBLE/BYTE_ARRAY)",
+                    (int64) 0);
             }
-            pt = r.readFieldHeader();
         }
-        r.exitStruct(pSaved);
-
-        int64 dataStart = r.position();
-        int8[] compBytes = r.slice(dataStart, (int64) compSize);
-        int8[] page = ParquetColumnReader.decompress(
-            compBytes, (int64) compSize, codec, (int64) uncompSize);
-
-        // def levels: flat column ⇒ no rep levels; OPTIONAL ⇒ 4-byte-LE-prefixed
-        // section. v1 assumes no nulls, so just skip to the value plane.
-        int64 valuesStart = (int64) 0;
-        if (repType == 1) {
-            int64 defLen = ParquetColumnReader.le32(page, (int64) 0);
-            valuesStart = (int64) 4 + defLen;
+        if (repType == (int32) 2) {
+            throw heap ParquetParseException("repeated/nested columns unsupported (v1)", (int64) 0);
         }
 
-        if (encoding == 0) {
-            return ParquetColumnReader.readPlainLongs(
-                page, valuesStart, pageNumValues, valueBytes);
-        }
-        if (encoding == 2 || encoding == 8) {
-            // dictionary indices: 1-byte width + RLE/bit-packing hybrid.
-            int32 width = ((int32) page[valuesStart]) & 0xFF;
-            int64 idxStart = valuesStart + (int64) 1;
-            int32[] idx = Rle.decode(page, idxStart, width, pageNumValues);
-            int64[] out = heap int64[pageNumValues];
-            int32 gi = 0;
-            while (gi < pageNumValues) {
-                int32 ix = idx[gi];
-                out[gi] = dict[ix];
-                gi = gi + 1;
+        int64 total = (int64) 0;
+        int32 gi = 0;
+        while (gi < nGroups) { total = total + grpRows[gi]; gi = gi + 1; }
+
+        int64[] bits = heap int64[total];
+        String[] strs = heap String[total];
+        boolean[] valid = heap boolean[total];
+
+        int64 base = (int64) 0;
+        int32 g2 = 0;
+        while (g2 < nGroups) {
+            // ---- dictionary page (optional) ----
+            int64[] dictL = heap int64[0];
+            String[] dictS = heap String[0];
+            boolean hasDict = dictOff[g2] >= (int64) 0;
+            if (hasDict) {
+                r.seek(dictOff[g2]);
+                int32 dSaved = r.enterStruct();
+                int32 dComp = 0;
+                int32 dUncomp = 0;
+                int32 dNum = 0;
+                int32 dpt = r.readFieldHeader();
+                while (dpt != (int32) 0) {
+                    int32 pf = r.fieldId();
+                    if (pf == 2) {
+                        dUncomp = r.readI32();
+                    } else if (pf == 3) {
+                        dComp = r.readI32();
+                    } else if (pf == 7) {
+                        int32 dhSaved = r.enterStruct();
+                        int32 dh = r.readFieldHeader();
+                        while (dh != (int32) 0) {
+                            if (r.fieldId() == 1) {
+                                dNum = r.readI32();
+                            } else {
+                                r.skip(dh);
+                            }
+                            dh = r.readFieldHeader();
+                        }
+                        r.exitStruct(dhSaved);
+                    } else {
+                        r.skip(dpt);
+                    }
+                    dpt = r.readFieldHeader();
+                }
+                r.exitStruct(dSaved);
+                int64 dStart = r.position();
+                int8[] dCompBytes = r.slice(dStart, (int64) dComp);
+                int8[] dPage = ParquetColumnReader.decompress(
+                    dCompBytes, (int64) dComp, codec, (int64) dUncomp);
+                if (isStr) {
+                    dictS = ParquetColumnReader.readPlainStrings(dPage, (int64) 0, dNum);
+                } else {
+                    dictL = ParquetColumnReader.readPlainLongs(dPage, (int64) 0, dNum, valueBytes);
+                }
             }
-            return #out;
+
+            // ---- data page ----
+            r.seek(dataOff[g2]);
+            int32 pSaved = r.enterStruct();
+            int32 compSize = 0;
+            int32 uncompSize = 0;
+            int32 pageNumValues = 0;
+            int32 encoding = 0;
+            int32 pt = r.readFieldHeader();
+            while (pt != (int32) 0) {
+                int32 pfid = r.fieldId();
+                if (pfid == 2) {
+                    uncompSize = r.readI32();
+                } else if (pfid == 3) {
+                    compSize = r.readI32();
+                } else if (pfid == 5) {
+                    int32 dphSaved = r.enterStruct();
+                    int32 dt = r.readFieldHeader();
+                    while (dt != (int32) 0) {
+                        int32 dfid = r.fieldId();
+                        if (dfid == 1) {
+                            pageNumValues = r.readI32();
+                        } else if (dfid == 2) {
+                            encoding = r.readI32();
+                        } else {
+                            r.skip(dt);
+                        }
+                        dt = r.readFieldHeader();
+                    }
+                    r.exitStruct(dphSaved);
+                } else {
+                    r.skip(pt);
+                }
+                pt = r.readFieldHeader();
+            }
+            r.exitStruct(pSaved);
+
+            int64 dataStart = r.position();
+            int8[] compBytes = r.slice(dataStart, (int64) compSize);
+            int8[] page = ParquetColumnReader.decompress(
+                compBytes, (int64) compSize, codec, (int64) uncompSize);
+
+            // def levels: flat column ⇒ no rep levels; OPTIONAL ⇒ a 4-byte-LE-len
+            // prefixed RLE hybrid section (bit width 1). Decode it into per-row
+            // presence; REQUIRED columns have no def section and are all-present.
+            int32 rows = pageNumValues;
+            int64 valuesStart = (int64) 0;
+            int32 present = rows;
+            int32[] def = heap int32[0];
+            boolean hasDef = repType == (int32) 1;
+            if (hasDef) {
+                int64 defLen = ParquetColumnReader.le32(page, (int64) 0);
+                def = Rle.decode(page, (int64) 4, (int32) 1, rows);
+                valuesStart = (int64) 4 + defLen;
+                present = 0;
+                int32 di = 0;
+                while (di < rows) {
+                    if (def[di] == (int32) 1) { present = present + 1; }
+                    di = di + 1;
+                }
+            }
+
+            // value plane: PLAIN, or dictionary indices (1-byte width + RLE hybrid).
+            int64[] valL = heap int64[0];
+            String[] valS = heap String[0];
+            if (isStr) {
+                if (encoding == (int32) 0) {
+                    valS = ParquetColumnReader.readPlainStrings(page, valuesStart, present);
+                } else if (encoding == (int32) 2 || encoding == (int32) 8) {
+                    int32 width = ((int32) page[valuesStart]) & 0xFF;
+                    int64 idxStart = valuesStart + (int64) 1;
+                    int32[] idx = Rle.decode(page, idxStart, width, present);
+                    valS = heap String[present];
+                    int32 gg = 0;
+                    while (gg < present) { valS[gg] = dictS[idx[gg]]; gg = gg + 1; }
+                } else {
+                    throw heap ParquetParseException("unsupported value encoding (v1)", dataOff[g2]);
+                }
+            } else {
+                if (encoding == (int32) 0) {
+                    valL = ParquetColumnReader.readPlainLongs(page, valuesStart, present, valueBytes);
+                } else if (encoding == (int32) 2 || encoding == (int32) 8) {
+                    int32 width = ((int32) page[valuesStart]) & 0xFF;
+                    int64 idxStart = valuesStart + (int64) 1;
+                    int32[] idx = Rle.decode(page, idxStart, width, present);
+                    valL = heap int64[present];
+                    int32 gg = 0;
+                    while (gg < present) { valL[gg] = dictL[idx[gg]]; gg = gg + 1; }
+                } else {
+                    throw heap ParquetParseException("unsupported value encoding (v1)", dataOff[g2]);
+                }
+            }
+
+            // scatter the present values back into row positions per the def levels
+            int32 vp = 0;
+            int32 rrow = 0;
+            while (rrow < rows) {
+                boolean isPresent = true;
+                if (hasDef) { isPresent = def[rrow] == (int32) 1; }
+                int64 outIdx = base + (int64) rrow;
+                if (isPresent) {
+                    valid[outIdx] = true;
+                    if (isStr) { strs[outIdx] = valS[vp]; }
+                    else { bits[outIdx] = valL[vp]; }
+                    vp = vp + 1;
+                } else {
+                    valid[outIdx] = false;
+                }
+                rrow = rrow + 1;
+            }
+            base = base + (int64) rows;
+            g2 = g2 + 1;
         }
-        throw heap ParquetParseException("unsupported value encoding (v1)", dataPageOffset);
+
+        return heap ParquetColumn(colType, repType == (int32) 1, total, #bits, #strs, #valid);
     }
 
-    /** Read an INT32 column (narrows the widened values). */
+    /** Read an INT32 column (narrows the widened values; null slots read 0). */
     public static #int32[] readInt32Column(int8[] file, int64 n, int32 col) {
-        int64[] longs = ParquetColumnReader.readLongs(file, n, col);
-        int32 m = (int32) longs.count();
+        ParquetColumn c #= ParquetColumnReader.readColumn(file, n, col);
+        int64 m = c.rows;
         int32[] out = heap int32[m];
-        int32 i = 0;
-        while (i < m) { out[i] = (int32) longs[i]; i = i + 1; }
+        int64 i = (int64) 0;
+        while (i < m) { out[i] = (int32) c.bits[i]; i = i + 1; }
         return #out;
-    }
-
-    /** Sum an INT64 column's values (scalar return — validates the int64 path
-        without returning an int64[], which miscompiles across the test-exe). */
-    public static int64 int64ColumnSum(int8[] file, int64 n, int32 col) {
-        int64[] longs = ParquetColumnReader.readLongs(file, n, col);
-        int64 sum = (int64) 0;
-        int32 m = (int32) longs.count();
-        int32 i = 0;
-        while (i < m) { sum = sum + longs[i]; i = i + 1; }
-        return sum;
     }
 
     /** Read an INT64 column. */
     public static #int64[] readInt64Column(int8[] file, int64 n, int32 col) {
-        int64[] longs = ParquetColumnReader.readLongs(file, n, col);
-        int32 m = (int32) longs.count();
+        ParquetColumn c #= ParquetColumnReader.readColumn(file, n, col);
+        int64 m = c.rows;
         int64[] out = heap int64[m];
-        int32 i = 0;
-        while (i < m) { out[i] = longs[i]; i = i + 1; }
+        int64 i = (int64) 0;
+        while (i < m) { out[i] = c.bits[i]; i = i + 1; }
         return #out;
+    }
+
+    /** Read a FLOAT column, reinterpreting the raw IEEE-754 bits. */
+    public static #float32[] readFloat32Column(int8[] file, int64 n, int32 col) {
+        ParquetColumn c #= ParquetColumnReader.readColumn(file, n, col);
+        int64 m = c.rows;
+        float32[] out = heap float32[m];
+        int64 i = (int64) 0;
+        while (i < m) { out[i] = Cajeta.bitsToF32((int32) c.bits[i]); i = i + 1; }
+        return #out;
+    }
+
+    /** Read a DOUBLE column, reinterpreting the raw IEEE-754 bits. */
+    public static #float64[] readFloat64Column(int8[] file, int64 n, int32 col) {
+        ParquetColumn c #= ParquetColumnReader.readColumn(file, n, col);
+        int64 m = c.rows;
+        float64[] out = heap float64[m];
+        int64 i = (int64) 0;
+        while (i < m) { out[i] = Cajeta.bitsToF64(c.bits[i]); i = i + 1; }
+        return #out;
+    }
+
+    /** Read a BYTE_ARRAY column as UTF-8 strings (null slots read null). */
+    public static #String[] readStringColumn(int8[] file, int64 n, int32 col) {
+        ParquetColumn c #= ParquetColumnReader.readColumn(file, n, col);
+        int64 m = c.rows;
+        String[] out = heap String[m];
+        int64 i = (int64) 0;
+        while (i < m) { out[i] = c.strs[i]; i = i + 1; }
+        return #out;
+    }
+
+    /** Per-row validity (true = present); all-true for a REQUIRED column. */
+    public static #boolean[] readValidity(int8[] file, int64 n, int32 col) {
+        ParquetColumn c #= ParquetColumnReader.readColumn(file, n, col);
+        int64 m = c.rows;
+        boolean[] out = heap boolean[m];
+        int64 i = (int64) 0;
+        while (i < m) { out[i] = c.valid[i]; i = i + 1; }
+        return #out;
+    }
+
+    /** Sum an INT64 column's values (scalar return — the value-plane smoke test). */
+    public static int64 int64ColumnSum(int8[] file, int64 n, int32 col) {
+        ParquetColumn c #= ParquetColumnReader.readColumn(file, n, col);
+        int64 sum = (int64) 0;
+        int64 m = c.rows;
+        int64 i = (int64) 0;
+        while (i < m) { sum = sum + c.bits[i]; i = i + 1; }
+        return sum;
     }
 }

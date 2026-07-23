@@ -45,7 +45,11 @@ permissions:
 env:
   # A published cajeta toolchain that contains the codec synthesizers. Bump when
   # the next cajeta release ships them. Must match a release tag of jklappenbach/cajeta.
-  CAJETA_VERSION: v0.9.3
+  # 0.9.5 carries the codec synthesizers + the widened-reader intrinsics
+  # (Cajeta.bitsToF32/F64). The Arrow BRIDGE (run-bridge-test.sh) additionally
+  # needs cajeta.nucleo.* — unreleased until nucleo-frame ships; that step is
+  # non-blocking below and goes green once a nucleo-carrying release is pinned.
+  CAJETA_VERSION: v0.9.5
 
 jobs:
   build-test:
@@ -85,6 +89,19 @@ jobs:
         # cajeta release.
         continue-on-error: true
         run: ./run-gpu-decode.sh cpu
+
+      - name: Run the Arrow bridge test (parquet -> Arrow -> Table<R>)
+        # The cross-repo integration (nucleo-frame U17): parquet decode crosses
+        # the Arrow C Data Interface into a typed stdlib Table<R>. It depends on
+        # cajeta.nucleo.column + cajeta.nucleo.frame, which are UNRELEASED at
+        # authoring time, so this is RED until CAJETA_VERSION points at a release
+        # carrying nucleo — deliberately non-blocking (like the GPU oracle), and
+        # kept out of run-tests.sh so a nucleo import never fails the whole suite.
+        continue-on-error: true
+        env:
+          CAJETA: cajeta
+          UNIT_REPO: ${{ github.workspace }}/cajeta-unit-dep
+        run: ./run-bridge-test.sh
 
       - name: Build the release .cja
         id: build

@@ -1,0 +1,37 @@
+package dev.cajeta.codec.parquet;
+
+/**
+ * A fully-decoded Parquet column (U17 reader widening) — the widened surface
+ * over which the typed wrappers and the Arrow bridge are built. Carries every
+ * physical type in one shape:
+ *   - `colType` is the Parquet physical type (1 INT32, 2 INT64, 4 FLOAT,
+ *     5 DOUBLE, 6 BYTE_ARRAY);
+ *   - `bits` holds the widened value bits for the fixed-width types (raw IEEE-754
+ *     bits for FLOAT/DOUBLE — the typed wrappers reinterpret, no bit-smuggling at
+ *     the surface), null slots left 0;
+ *   - `strs` holds decoded UTF-8 values for BYTE_ARRAY, null slots left null;
+ *   - `valid[r]` is true where row `r` is present (all-true for a REQUIRED
+ *     column) — the definition-levels → validity decode.
+ * Values span ALL row groups, concatenated in file order.
+ */
+public final class ParquetColumn {
+    public int32 colType;
+    public boolean nullable;
+    public int64 rows;
+    public int64[] bits;
+    public String[] strs;
+    public boolean[] valid;
+
+    public ParquetColumn(int32 colType, boolean nullable, int64 rows,
+                         #int64[] bits, #String[] strs, #boolean[] valid) {
+        this.colType = colType;
+        this.nullable = nullable;
+        this.rows = rows;
+        this.bits #= bits;
+        this.strs #= strs;
+        this.valid #= valid;
+    }
+
+    /** True where the column carries UTF-8 (BYTE_ARRAY) rather than fixed-width. */
+    public boolean isString() { return this.colType == 6; }
+}

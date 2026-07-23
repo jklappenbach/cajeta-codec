@@ -1,0 +1,94 @@
+package dev.cajeta.codec.bridge;
+
+import dev.cajeta.codec.parquet.ParquetColumnReader;
+import dev.cajeta.codec.parquet.ParquetColumn;
+import dev.cajeta.codec.parquet.ParquetParseException;
+import cajeta.nucleo.column.DynCol;
+import cajeta.nucleo.column.Column;
+import cajeta.nucleo.column.StringColumn;
+import cajeta.nucleo.column.NullableColumn;
+
+/**
+ * The cajeta-codec → stdlib Arrow bridge (nucleo-frame U17, spec §10.1): the
+ * `Parquet.readTable`-shaped producer. It decodes each parquet column
+ * ({@link ParquetColumnReader}) and re-materializes it as a nucleo-column
+ * {@link DynCol}, whose {@code exportArrow()} hands the value/validity/offset
+ * buffers across the frozen Arrow C Data Interface — the SAME seam the stdlib's
+ * `Table.importArrow<R>` consumes. cajeta-codec speaks the neutral Arrow ABI;
+ * it does not reach into frame internals.
+ *
+ * Nullability follows the ACTUAL data, not the parquet repetition type: pyarrow
+ * writes flat columns OPTIONAL even when nothing is missing, so a column with
+ * zero missing values becomes a plain {@link Column} (matching a non-null record
+ * field) and one with any missing value becomes a {@link NullableColumn}.
+ *
+ * The returned columns are OWNED and must be kept alive across the export/import
+ * — the Arrow export is a zero-copy borrow of their live buffers (spec §4.4).
+ *
+ * This unit depends on `cajeta.nucleo.*`, which is unreleased (feature-branch)
+ * at authoring time; it is built and verified against a from-source toolchain
+ * (see `run-bridge-test.sh`), separate from the codec's released-toolchain CI.
+ */
+public final class ParquetArrow {
+
+    /** One owned {@link DynCol} per column of the parquet file, in file order. */
+    public static #DynCol[] readColumns(int8[] file, int64 n, int32 ncols) {
+        DynCol[] cols = heap DynCol[ncols];
+        int32 i = 0;
+        while (i < ncols) {
+            cols[i] #= ParquetArrow.toDynCol(ParquetColumnReader.readColumn(file, n, i));
+            i = i + 1;
+        }
+        return #cols;
+    }
+
+    static boolean anyNull(ParquetColumn c) {
+        int64 m = c.rows;
+        int64 i = (int64) 0;
+        while (i < m) {
+            if (!c.valid[i]) { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    static #DynCol toDynCol(#ParquetColumn c) {
+        int32 ct = c.colType;
+        int64 m = c.rows;
+        boolean nulls = ParquetArrow.anyNull(c);
+
+        if (ct == (int32) 6) {                          // BYTE_ARRAY → utf8
+            return DynCol.ofStr(StringColumn.of(c.strs));
+        }
+        if (ct == (int32) 1) {                          // INT32
+            int32[] v = heap int32[m];
+            int64 i = (int64) 0;
+            while (i < m) { v[i] = (int32) c.bits[i]; i = i + 1; }
+            if (nulls) { return DynCol.ofNI32(NullableColumn.of<int32>(v, c.valid)); }
+            return DynCol.ofI32(Column.of<int32>(v));
+        }
+        if (ct == (int32) 2) {                          // INT64
+            int64[] v = heap int64[m];
+            int64 i = (int64) 0;
+            while (i < m) { v[i] = c.bits[i]; i = i + 1; }
+            if (nulls) { return DynCol.ofNI64(NullableColumn.of<int64>(v, c.valid)); }
+            return DynCol.ofI64(Column.of<int64>(v));
+        }
+        if (ct == (int32) 4) {                          // FLOAT
+            float32[] v = heap float32[m];
+            int64 i = (int64) 0;
+            while (i < m) { v[i] = Cajeta.bitsToF32((int32) c.bits[i]); i = i + 1; }
+            if (nulls) { return DynCol.ofNF32(NullableColumn.of<float32>(v, c.valid)); }
+            return DynCol.ofF32(Column.of<float32>(v));
+        }
+        if (ct == (int32) 5) {                          // DOUBLE
+            float64[] v = heap float64[m];
+            int64 i = (int64) 0;
+            while (i < m) { v[i] = Cajeta.bitsToF64(c.bits[i]); i = i + 1; }
+            if (nulls) { return DynCol.ofNF64(NullableColumn.of<float64>(v, c.valid)); }
+            return DynCol.ofF64(Column.of<float64>(v));
+        }
+        throw heap ParquetParseException(
+            "unsupported physical type for the Arrow bridge (v1)", (int64) 0);
+    }
+}
