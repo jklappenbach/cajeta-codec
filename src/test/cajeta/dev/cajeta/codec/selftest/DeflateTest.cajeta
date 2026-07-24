@@ -154,6 +154,82 @@ public class DeflateTest {
         return;
     }
 
+    // ~2 KiB of dictionary words in a deterministic pseudo-random order — real
+    // LZ matches at a spread of distances, so chain depth (the compression
+    // level) actually changes the result.
+    static #int8[] levelPayload(int32 n) {
+        String[] w = {"the ", "quick ", "brown ", "fox ", "jumps ", "over ",
+            "a ", "lazy ", "dog ", "while ", "counting ", "numbers "};
+        int8[] p = heap int8[n];
+        int64 st = (int64) 0x9E3779B97F4A7C15;
+        int32 off = 0;
+        while (off < n) {
+            st = st ^ (st << 13);
+            st = st ^ (st >> 7);
+            st = st ^ (st << 17);
+            int32 wi = (int32) ((st >> (int64) 33) & (int64) 11);
+            String word = w[wi];
+            int8[] wb = word.toBytes();
+            int32 wl = word.byteLength();
+            int32 j = 0;
+            while (j < wl && off < n) { p[off] = wb[j]; off = off + 1; j = j + 1; }
+        }
+        return #p;
+    }
+
+    static boolean bytesEqual(int8[] a, int8[] b) {
+        int32 an = (int32) a.count();
+        if (an != (int32) b.count()) { return false; }
+        int32 i = 0;
+        while (i < an) { if (a[i] != b[i]) { return false; } i = i + 1; }
+        return true;
+    }
+
+    @Test
+    public void deflateEveryLevelRoundTrips() {
+        // Every level 1..9 must produce valid DEFLATE that inflates byte-exact.
+        int8[] in = DeflateTest.levelPayload(2048);
+        int64 inLen = (int64) 2048;
+        int32 lv = 1;
+        while (lv <= 9) {
+            int8[] comp = Deflate.deflate(in, inLen, lv);
+            int8[] out = Deflate.inflate(comp, (int64) comp.count(), inLen);
+            Assert.isTrue(DeflateTest.bytesEqual(in, out));
+            lv = lv + 1;
+        }
+        return;
+    }
+
+    @Test
+    public void deflateDefaultIsLevelSix() {
+        // The no-level `deflate(src, n)` must be byte-identical to level 6.
+        int8[] in = DeflateTest.levelPayload(2048);
+        int64 inLen = (int64) 2048;
+        int8[] dflt = Deflate.deflate(in, inLen);
+        int8[] six = Deflate.deflate(in, inLen, 6);
+        Assert.isTrue(DeflateTest.bytesEqual(dflt, six));
+        return;
+    }
+
+    @Test
+    public void deflateHigherLevelCompressesNoWorse() {
+        // Max ratio (9) must never be larger than fastest (1) on matchy data;
+        // and out-of-range levels clamp into [1, 9] rather than trap.
+        int8[] in = DeflateTest.levelPayload(2048);
+        int64 inLen = (int64) 2048;
+        int64 fast = (int64) Deflate.deflate(in, inLen, 1).count();
+        int64 best = (int64) Deflate.deflate(in, inLen, 9).count();
+        Assert.isTrue(best <= fast);
+        // Clamping: level 0 behaves like 1, level 99 like 9 — both valid.
+        int8[] lo = Deflate.deflate(in, inLen, 0);
+        int8[] hi = Deflate.deflate(in, inLen, 99);
+        int8[] loOut = Deflate.inflate(lo, (int64) lo.count(), inLen);
+        int8[] hiOut = Deflate.inflate(hi, (int64) hi.count(), inLen);
+        Assert.isTrue(DeflateTest.bytesEqual(in, loOut));
+        Assert.isTrue(DeflateTest.bytesEqual(in, hiOut));
+        return;
+    }
+
     @Test
     public void inflatesDynamicHuffman() {
         // zlib level 9, "the quick brown fox jumps over the lazy dog. " x4 (180).

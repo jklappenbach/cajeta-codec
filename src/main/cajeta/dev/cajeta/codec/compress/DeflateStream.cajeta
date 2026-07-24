@@ -34,14 +34,32 @@ public final class DeflateStream {
     int32 bufLen;
     /** Set by [`finish`](#finish); further writes/flushes raise. */
     boolean done;
+    /** Compression level 1..9 applied to every emitted block (default 6). */
+    int32 level;
 
-    /** An empty stream: no history, no pending bytes. @EntryPoint */
+    /** An empty stream at the default compression level (6). @EntryPoint */
     public DeflateStream() {
         int8[] b0 = heap int8[65536];
         this.buf = #b0;
         this.histLen = 0;
         this.bufLen = 0;
         this.done = false;
+        this.level = 6;
+    }
+
+    /**
+     * An empty stream at compression `level` (1 = fastest .. 9 = max ratio;
+     * see [`Deflate.deflate`](Deflate.cajeta#deflate)). Trades ratio for CPU
+     * on every [`syncFlush`](#syncFlush)/[`finish`](#finish) block — useful
+     * for a high-throughput permessage-deflate send path.
+     */
+    public DeflateStream(int32 level) {
+        int8[] b0 = heap int8[65536];
+        this.buf = #b0;
+        this.histLen = 0;
+        this.bufLen = 0;
+        this.done = false;
+        this.level = level;
     }
 
     /** Append `len` bytes of `data` to the pending segment. */
@@ -76,7 +94,7 @@ public final class DeflateStream {
         BitWriter bw = heap BitWriter(cap);
         if (pend > 0) {
             Deflate.deflateFixedInto(bw, this.buf, this.histLen,
-                                     this.bufLen, 0);
+                                     this.bufLen, 0, this.level);
         }
         // The sync tail: BFINAL=0, BTYPE=00, pad to the byte, LEN=0,
         // NLEN=0xFFFF — the canonical 00 00 FF FF boundary.
@@ -104,7 +122,8 @@ public final class DeflateStream {
         int32 pend = this.bufLen - this.histLen;
         int64 cap = (int64) pend + ((int64) pend >> 1) + (int64) 32;
         BitWriter bw = heap BitWriter(cap);
-        Deflate.deflateFixedInto(bw, this.buf, this.histLen, this.bufLen, 1);
+        Deflate.deflateFixedInto(bw, this.buf, this.histLen, this.bufLen, 1,
+                                 this.level);
         bw.flushByte();
         this.done = true;
         return bw.result();

@@ -73,25 +73,37 @@ public final class CompressBench {
         int32 iters = 200;
         int8[] data = CompressBench.payload(sz);
 
-        // --- compress (DeflateStream: the WS echo path) ---
+        // --- compress across levels (DeflateStream: the WS echo path) ---
         DeflateStream warm = heap DeflateStream();
         warm.write(data, sz);
         int8[] comp = warm.syncFlush();
         int32 cn = (int32) comp.count();
-        System.stdout.println("payload={} bytes, compressed={} ({}%)",
+        System.stdout.println("payload={} bytes (level-6 compressed={}, {}%)",
             sz, cn, (cn * 100) / sz);
 
+        int32[] levels = {1, 3, 6, 9};
+        int32 li = 0;
+        while (li < 4) {
+            int32 lvl = levels[li];
+            DeflateStream lz = heap DeflateStream(lvl);
+            lz.write(data, sz);
+            int8[] lc = lz.syncFlush();
+            int32 lcn = (int32) lc.count();
+            int64 t0 = CompressBench.nowMs();
+            int32 k = 0;
+            while (k < iters) {
+                DeflateStream ds = heap DeflateStream(lvl);
+                ds.write(data, sz);
+                int8[] c = ds.syncFlush();
+                k = k + 1;
+            }
+            int64 dms = CompressBench.nowMs() - t0;
+            System.stdout.println("  COMPRESS L{}      : {} ms, {} MB/s  ({} bytes, {}%)",
+                lvl, dms, CompressBench.mbps(sz, iters, dms), lcn, (lcn * 100) / sz);
+            li = li + 1;
+        }
         int64 t0 = CompressBench.nowMs();
         int32 k = 0;
-        while (k < iters) {
-            DeflateStream ds = heap DeflateStream();
-            ds.write(data, sz);
-            int8[] c = ds.syncFlush();
-            k = k + 1;
-        }
-        int64 dms = CompressBench.nowMs() - t0;
-        System.stdout.println("  COMPRESS         : {} ms, {} MB/s",
-            dms, CompressBench.mbps(sz, iters, dms));
 
         // --- streaming inflate (InflateStream: the WS receive path) ---
         int8[] marker = { (int8) 0x00, (int8) 0x00, (int8) 0xFF, (int8) 0xFF };

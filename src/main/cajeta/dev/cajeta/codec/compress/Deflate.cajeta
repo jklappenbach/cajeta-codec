@@ -190,6 +190,22 @@ public final class Deflate {
         return -1;
     }
 
+    // DEFLATE match-finder hash of the 3 bytes at a position. A multiplicative
+    // (Fibonacci) hash — `(v * 2654435761) >> (32 - 15)` on the low 32 bits of
+    // the product — avalanches the 24-bit trigram across the 15-bit table far
+    // better than the old `(c0<<10)^(c1<<5)^c2`, whose fields overlapped
+    // heavily for ASCII text and clustered distinct trigrams into the same
+    // buckets (spurious chain entries). Same 3 input bytes → same match
+    // semantics, just shorter chains of genuinely-relevant candidates. (On
+    // *exact-recurrence* data — the same bytes repeating — the chains are
+    // inherently deep and no hash shortens them; the win is on diverse text.)
+    @Inline
+    static int32 hash3(int32 c0, int32 c1, int32 c2) {
+        int32 v = c0 | (c1 << 8) | (c2 << 16);
+        int64 p = ((int64) v * (int64) 2654435761) & (int64) 0xFFFFFFFF;
+        return (int32) (p >> (int64) 17);
+    }
+
     // 8-byte-wide back-reference copy (scalar tail).
     @Inline
     static void blit(int8[] dst, int64 d, int8[] src, int64 s, int64 len) {
@@ -468,7 +484,20 @@ public final class Deflate {
      * result.
      */
     public static #int8[] deflate(int8[] src, int64 n) {
-        int8[] fixed = Deflate.deflateFixed(src, n);
+        return Deflate.deflate(src, n, 6);
+    }
+
+    /**
+     * Encode at compression `level` — **1 = fastest, 9 = maximum ratio**; 6 is
+     * the balanced default the no-level [`deflate`](#deflate) uses. The level
+     * tunes only the LZ77 match finder (hash-chain search depth and the
+     * `nice_length` early-exit): lower levels search fewer candidates, trading
+     * a larger output for less CPU; higher levels search harder for the best
+     * matches. Out-of-range levels clamp into [1, 9]. Output is always valid
+     * DEFLATE and inflates identically regardless of the level it was made at.
+     */
+    public static #int8[] deflate(int8[] src, int64 n, int32 level) {
+        int8[] fixed = Deflate.deflateFixed(src, n, level);
         int64 flen = (int64) fixed.count();
         int64 storedLen = n + ((n / (int64) 65535) + (int64) 1) * (int64) 5;
         if (flen <= storedLen) { return fixed; }
@@ -545,9 +574,14 @@ public final class Deflate {
      * owns the result.
      */
     public static #int8[] deflateFixed(int8[] src, int64 n) {
+        return Deflate.deflateFixed(src, n, 6);
+    }
+
+    /** Fixed-Huffman encode at compression `level` (see [`deflate`](#deflate)). */
+    public static #int8[] deflateFixed(int8[] src, int64 n, int32 level) {
         int64 cap = n + (n >> 1) + (int64) 16;
         BitWriter bw = heap BitWriter(cap);
-        Deflate.deflateFixedInto(bw, src, 0, (int32) n, 1);
+        Deflate.deflateFixedInto(bw, src, 0, (int32) n, 1, level);
         bw.flushByte();
         return bw.result();
     }
@@ -566,21 +600,33 @@ public final class Deflate {
      */
     static void deflateFixedInto(BitWriter bw, int8[] src, int32 emitFrom,
                                  int32 nLen, int32 bfinal) {
+        Deflate.deflateFixedInto(bw, src, emitFrom, nLen, bfinal, 6);
+    }
+
+    static void deflateFixedInto(BitWriter bw, int8[] src, int32 emitFrom,
+                                 int32 nLen, int32 bfinal, int32 level) {
         int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
         int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
         int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
         int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
 
         int32 HASHSIZE = 32768;
-        int32 HASHMASK = 32767;
         int32 WSIZE = 32768;
         int32 WMASK = 32767;
-        int32 MAXCHAIN = 128;
         int32 MINMATCH = 3;
         int32 MAXMATCH = 258;
-        // Stop the chain walk once a match this long is found (zlib's
-        // nice_length) — a long match is good enough, don't scan further.
-        int32 NICEMATCH = 128;
+        // Compression level → match-finder effort. `MAXCHAIN` caps how many
+        // hash-chain candidates a position examines; `NICEMATCH` stops the
+        // walk once a match this long is found. Both climb with the level
+        // (zlib-shaped): level 6 reproduces the historical 128/128 default.
+        // Index 0 is unused; levels clamp into [1, 9].
+        int32 lv = level;
+        if (lv < 1) { lv = 1; }
+        if (lv > 9) { lv = 9; }
+        int32[] chainByLevel = {0, 8, 16, 32, 48, 64, 128, 256, 512, 1024};
+        int32[] niceByLevel  = {0, 16, 16, 32, 64, 96, 128, 200, 258, 258};
+        int32 MAXCHAIN = chainByLevel[lv];
+        int32 NICEMATCH = niceByLevel[lv];
 
         int32[] head = heap int32[HASHSIZE];
         int32[] prev = heap int32[WSIZE];
@@ -602,13 +648,19 @@ public final class Deflate {
                 int32 e0 = ((int32) src[pos]) & 0xFF;
                 int32 e1 = ((int32) src[p1]) & 0xFF;
                 int32 e2 = ((int32) src[p2]) & 0xFF;
-                int32 hp = ((e0 << 10) ^ (e1 << 5) ^ e2) & HASHMASK;
+                int32 hp = Deflate.hash3(e0, e1, e2);
                 int32 ps = pos & WMASK;
                 prev[ps] = head[hp];
                 head[hp] = pos;
             }
             pos = pos + 1;
         }
+
+        // Length of the match found at the previous position — drives zlib's
+        // `good_match` heuristic: once we are already landing long matches,
+        // search only a quarter as deep (a longer one is unlikely).
+        int32 GOODMATCH = 32;
+        int32 prevMatchLen = 0;
 
         while (pos < nLen) {
             int32 bestLen = 0;
@@ -623,16 +675,20 @@ public final class Deflate {
                 int32 c0 = ((int32) src[pos]) & 0xFF;
                 int32 c1 = ((int32) src[i1]) & 0xFF;
                 int32 c2 = ((int32) src[i2]) & 0xFF;
-                h = ((c0 << 10) ^ (c1 << 5) ^ c2) & HASHMASK;
+                h = Deflate.hash3(c0, c1, c2);
                 int32 cand = head[h];
                 int32 depth = 0;
+                // Adaptive chain depth (zlib good_match): shrink the walk 4×
+                // once the neighbourhood is already yielding long matches.
+                int32 chainLimit = MAXCHAIN;
+                if (prevMatchLen >= GOODMATCH) { chainLimit = MAXCHAIN >> 2; }
                 // Longest legal match at this position: capped at MAXMATCH and
                 // at the remaining input.
                 int32 maxCmp = MAXMATCH;
                 if (nLen - pos < maxCmp) { maxCmp = nLen - pos; }
-                while (cand >= 0 && depth < MAXCHAIN) {
+                while (cand >= 0 && depth < chainLimit) {
                     int32 dist = pos - cand;
-                    if (dist > WSIZE) { depth = MAXCHAIN; }
+                    if (dist > WSIZE) { depth = chainLimit; }
                     else {
                         // Cheap prune (zlib's key trick): a candidate can only
                         // BEAT the current best if its byte at `bestLen` already
@@ -719,15 +775,17 @@ public final class Deflate {
                         int32 d0 = ((int32) src[q]) & 0xFF;
                         int32 d1 = ((int32) src[q1]) & 0xFF;
                         int32 d2 = ((int32) src[q2]) & 0xFF;
-                        int32 hq = ((d0 << 10) ^ (d1 << 5) ^ d2) & HASHMASK;
+                        int32 hq = Deflate.hash3(d0, d1, d2);
                         int32 qs = q & WMASK;
                         prev[qs] = head[hq];
                         head[hq] = q;
                     }
                     q = q + 1;
                 }
+                prevMatchLen = bestLen;
                 pos = end;
             } else {
+                prevMatchLen = 0;
                 int32 lit = ((int32) src[pos]) & 0xFF;
                 Deflate.emitLiteral(bw, lit);
                 pos = pos + 1;
