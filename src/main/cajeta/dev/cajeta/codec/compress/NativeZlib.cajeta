@@ -32,9 +32,15 @@ package dev.cajeta.codec.compress;
 public final class NativeZlib {
 
     // windowBits wrapper selectors (zlib deflateInit2 / inflateInit2 convention).
-    static int32 wbitsRaw()  { return -15; }   // raw DEFLATE, RFC 1951
-    static int32 wbitsZlib() { return 15;  }   // zlib stream, RFC 1950
-    static int32 wbitsGzip() { return 31;  }   // gzip member, RFC 1952
+    static int32 WBITS_RAW  = -15;   // raw DEFLATE, RFC 1951
+    static int32 WBITS_ZLIB =  15;   // zlib stream, RFC 1950
+    static int32 WBITS_GZIP =  31;   // gzip member, RFC 1952
+
+    // zlib Z_* error codes (the shim returns these negative on failure).
+    static int64 Z_STREAM_ERROR = -2;
+    static int64 Z_DATA_ERROR   = -3;
+    static int64 Z_MEM_ERROR    = -4;
+    static int64 Z_BUF_ERROR    = -5;
 
     @Native(symbol = "__cajeta_zlib_crc32", lib = "cajeta_zlib")
     static int32 crc32Raw(int8[] data, int64 len);
@@ -84,16 +90,15 @@ public final class NativeZlib {
     }
 
     // Translate a negative shim return (a Z_* code) into a DeflateException.
-    // Z_DATA_ERROR = -3, Z_MEM_ERROR = -4, Z_BUF_ERROR = -5, Z_STREAM_ERROR = -2.
     static #DeflateException error(int64 code) {
         String msg = "zlib error";
-        if (code == (int64) -3) {
+        if (code == NativeZlib.Z_DATA_ERROR) {
             msg = "invalid or truncated DEFLATE data";
-        } else if (code == (int64) -5) {
+        } else if (code == NativeZlib.Z_BUF_ERROR) {
             msg = "zlib buffer error";
-        } else if (code == (int64) -4) {
+        } else if (code == NativeZlib.Z_MEM_ERROR) {
             msg = "zlib out of memory";
-        } else if (code == (int64) -2) {
+        } else if (code == NativeZlib.Z_STREAM_ERROR) {
             msg = "zlib stream error";
         }
         return heap DeflateException(msg, (int64) 0);
@@ -132,7 +137,7 @@ public final class NativeZlib {
             if (r >= (int64) 0) {
                 out = #NativeZlib.exact(dst, r);
                 go = false;
-            } else if (r == (int64) -5) {   // Z_BUF_ERROR: dst too small
+            } else if (r == NativeZlib.Z_BUF_ERROR) {   // dst too small
                 cap = cap * (int64) 2;
             } else {
                 throw NativeZlib.error(r);
@@ -145,31 +150,31 @@ public final class NativeZlib {
 
     /** Raw DEFLATE (RFC 1951) compress at `level`. */
     public static #int8[] deflate(int8[] src, int64 n, int32 level) {
-        return #NativeZlib.compress(src, n, level, NativeZlib.wbitsRaw());
+        return #NativeZlib.compress(src, n, level, NativeZlib.WBITS_RAW);
     }
 
     /** Raw DEFLATE (RFC 1951) inflate; `hint` seeds the output size. */
     public static #int8[] inflate(int8[] src, int64 n, int64 hint) {
-        return #NativeZlib.uncompress(src, n, hint, NativeZlib.wbitsRaw());
+        return #NativeZlib.uncompress(src, n, hint, NativeZlib.WBITS_RAW);
     }
 
     /** gzip member (RFC 1952) compress at `level`. */
     public static #int8[] gzipCompress(int8[] src, int64 n, int32 level) {
-        return #NativeZlib.compress(src, n, level, NativeZlib.wbitsGzip());
+        return #NativeZlib.compress(src, n, level, NativeZlib.WBITS_GZIP);
     }
 
     /** gzip member (RFC 1952) decompress (size is self-describing via ISIZE). */
     public static #int8[] gzipDecompress(int8[] src, int64 n) {
-        return #NativeZlib.uncompress(src, n, n * (int64) 4, NativeZlib.wbitsGzip());
+        return #NativeZlib.uncompress(src, n, n * (int64) 4, NativeZlib.WBITS_GZIP);
     }
 
     /** zlib stream (RFC 1950) compress at `level`. */
     public static #int8[] zlibCompress(int8[] src, int64 n, int32 level) {
-        return #NativeZlib.compress(src, n, level, NativeZlib.wbitsZlib());
+        return #NativeZlib.compress(src, n, level, NativeZlib.WBITS_ZLIB);
     }
 
     /** zlib stream (RFC 1950) decompress; `hint` seeds the output size. */
     public static #int8[] zlibDecompress(int8[] src, int64 n, int64 hint) {
-        return #NativeZlib.uncompress(src, n, hint, NativeZlib.wbitsZlib());
+        return #NativeZlib.uncompress(src, n, hint, NativeZlib.WBITS_ZLIB);
     }
 }
