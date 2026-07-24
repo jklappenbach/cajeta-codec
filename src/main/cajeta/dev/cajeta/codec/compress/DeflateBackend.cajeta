@@ -1,0 +1,49 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * Backend selector for the DEFLATE / gzip / zlib family. The public entry points
+ * ([`Deflate.deflate`](Deflate.cajeta) / `inflate`, [`Gzip`](Gzip.cajeta) and
+ * [`Zlib`](Zlib.cajeta) `compress` / `decompress`) route through here: the
+ * native zlib backend ([`NativeZlib`](NativeZlib.cajeta)) when it is linked, the
+ * pure-cajeta encoder/decoder otherwise.
+ *
+ * ## Linking, not runtime probing
+ *
+ * cajeta's `@Native` requirement is DCE-gated: because the public API references
+ * `NativeZlib`, the `libcajeta_zlib.a` artifact is a **link requirement** of any
+ * build that includes this class tree — the default, per the native-dependency
+ * subsystem (the artifact is baked into the `.cja` at publish). There is no
+ * runtime "native absent" state on such a build: either it linked (native works)
+ * or the link failed. A genuinely native-free build is produced by compiling
+ * against a `DeflateBackend` variant whose `useNative()` is a compile-time
+ * `false` so DCE prunes every `NativeZlib` reference — a build-config concern
+ * (plan Unit 4), not a runtime branch.
+ *
+ * ## The force hook
+ *
+ * [`forceFallback`](#forceFallback) flips the selector to the pure-cajeta path
+ * within a native-linked binary, so a single test process can drive **both**
+ * backends and assert they agree (differential parity). It is a test affordance,
+ * not a production switch.
+ */
+public final class DeflateBackend {
+
+    // When true, the public API takes the pure-cajeta path even though native
+    // is linked. Test-only; see forceFallback().
+    static boolean forcedFallback = false;
+
+    /** True when the public entry points should call the native zlib backend. */
+    public static boolean useNative() {
+        if (DeflateBackend.forcedFallback) { return false; }
+        return true;
+    }
+
+    /**
+     * Force the pure-cajeta fallback (`true`) or restore native selection
+     * (`false`). For differential tests that exercise both backends in one
+     * process; restore to `false` when done so later work uses native.
+     */
+    public static void forceFallback(boolean on) {
+        DeflateBackend.forcedFallback = on;
+    }
+}

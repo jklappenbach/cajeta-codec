@@ -110,10 +110,15 @@ public final class NativeZlib {
      * [`DeflateException`](DeflateException.cajeta) on a native error.
      */
     public static #int8[] compress(int8[] src, int64 n, int32 level, int32 wbits) {
+        // Honor the codec's documented contract: levels clamp into [1, 9]
+        // (zlib's deflateInit2 would Z_STREAM_ERROR on an out-of-range level).
+        int32 lv = level;
+        if (lv < 1) { lv = 1; }
+        if (lv > 9) { lv = 9; }
         int64 cap = NativeZlib.compressBound(n, wbits);
         if (cap < (int64) 16) { cap = (int64) 16; }
         int8[] dst = heap int8[cap];
-        int64 r = NativeZlib.compressRaw(dst, cap, src, n, level, wbits);
+        int64 r = NativeZlib.compressRaw(dst, cap, src, n, lv, wbits);
         if (r < (int64) 0) {
             throw NativeZlib.error(r);
         }

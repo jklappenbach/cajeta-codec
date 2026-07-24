@@ -110,7 +110,15 @@ int64_t __cajeta_zlib_uncompress(void *dst_hdr, int64_t dstcap,
     rc = inflate(&s, Z_FINISH);
     int64_t produced = (int64_t) s.total_out;
     if (rc == Z_STREAM_END) {
+        /*
+         * Strict framing: the codec's hardening contract (cajeta-http 1.6a)
+         * requires the claimed input to be fully consumed — trailing bytes
+         * inside `srclen` are corruption, not a second member. zlib itself
+         * stops at STREAM_END and ignores them, so reject leftover input here.
+         */
+        uInt leftover = s.avail_in;
         inflateEnd(&s);
+        if (leftover != 0) { return (int64_t) Z_DATA_ERROR; }
         return produced;
     }
     /* Not finished. Filled the whole output => need a bigger buffer. */

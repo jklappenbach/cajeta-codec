@@ -98,25 +98,30 @@ build wiring in later units — that is expected; update this plan if so.
   - [x] 2.3.2 Interop proven both directions with the cajeta decoders (themselves
         validated against python `zlib`/`gzip`); native emits standard RFC framing.
 
-## 3. Selector + wire public API to native, cajeta as fallback  (spec 4.1–4.4)
+## 3. Selector + wire public API to native, cajeta as fallback  (spec 4.1–4.4)  ✅ DONE
 
-- [ ] **3.1 TDD**
-  - [ ] 3.1.1 Differential: native vs forced-cajeta round-trip identical on the
-        corpus (text/binary/empty/incompressible/repetitive/large).
-  - [ ] 3.1.2 The selector picks native on a native-linked build; forcing
-        fallback runs cajeta.
-  - [ ] 3.1.3 The existing codec suite (196 tests) still passes unchanged.
-- [ ] **3.2 Coding**
-  - [ ] 3.2.1 A `DeflateBackend` selector (native-present flag; env/force hook
-        for tests).
-  - [ ] 3.2.2 Route `Deflate.deflate/inflate`, `Gzip.compress/decompress`,
-        `Zlib.compress/decompress` through the selector; the current cajeta
-        bodies become the fallback branch.
-  - [ ] 3.2.3 Keep `deflateFixed` / `DynDeflate` reachable for the fallback +
-        differential tests.
-- [ ] **3.3 Acceptance**
-  - [ ] 3.3.1 Default build uses native; API unchanged; 196 + new tests green.
-  - [ ] 3.3.2 Fallback build (no native) round-trips correctly.
+- [x] **3.1 TDD** (`DeflateBackendTest`, 6 tests)
+  - [x] 3.1.1 Differential: native vs forced-cajeta round-trip identical on the
+        corpus — text / repetitive / incompressible(LCG) / empty / large(40 KB),
+        each raw+zlib+gzip through both backends *and* cross-backend decode.
+  - [x] 3.1.2 `selectorSwitchesBackends` proves `forceFallback` routes to a
+        different encoder (byte streams differ, both round-trip).
+  - [x] 3.1.3 The existing suite passes unchanged (native now the default path;
+        214 total, 0 fail).
+- [x] **3.2 Coding**
+  - [x] 3.2.1 `DeflateBackend` selector — `useNative()` + `forceFallback()` test
+        hook. (No runtime "native absent": `@Native` reference makes the artifact
+        a link requirement; a native-free build is a compile-time variant, Unit 4.)
+  - [x] 3.2.2 Routed `Deflate.deflate`/`inflate`/`inflateGrow`, `Gzip.compress`/
+        `decompress`, `Zlib.compress`/`decompress` through the selector; cajeta
+        bodies are the fallback branch. Native honors the codec contract:
+        level clamp [1,9], strict-framing (reject trailing input).
+  - [x] 3.2.3 `deflateFixed` / `DynDeflate` stay reachable (public + fallback).
+- [x] **3.3 Acceptance**
+  - [x] 3.3.1 Default build uses native; API unchanged; suite green (214/1 skip).
+  - [x] 3.3.2 Fallback round-trips correctly — fixed a latent `ensure()` infinite
+        loop on a zero-capacity output buffer (`inflate(.., 0)` / `Zlib.decompress
+        (.., 0)`) surfaced by the empty-corpus fallback case.
 
 ## 4. Per-target static build + cross-compile smoke  (spec 2.2, 2.4, 5.3)
 
