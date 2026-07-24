@@ -18,12 +18,40 @@ package dev.cajeta.codec.compress;
  * baked into the `.cja` at publish. The requirement is **DCE-gated**: a build
  * that never calls a `NativeZlib` method links with no native artifact at all.
  *
- * Unit 1 (this file) binds `crc32` only; compress/inflate follow in unit 2.
+ * ## Wrapper selection (`wbits`)
+ *
+ * The compress/inflate shims take zlib's `windowBits` convention, so one code
+ * path serves all three framings and zlib does the header + checksum work:
+ *   - `WBITS_RAW`  (−15) — raw DEFLATE, RFC 1951
+ *   - `WBITS_ZLIB` ( 15) — zlib stream, RFC 1950
+ *   - `WBITS_GZIP` ( 31) — gzip member, RFC 1952
+ *
+ * On success the shim returns the byte length written; on failure a negative
+ * `Z_*` code, translated here into a [`DeflateException`](DeflateException.cajeta).
  */
 public final class NativeZlib {
 
+    // windowBits wrapper selectors (zlib deflateInit2 / inflateInit2 convention).
+    static int32 wbitsRaw()  { return -15; }   // raw DEFLATE, RFC 1951
+    static int32 wbitsZlib() { return 15;  }   // zlib stream, RFC 1950
+    static int32 wbitsGzip() { return 31;  }   // gzip member, RFC 1952
+
     @Native(symbol = "__cajeta_zlib_crc32", lib = "cajeta_zlib")
     static int32 crc32Raw(int8[] data, int64 len);
+
+    @Native(symbol = "__cajeta_zlib_adler32", lib = "cajeta_zlib")
+    static int32 adler32Raw(int8[] data, int64 len);
+
+    @Native(symbol = "__cajeta_zlib_compress_bound", lib = "cajeta_zlib")
+    static int64 compressBound(int64 srclen, int32 wbits);
+
+    @Native(symbol = "__cajeta_zlib_compress", lib = "cajeta_zlib")
+    static int64 compressRaw(int8[] dst, int64 dstcap, int8[] src, int64 srclen,
+                             int32 level, int32 wbits);
+
+    @Native(symbol = "__cajeta_zlib_uncompress", lib = "cajeta_zlib")
+    static int64 uncompressRaw(int8[] dst, int64 dstcap, int8[] src, int64 srclen,
+                               int32 wbits);
 
     /**
      * CRC-32 (RFC 1952, reflected `0xEDB88320`) of the first `n` bytes, computed
@@ -33,5 +61,115 @@ public final class NativeZlib {
     public static int64 crc32(int8[] data, int64 n) {
         int32 r = NativeZlib.crc32Raw(data, n);
         return ((int64) r) & (int64) 0xFFFFFFFF;
+    }
+
+    /**
+     * Adler-32 (RFC 1950) of the first `n` bytes, computed by native zlib.
+     * Returned unsigned in an `int64` (matches [`Zlib.adler32`](Zlib.cajeta)).
+     */
+    public static int64 adler32(int8[] data, int64 n) {
+        int32 r = NativeZlib.adler32Raw(data, n);
+        return ((int64) r) & (int64) 0xFFFFFFFF;
+    }
+
+    // Copy the first `len` bytes of `src` into a fresh exact-size array.
+    static #int8[] exact(int8[] src, int64 len) {
+        int8[] out = heap int8[len];
+        int64 k = (int64) 0;
+        while (k < len) {
+            out[k] = src[k];
+            k = k + 1;
+        }
+        return #out;
+    }
+
+    // Translate a negative shim return (a Z_* code) into a DeflateException.
+    // Z_DATA_ERROR = -3, Z_MEM_ERROR = -4, Z_BUF_ERROR = -5, Z_STREAM_ERROR = -2.
+    static #DeflateException error(int64 code) {
+        String msg = "zlib error";
+        if (code == (int64) -3) {
+            msg = "invalid or truncated DEFLATE data";
+        } else if (code == (int64) -5) {
+            msg = "zlib buffer error";
+        } else if (code == (int64) -4) {
+            msg = "zlib out of memory";
+        } else if (code == (int64) -2) {
+            msg = "zlib stream error";
+        }
+        return heap DeflateException(msg, (int64) 0);
+    }
+
+    /**
+     * Compress the first `n` bytes of `src` at `level` (1..9) under the
+     * `wbits`-selected wrapper. Returns a fresh exact-size array. Raises
+     * [`DeflateException`](DeflateException.cajeta) on a native error.
+     */
+    public static #int8[] compress(int8[] src, int64 n, int32 level, int32 wbits) {
+        int64 cap = NativeZlib.compressBound(n, wbits);
+        if (cap < (int64) 16) { cap = (int64) 16; }
+        int8[] dst = heap int8[cap];
+        int64 r = NativeZlib.compressRaw(dst, cap, src, n, level, wbits);
+        if (r < (int64) 0) {
+            throw NativeZlib.error(r);
+        }
+        return #NativeZlib.exact(dst, r);
+    }
+
+    /**
+     * Inflate the first `n` bytes of `src` under the `wbits`-selected wrapper.
+     * `hint` seeds the output buffer; the buffer grows and retries if the real
+     * output is larger. Returns a fresh exact-size array. Raises
+     * [`DeflateException`](DeflateException.cajeta) on corrupt/truncated input.
+     */
+    public static #int8[] uncompress(int8[] src, int64 n, int64 hint, int32 wbits) {
+        int64 cap = hint;
+        if (cap < (int64) 64) { cap = (int64) 64; }
+        boolean go = true;
+        int8[] out = heap int8[0];
+        while (go) {
+            int8[] dst = heap int8[cap];
+            int64 r = NativeZlib.uncompressRaw(dst, cap, src, n, wbits);
+            if (r >= (int64) 0) {
+                out = #NativeZlib.exact(dst, r);
+                go = false;
+            } else if (r == (int64) -5) {   // Z_BUF_ERROR: dst too small
+                cap = cap * (int64) 2;
+            } else {
+                throw NativeZlib.error(r);
+            }
+        }
+        return #out;
+    }
+
+    // ---- Framing convenience wrappers (used by the Deflate/Gzip/Zlib selector) ----
+
+    /** Raw DEFLATE (RFC 1951) compress at `level`. */
+    public static #int8[] deflate(int8[] src, int64 n, int32 level) {
+        return #NativeZlib.compress(src, n, level, NativeZlib.wbitsRaw());
+    }
+
+    /** Raw DEFLATE (RFC 1951) inflate; `hint` seeds the output size. */
+    public static #int8[] inflate(int8[] src, int64 n, int64 hint) {
+        return #NativeZlib.uncompress(src, n, hint, NativeZlib.wbitsRaw());
+    }
+
+    /** gzip member (RFC 1952) compress at `level`. */
+    public static #int8[] gzipCompress(int8[] src, int64 n, int32 level) {
+        return #NativeZlib.compress(src, n, level, NativeZlib.wbitsGzip());
+    }
+
+    /** gzip member (RFC 1952) decompress (size is self-describing via ISIZE). */
+    public static #int8[] gzipDecompress(int8[] src, int64 n) {
+        return #NativeZlib.uncompress(src, n, n * (int64) 4, NativeZlib.wbitsGzip());
+    }
+
+    /** zlib stream (RFC 1950) compress at `level`. */
+    public static #int8[] zlibCompress(int8[] src, int64 n, int32 level) {
+        return #NativeZlib.compress(src, n, level, NativeZlib.wbitsZlib());
+    }
+
+    /** zlib stream (RFC 1950) decompress; `hint` seeds the output size. */
+    public static #int8[] zlibDecompress(int8[] src, int64 n, int64 hint) {
+        return #NativeZlib.uncompress(src, n, hint, NativeZlib.wbitsZlib());
     }
 }
