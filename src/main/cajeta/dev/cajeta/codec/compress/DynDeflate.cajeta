@@ -71,6 +71,11 @@ public final class DynDeflate {
     int32 litMax;
     int32 distMax;
 
+    // Match-finder state (hash chains) + last findLongest match start.
+    int32[] head;
+    int32[] prev;
+    int32 mStart;
+
     public DynDeflate() {
         this.tokN = 0;
         this.staticBits = (int64) 0;
@@ -427,152 +432,201 @@ public final class DynDeflate {
         bw.writeBits(this.litCode[256], this.litLen[256]);
     }
 
-    // LZ77 match finder (whole input as one block) tallying tokens + freqs.
-    // Mirrors Deflate.deflateFixedInto's finder (hash-chain, level tuning,
-    // good_match, wide compare) — emitFrom is always 0 here (no history).
-    void lz77(int8[] src, int32 nLen, int32 level) {
+    // Record a literal token + its frequency and fixed-Huffman cost.
+    void tallyLit(int32 b) {
+        this.tokA[this.tokN] = b;
+        this.tokDist[this.tokN] = 0;
+        this.tokN = this.tokN + 1;
+        this.freqLit[b] = this.freqLit[b] + 1;
+        int32 litBits = 9;
+        if (b < 144) { litBits = 8; }
+        this.staticBits = this.staticBits + (int64) litBits;
+    }
+
+    // Record a (length, distance) match token + frequencies and fixed cost.
+    void tallyMatch(int32 len, int32 dist) {
         int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
         int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
         int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
         int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+        this.tokA[this.tokN] = len;
+        this.tokDist[this.tokN] = dist;
+        this.tokN = this.tokN + 1;
+        int32 li = 28;
+        while (li > 0 && lengthBase[li] > len) { li = li - 1; }
+        this.freqLit[257 + li] = this.freqLit[257 + li] + 1;
+        int32 di = 29;
+        while (di > 0 && distBase[di] > dist) { di = di - 1; }
+        this.freqDist[di] = this.freqDist[di] + 1;
+        int32 lcodeBits = 8;
+        if (257 + li <= 279) { lcodeBits = 7; }
+        this.staticBits = this.staticBits + (int64) lcodeBits
+            + (int64) lengthExtra[li] + (int64) 5 + (int64) distExtra[di];
+    }
 
-        int32 HASHSIZE = 32768;
+    // Insert `pos` into the hash chain (no-op when < 3 bytes remain).
+    void insertPos(int8[] src, int32 pos, int32 nLen) {
+        if ((pos + 3) <= nLen) {
+            int32 c0 = ((int32) src[pos]) & 0xFF;
+            int32 c1 = ((int32) src[pos + 1]) & 0xFF;
+            int32 c2 = ((int32) src[pos + 2]) & 0xFF;
+            int32 h = Deflate.hash3(c0, c1, c2);
+            this.prev[pos & 32767] = this.head[h];
+            this.head[h] = pos;
+        }
+    }
+
+    // Longest match for `pos` walking the chain from `cand0`; sets this.mStart
+    // to the winning candidate's start. Returns the match length (0 if none).
+    int32 findLongest(int8[] src, int32 pos, int32 nLen, int32 cand0,
+                      int32 chainLimit, int32 niceMatch) {
         int32 WSIZE = 32768;
         int32 WMASK = 32767;
-        int32 MINMATCH = 3;
         int32 MAXMATCH = 258;
+        int32 bestLen = 0;
+        int32 bestStart = 0;
+        int32 maxCmp = MAXMATCH;
+        if (nLen - pos < maxCmp) { maxCmp = nLen - pos; }
+        int32 cand = cand0;
+        int32 depth = 0;
+        while (cand >= 0 && depth < chainLimit) {
+            int32 dist = pos - cand;
+            if (dist > WSIZE) { depth = chainLimit; }
+            else {
+                boolean worth = true;
+                if (bestLen > 0 && bestLen < maxCmp) {
+                    int32 cb = ((int32) src[cand + bestLen]) & 0xFF;
+                    int32 pb = ((int32) src[pos + bestLen]) & 0xFF;
+                    if (cb != pb) { worth = false; }
+                }
+                if (worth) {
+                    int32 mlen = 0;
+                    boolean wide = true;
+                    while (wide && mlen + 8 <= maxCmp) {
+                        uint64 a = Cajeta.loadU64(src, (int64) (pos + mlen));
+                        uint64 bb = Cajeta.loadU64(src, (int64) (cand + mlen));
+                        uint64 x = a ^ bb;
+                        if (x == (uint64) 0) {
+                            mlen = mlen + 8;
+                        } else {
+                            while ((x & (uint64) 0xFF) == (uint64) 0) {
+                                mlen = mlen + 1;
+                                x = x >> (uint64) 8;
+                            }
+                            wide = false;
+                        }
+                    }
+                    if (wide) {
+                        boolean tail = true;
+                        while (tail && mlen < maxCmp) {
+                            int32 a2 = ((int32) src[pos + mlen]) & 0xFF;
+                            int32 b2 = ((int32) src[cand + mlen]) & 0xFF;
+                            if (a2 != b2) { tail = false; }
+                            else { mlen = mlen + 1; }
+                        }
+                    }
+                    if (mlen > bestLen) {
+                        bestLen = mlen;
+                        bestStart = cand;
+                        if (bestLen >= niceMatch) { depth = chainLimit; }
+                    }
+                }
+                cand = this.prev[cand & WMASK];
+                depth = depth + 1;
+            }
+        }
+        this.mStart = bestStart;
+        return bestLen;
+    }
+
+    // LZ77 with **lazy matching** (a port of zlib deflate_slow): each position's
+    // best match is deferred one byte to see if a strictly longer one starts at
+    // the next byte; if so the current byte is emitted as a literal instead.
+    // Whole input as one block (no history). Level tunes chain depth, the
+    // `nice_length` early-exit, and the `max_lazy` lookahead gate.
+    void lz77(int8[] src, int32 nLen, int32 level) {
+        int32 MINMATCH = 3;
+        int32 WSIZE = 32768;
+        int32 TOOFAR = 4096;
         int32 lv = level;
         if (lv < 1) { lv = 1; }
         if (lv > 9) { lv = 9; }
         int32[] chainByLevel = {0, 8, 16, 32, 48, 64, 128, 256, 512, 1024};
         int32[] niceByLevel  = {0, 16, 16, 32, 64, 96, 128, 200, 258, 258};
+        int32[] lazyByLevel  = {0, 4, 8, 16, 32, 64, 128, 128, 258, 258};
         int32 MAXCHAIN = chainByLevel[lv];
         int32 NICEMATCH = niceByLevel[lv];
+        int32 MAXLAZY = lazyByLevel[lv];
         int32 GOODMATCH = 32;
 
-        int32[] head = heap int32[HASHSIZE];
-        int32[] prev = heap int32[WSIZE];
+        int32[] hd = heap int32[32768];   this.head = #hd;
+        int32[] pv = heap int32[32768];   this.prev = #pv;
         int32 t = 0;
-        while (t < HASHSIZE) { head[t] = -1; t = t + 1; }
-        t = 0;
-        while (t < WSIZE) { prev[t] = -1; t = t + 1; }
+        while (t < 32768) { this.head[t] = -1; this.prev[t] = -1; t = t + 1; }
 
-        int32 prevMatchLen = 0;
+        int32 matchLength = MINMATCH - 1;
+        int32 matchStart = 0;
+        int32 matchAvailable = 0;
         int32 pos = 0;
         while (pos < nLen) {
-            int32 bestLen = 0;
-            int32 bestDist = 0;
-            boolean canHash = (pos + MINMATCH) <= nLen;
-            int32 h = 0;
-            if (canHash) {
-                int32 i1 = pos + 1;
-                int32 i2 = pos + 2;
+            // Insert the current position and read the chain head before it.
+            int32 hashHead = -1;
+            if ((pos + MINMATCH) <= nLen) {
                 int32 c0 = ((int32) src[pos]) & 0xFF;
-                int32 c1 = ((int32) src[i1]) & 0xFF;
-                int32 c2 = ((int32) src[i2]) & 0xFF;
-                h = Deflate.hash3(c0, c1, c2);
-                int32 cand = head[h];
-                int32 depth = 0;
-                int32 chainLimit = MAXCHAIN;
-                if (prevMatchLen >= GOODMATCH) { chainLimit = MAXCHAIN >> 2; }
-                int32 maxCmp = MAXMATCH;
-                if (nLen - pos < maxCmp) { maxCmp = nLen - pos; }
-                while (cand >= 0 && depth < chainLimit) {
-                    int32 dist = pos - cand;
-                    if (dist > WSIZE) { depth = chainLimit; }
-                    else {
-                        boolean worth = true;
-                        if (bestLen > 0 && bestLen < maxCmp) {
-                            int32 cb = ((int32) src[cand + bestLen]) & 0xFF;
-                            int32 pb = ((int32) src[pos + bestLen]) & 0xFF;
-                            if (cb != pb) { worth = false; }
-                        }
-                        if (worth) {
-                            int32 mlen = 0;
-                            boolean wide = true;
-                            while (wide && mlen + 8 <= maxCmp) {
-                                uint64 a = Cajeta.loadU64(src, (int64) (pos + mlen));
-                                uint64 bb = Cajeta.loadU64(src, (int64) (cand + mlen));
-                                uint64 x = a ^ bb;
-                                if (x == (uint64) 0) {
-                                    mlen = mlen + 8;
-                                } else {
-                                    while ((x & (uint64) 0xFF) == (uint64) 0) {
-                                        mlen = mlen + 1;
-                                        x = x >> (uint64) 8;
-                                    }
-                                    wide = false;
-                                }
-                            }
-                            if (wide) {
-                                boolean tail = true;
-                                while (tail && mlen < maxCmp) {
-                                    int32 a2 = ((int32) src[pos + mlen]) & 0xFF;
-                                    int32 b2 = ((int32) src[cand + mlen]) & 0xFF;
-                                    if (a2 != b2) { tail = false; }
-                                    else { mlen = mlen + 1; }
-                                }
-                            }
-                            if (mlen > bestLen) {
-                                bestLen = mlen;
-                                bestDist = dist;
-                                if (bestLen >= NICEMATCH) { depth = chainLimit; }
-                            }
-                        }
-                        int32 slot = cand & WMASK;
-                        cand = prev[slot];
-                        depth = depth + 1;
-                    }
-                }
-                int32 cs = pos & WMASK;
-                prev[cs] = head[h];
-                head[h] = pos;
+                int32 c1 = ((int32) src[pos + 1]) & 0xFF;
+                int32 c2 = ((int32) src[pos + 2]) & 0xFF;
+                int32 h = Deflate.hash3(c0, c1, c2);
+                hashHead = this.head[h];
+                this.prev[pos & 32767] = hashHead;
+                this.head[h] = pos;
             }
 
-            if (bestLen >= MINMATCH) {
-                this.tokA[this.tokN] = bestLen;
-                this.tokDist[this.tokN] = bestDist;
-                this.tokN = this.tokN + 1;
-                int32 li = 28;
-                while (li > 0 && lengthBase[li] > bestLen) { li = li - 1; }
-                this.freqLit[257 + li] = this.freqLit[257 + li] + 1;
-                int32 di = 29;
-                while (di > 0 && distBase[di] > bestDist) { di = di - 1; }
-                this.freqDist[di] = this.freqDist[di] + 1;
-                int32 lcodeBits = 8;
-                if (257 + li <= 279) { lcodeBits = 7; }
-                this.staticBits = this.staticBits + (int64) lcodeBits
-                    + (int64) lengthExtra[li] + (int64) 5 + (int64) distExtra[di];
-                int32 end = pos + bestLen;
-                int32 q = pos + 1;
-                while (q < end) {
-                    if ((q + MINMATCH) <= nLen) {
-                        int32 q1 = q + 1;
-                        int32 q2 = q + 2;
-                        int32 d0 = ((int32) src[q]) & 0xFF;
-                        int32 d1 = ((int32) src[q1]) & 0xFF;
-                        int32 d2 = ((int32) src[q2]) & 0xFF;
-                        int32 hq = Deflate.hash3(d0, d1, d2);
-                        int32 qs = q & WMASK;
-                        prev[qs] = head[hq];
-                        head[hq] = q;
-                    }
-                    q = q + 1;
+            int32 prevLength = matchLength;
+            int32 prevMatch = matchStart;
+            matchLength = MINMATCH - 1;
+
+            if (hashHead >= 0 && prevLength < MAXLAZY
+                    && (pos - hashHead) <= WSIZE) {
+                int32 chainLimit = MAXCHAIN;
+                if (prevLength >= GOODMATCH) { chainLimit = MAXCHAIN >> 2; }
+                matchLength = this.findLongest(src, pos, nLen, hashHead,
+                                               chainLimit, NICEMATCH);
+                matchStart = this.mStart;
+                // Drop a lone length-3 match that reaches too far — it costs
+                // more than three literals.
+                if (matchLength == MINMATCH && (pos - matchStart) > TOOFAR) {
+                    matchLength = MINMATCH - 1;
                 }
-                prevMatchLen = bestLen;
-                pos = end;
+            }
+
+            if (prevLength >= MINMATCH && matchLength <= prevLength) {
+                // The previous position's match wins — emit it (it started at
+                // pos-1) and insert the interior positions it covers.
+                int32 dist = (pos - 1) - prevMatch;
+                this.tallyMatch(prevLength, dist);
+                int32 ins = prevLength - 2;
+                while (ins > 0) {
+                    pos = pos + 1;
+                    this.insertPos(src, pos, nLen);
+                    ins = ins - 1;
+                }
+                matchAvailable = 0;
+                matchLength = MINMATCH - 1;
+                pos = pos + 1;
+            } else if (matchAvailable == 1) {
+                // No better match; flush the deferred byte at pos-1 as a literal.
+                int32 b = ((int32) src[pos - 1]) & 0xFF;
+                this.tallyLit(b);
+                pos = pos + 1;
             } else {
-                int32 b = ((int32) src[pos]) & 0xFF;
-                this.tokA[this.tokN] = b;
-                this.tokDist[this.tokN] = 0;
-                this.tokN = this.tokN + 1;
-                this.freqLit[b] = this.freqLit[b] + 1;
-                int32 litBits = 9;
-                if (b < 144) { litBits = 8; }
-                this.staticBits = this.staticBits + (int64) litBits;
-                prevMatchLen = 0;
+                // Defer: keep this position's match as the pending candidate.
+                matchAvailable = 1;
                 pos = pos + 1;
             }
+        }
+        if (matchAvailable == 1) {
+            int32 b = ((int32) src[pos - 1]) & 0xFF;
+            this.tallyLit(b);
         }
     }
 
