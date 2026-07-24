@@ -1,35 +1,54 @@
 package dev.cajeta.codec.compress;
 
-/**
- * One-shot **dynamic-Huffman** DEFLATE encoder (RFC 1951 §3.2.7) — the ratio
- * half of the codec's compressor. The existing fixed-Huffman path entropy-codes
- * with the RFC's static tables; this one runs the LZ77 match finder over the
- * whole input, tallies literal/length and distance frequencies, builds two
- * *optimal* length-limited Huffman trees for the block, and emits whichever of
- * {dynamic, fixed} is smaller (the caller's `deflate` still compares against a
- * stored block). Same LZ77 window and level tuning as
- * [`Deflate.deflateFixedInto`](Deflate.cajeta); only the entropy stage differs.
+/*
+ * DynDeflate.cajeta — dynamic-Huffman + lazy-matching DEFLATE encoder.
  *
- * ## Attribution
+ * Portions of this file are a port of zlib version 1.3.1 to the cajeta
+ * language:
+ *   - the Huffman-tree construction (buildTree / genBitlen / genCodes /
+ *     scanTree / sendTree) is ported from zlib `trees.c`
+ *         Copyright (C) 1995-2024 Jean-loup Gailly
+ *   - the lazy-matching LZ77 loop (lz77 / findLongest) is ported from the
+ *     `deflate_slow` function of zlib `deflate.c`
+ *         Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
  *
- * The Huffman-tree construction (heap build, `genBitlen` length limiting with
- * overflow redistribution, canonical `genCodes`, and the `scanTree`/`sendTree`
- * code-length RLE) is a **port of zlib 1.3.1 `trees.c`** by Jean-loup Gailly.
- * zlib is distributed under the zlib license:
+ * THIS IS AN ALTERED VERSION of the zlib source: a reimplementation in a
+ * different programming language, not the original C software, and NOT endorsed
+ * by or affiliated with the zlib authors. They did not write this cajeta code;
+ * any defects in it are the porter's, not theirs.
  *
- *   Copyright (C) 1995-2022 Jean-loup Gailly and Mark Adler
- *   This software is provided 'as-is', without any express or implied warranty.
+ * Redistributed under the terms of the zlib license, whose notice is reproduced
+ * here in full and unaltered, as condition 3 of that license requires:
+ *
+ *   This software is provided 'as-is', without any express or implied
+ *   warranty.  In no event will the authors be held liable for any damages
+ *   arising from the use of this software.
+ *
  *   Permission is granted to anyone to use this software for any purpose,
  *   including commercial applications, and to alter it and redistribute it
  *   freely, subject to the following restrictions:
+ *
  *   1. The origin of this software must not be misrepresented; you must not
- *      claim that you wrote the original software.
+ *      claim that you wrote the original software. If you use this software
+ *      in a product, an acknowledgment in the product documentation would be
+ *      appreciated but is not required.
  *   2. Altered source versions must be plainly marked as such, and must not be
  *      misrepresented as being the original software.
  *   3. This notice may not be removed or altered from any source distribution.
  *
- * **This is an altered version** — a cajeta reimplementation of the algorithm,
- * not the original C source.
+ *   Jean-loup Gailly        Mark Adler
+ *   jloup@gzip.org          madler@alumni.caltech.edu
+ */
+
+/**
+ * One-shot **dynamic-Huffman** DEFLATE encoder (RFC 1951 §3.2.7) — the ratio
+ * half of the codec's compressor. The fixed-Huffman path entropy-codes with the
+ * RFC's static tables; this one runs a **lazy-matching** LZ77 finder over the
+ * whole input, tallies literal/length and distance frequencies, builds two
+ * *optimal* length-limited Huffman trees for the block, and emits whichever of
+ * {dynamic, fixed} is smaller (the caller's `deflate` still compares against a
+ * stored block). See the zlib-license notice above: the tree construction and
+ * the lazy match loop are a cajeta port of zlib 1.3.1 `trees.c` / `deflate.c`.
  */
 public final class DynDeflate {
     // LZ77 token stream for the block. tokDist[i]==0 marks a literal (tokA[i] =
