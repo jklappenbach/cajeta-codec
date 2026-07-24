@@ -1,0 +1,41 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.compress.NativeZlib;
+import dev.cajeta.codec.compress.Gzip;
+import cajeta.lang.String;
+
+/**
+ * Native zlib backend (unit 1) — proves the `@Native` → vendored-static-zlib
+ * link and the crc32 binding. Requires `native/build.sh` to have produced
+ * `native/<platform>/libcajeta_zlib.a` and the build to see it (CAJETA_NATIVE_PATH
+ * points at the project `native/` dir).
+ */
+public class NativeZlibTest {
+
+    public NativeZlibTest() {
+        return;
+    }
+
+    @Test
+    public void crc32MatchesReference() {
+        // crc32("hello world") == 0x0D4A1185 == 222957957.
+        String s = "hello world";
+        int8[] b = s.toBytes();
+        int64 c = NativeZlib.crc32(b, (int64) s.byteLength());
+        Assert.isTrue(c == (int64) 222957957);
+        return;
+    }
+
+    @Test
+    public void crc32MatchesCajeta() {
+        // Native and the pure-cajeta CRC agree over a non-trivial buffer.
+        int8[] in = heap int8[517];
+        int32 i = 0;
+        while (i < 517) { in[i] = (int8) ((i * 37 + 11) & 0xFF); i = i + 1; }
+        int64 nat = NativeZlib.crc32(in, (int64) 517);
+        int64 caj = Gzip.crc32(in, (int64) 517);
+        Assert.isTrue(nat == caj);
+        return;
+    }
+}

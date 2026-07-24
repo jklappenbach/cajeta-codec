@@ -1,0 +1,37 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * Native **zlib** backend for the DEFLATE / gzip / zlib family — bindings to the
+ * reference zlib library through cajeta's `@Native` FFI. The goal is zlib-class
+ * throughput without reimplementing it: the pure-cajeta [`Deflate`](Deflate.cajeta)
+ * / [`DynDeflate`](DynDeflate.cajeta) path stays as the portable software
+ * fallback (and the seed for a future cajeta encoder that competes).
+ *
+ * ## How it links
+ *
+ * Each `@Native(symbol=…, lib="cajeta_zlib")` binds a C shim symbol
+ * (`__cajeta_zlib_*`, in `native/cajeta_zlib_shim.c`) that wraps zlib's simple
+ * buffer API — no `z_stream` struct crosses the boundary. The shim + vendored
+ * zlib (`native/zlib/`) compile to `libcajeta_zlib.a` via `native/build.sh`; the
+ * cajeta native-dependency subsystem resolves it per platform from the project
+ * `native/<platform>/` tree (via `CAJETA_NATIVE_PATH`) or from the artifact
+ * baked into the `.cja` at publish. The requirement is **DCE-gated**: a build
+ * that never calls a `NativeZlib` method links with no native artifact at all.
+ *
+ * Unit 1 (this file) binds `crc32` only; compress/inflate follow in unit 2.
+ */
+public final class NativeZlib {
+
+    @Native(symbol = "__cajeta_zlib_crc32", lib = "cajeta_zlib")
+    static int32 crc32Raw(int8[] data, int64 len);
+
+    /**
+     * CRC-32 (RFC 1952, reflected `0xEDB88320`) of the first `n` bytes, computed
+     * by native zlib. Returned unsigned in an `int64` (matches
+     * [`Gzip.crc32`](Gzip.cajeta)).
+     */
+    public static int64 crc32(int8[] data, int64 n) {
+        int32 r = NativeZlib.crc32Raw(data, n);
+        return ((int64) r) & (int64) 0xFFFFFFFF;
+    }
+}
