@@ -124,9 +124,13 @@ public final class CompressBench {
         System.stdout.println("  INFLATE stream   : {} ms, {} MB/s (verify {})",
             sms, CompressBench.mbps(sz, iters, sms), okS);
 
-        // --- one-shot inflate (Deflate.inflate: the gzip/zlib path) ---
+        // --- one-shot ratio: dynamic-Huffman (deflate) vs fixed-only ---
         int8[] whole = Deflate.deflate(data, (int64) sz);
         int64 wn = whole.count();
+        int8[] wfix = Deflate.deflateFixed(data, (int64) sz, 6);
+        System.stdout.println("  ONE-SHOT ratio   : dynamic={} ({}%)  fixed={} ({}%)",
+            (int32) wn, ((int32) wn * 100) / sz,
+            (int32) wfix.count(), ((int32) wfix.count() * 100) / sz);
         int8[] one = Deflate.inflate(whole, wn, (int64) sz);
         boolean okO = (int32) one.count() == sz && CompressBench.same(one, data, sz);
         t0 = CompressBench.nowMs();

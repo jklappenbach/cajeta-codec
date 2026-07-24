@@ -231,6 +231,20 @@ public class DeflateTest {
     }
 
     @Test
+    public void deflateEmitsDynamicHuffmanWhenSmaller() {
+        // On skewed-frequency text, the one-shot `deflate` (dynamic-or-fixed)
+        // must be no larger than the fixed-only encoder, and round-trip exactly.
+        int8[] in = DeflateTest.levelPayload(4096);
+        int64 inLen = (int64) 4096;
+        int8[] dyn = Deflate.deflate(in, inLen, 9);
+        int8[] fix = Deflate.deflateFixed(in, inLen, 9);
+        Assert.that((int64) dyn.count()).isLessThan((int64) fix.count() + (int64) 1);
+        int8[] out = Deflate.inflate(dyn, (int64) dyn.count(), inLen);
+        Assert.isTrue(DeflateTest.bytesEqual(in, out));
+        return;
+    }
+
+    @Test
     public void inflatesDynamicHuffman() {
         // zlib level 9, "the quick brown fox jumps over the lazy dog. " x4 (180).
         int8[] blob = {

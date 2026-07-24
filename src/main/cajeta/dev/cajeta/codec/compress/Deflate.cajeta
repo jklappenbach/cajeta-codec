@@ -497,10 +497,12 @@ public final class Deflate {
      * DEFLATE and inflates identically regardless of the level it was made at.
      */
     public static #int8[] deflate(int8[] src, int64 n, int32 level) {
-        int8[] fixed = Deflate.deflateFixed(src, n, level);
-        int64 flen = (int64) fixed.count();
+        // DynDeflate emits the smaller of a dynamic- or fixed-Huffman block;
+        // fall back to stored when even that expands (incompressible input).
+        int8[] comp = DynDeflate.encode(src, n, level);
+        int64 clen = (int64) comp.count();
         int64 storedLen = n + ((n / (int64) 65535) + (int64) 1) * (int64) 5;
-        if (flen <= storedLen) { return fixed; }
+        if (clen <= storedLen) { return comp; }
         return Deflate.deflateStored(src, n);
     }
 

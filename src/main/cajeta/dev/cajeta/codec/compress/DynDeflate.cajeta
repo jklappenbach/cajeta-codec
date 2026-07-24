@@ -1,0 +1,691 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * One-shot **dynamic-Huffman** DEFLATE encoder (RFC 1951 §3.2.7) — the ratio
+ * half of the codec's compressor. The existing fixed-Huffman path entropy-codes
+ * with the RFC's static tables; this one runs the LZ77 match finder over the
+ * whole input, tallies literal/length and distance frequencies, builds two
+ * *optimal* length-limited Huffman trees for the block, and emits whichever of
+ * {dynamic, fixed} is smaller (the caller's `deflate` still compares against a
+ * stored block). Same LZ77 window and level tuning as
+ * [`Deflate.deflateFixedInto`](Deflate.cajeta); only the entropy stage differs.
+ *
+ * ## Attribution
+ *
+ * The Huffman-tree construction (heap build, `genBitlen` length limiting with
+ * overflow redistribution, canonical `genCodes`, and the `scanTree`/`sendTree`
+ * code-length RLE) is a **port of zlib 1.3.1 `trees.c`** by Jean-loup Gailly.
+ * zlib is distributed under the zlib license:
+ *
+ *   Copyright (C) 1995-2022 Jean-loup Gailly and Mark Adler
+ *   This software is provided 'as-is', without any express or implied warranty.
+ *   Permission is granted to anyone to use this software for any purpose,
+ *   including commercial applications, and to alter it and redistribute it
+ *   freely, subject to the following restrictions:
+ *   1. The origin of this software must not be misrepresented; you must not
+ *      claim that you wrote the original software.
+ *   2. Altered source versions must be plainly marked as such, and must not be
+ *      misrepresented as being the original software.
+ *   3. This notice may not be removed or altered from any source distribution.
+ *
+ * **This is an altered version** — a cajeta reimplementation of the algorithm,
+ * not the original C source.
+ */
+public final class DynDeflate {
+    // LZ77 token stream for the block. tokDist[i]==0 marks a literal (tokA[i] =
+    // the byte); else tokA[i] = match length (3..258), tokDist[i] = distance.
+    int32[] tokA;
+    int32[] tokDist;
+    int32 tokN;
+
+    // Symbol frequencies: literal/length (0..285, incl. 256 = end-of-block),
+    // distance (0..29), and the code-length alphabet (0..18).
+    int32[] freqLit;
+    int32[] freqDist;
+    int32[] freqBl;
+    // Cost in bits of encoding the tokens with the FIXED tables (incl. extra
+    // bits), for the dynamic-vs-fixed decision.
+    int64 staticBits;
+
+    // Tree-build scratch (reused across the three trees). Indices 0..elems-1 are
+    // leaves; elems..2*elems-2 are internal nodes.
+    int32[] sfreq;
+    int32[] sdad;
+    int32[] sheap;
+    int32[] sdepth;
+    int32[] slen;
+    int32[] scode;
+    int32[] blCount;
+    int32 heapLen;
+    int32 heapMax;
+    int32 maxCode;
+    int64 optLen;   // set by buildTree: data bits using the tree just built
+
+    // The three built trees (bit length + reversed canonical code per symbol).
+    int32[] litLen;
+    int32[] litCode;
+    int32[] distLen;
+    int32[] distCode;
+    int32[] blLen;
+    int32[] blCode;
+    int32 litMax;
+    int32 distMax;
+
+    public DynDeflate() {
+        this.tokN = 0;
+        this.staticBits = (int64) 0;
+        this.heapLen = 0;
+        this.heapMax = 0;
+        this.maxCode = 0;
+        this.optLen = (int64) 0;
+        this.litMax = 0;
+        this.distMax = 0;
+    }
+
+    /** Reverse the low `len` bits of `code` (canonical MSB-first → LSB-first). */
+    static int32 biReverse(int32 code, int32 len) {
+        int32 res = 0;
+        int32 c = code;
+        int32 i = 0;
+        while (i < len) { res = (res << 1) | (c & 1); c = c >> 1; i = i + 1; }
+        return res;
+    }
+
+    boolean smaller(int32 a, int32 b) {
+        if (this.sfreq[a] < this.sfreq[b]) { return true; }
+        if (this.sfreq[a] == this.sfreq[b] && this.sdepth[a] <= this.sdepth[b]) {
+            return true;
+        }
+        return false;
+    }
+
+    void pqdownheap(int32 k) {
+        int32 v = this.sheap[k];
+        int32 j = k << 1;
+        boolean go = true;
+        while (go && j <= this.heapLen) {
+            if (j < this.heapLen && this.smaller(this.sheap[j + 1], this.sheap[j])) {
+                j = j + 1;
+            }
+            if (this.smaller(v, this.sheap[j])) {
+                go = false;
+            } else {
+                this.sheap[k] = this.sheap[j];
+                k = j;
+                j = j << 1;
+            }
+        }
+        this.sheap[k] = v;
+    }
+
+    int32 pqremove() {
+        int32 top = this.sheap[1];
+        this.sheap[1] = this.sheap[this.heapLen];
+        this.heapLen = this.heapLen - 1;
+        this.pqdownheap(1);
+        return top;
+    }
+
+    // Construct one length-limited Huffman tree from `freqIn[0..numElems-1]`.
+    // Fills this.slen / this.scode for the leaves, sets this.maxCode and
+    // this.optLen (data bits, incl. extra bits). `extra`/`extraBase` give the
+    // per-symbol extra-bit counts (length/distance/bit-length alphabets).
+    void buildTree(int32[] freqIn, int32 numElems, int32 maxLength,
+                   int32[] extra, int32 extraBase) {
+        int32 hs = 2 * numElems + 1;
+        int32 i = 0;
+        while (i < 2 * numElems) {
+            this.sfreq[i] = 0; this.sdad[i] = 0; this.slen[i] = 0; i = i + 1;
+        }
+        i = 0;
+        while (i < numElems) { this.sfreq[i] = freqIn[i]; i = i + 1; }
+
+        this.heapLen = 0;
+        this.heapMax = hs;
+        this.maxCode = -1;
+        int32 n = 0;
+        while (n < numElems) {
+            if (this.sfreq[n] != 0) {
+                this.heapLen = this.heapLen + 1;
+                this.sheap[this.heapLen] = n;
+                this.maxCode = n;
+                this.sdepth[n] = 0;
+            } else {
+                this.slen[n] = 0;
+            }
+            n = n + 1;
+        }
+        // At least two non-zero codes (pkzip format requirement).
+        while (this.heapLen < 2) {
+            int32 node = 0;
+            if (this.maxCode < 2) { this.maxCode = this.maxCode + 1; node = this.maxCode; }
+            this.heapLen = this.heapLen + 1;
+            this.sheap[this.heapLen] = node;
+            this.sfreq[node] = 1;
+            this.sdepth[node] = 0;
+        }
+
+        n = this.heapLen / 2;
+        while (n >= 1) { this.pqdownheap(n); n = n - 1; }
+
+        int32 node = numElems;
+        boolean go = true;
+        while (go) {
+            int32 nn = this.pqremove();
+            int32 mm = this.sheap[1];
+            this.heapMax = this.heapMax - 1; this.sheap[this.heapMax] = nn;
+            this.heapMax = this.heapMax - 1; this.sheap[this.heapMax] = mm;
+            this.sfreq[node] = this.sfreq[nn] + this.sfreq[mm];
+            int32 dmax = this.sdepth[nn];
+            if (this.sdepth[mm] > dmax) { dmax = this.sdepth[mm]; }
+            this.sdepth[node] = dmax + 1;
+            this.sdad[nn] = node;
+            this.sdad[mm] = node;
+            this.sheap[1] = node;
+            node = node + 1;
+            this.pqdownheap(1);
+            if (this.heapLen < 2) { go = false; }
+        }
+        this.heapMax = this.heapMax - 1;
+        this.sheap[this.heapMax] = this.sheap[1];
+
+        this.genBitlen(numElems, maxLength, extra, extraBase);
+        this.genCodes(this.maxCode);
+    }
+
+    void genBitlen(int32 numElems, int32 maxLength, int32[] extra, int32 extraBase) {
+        int32 b = 0;
+        while (b <= 15) { this.blCount[b] = 0; b = b + 1; }
+        this.slen[this.sheap[this.heapMax]] = 0;   // root
+        this.optLen = (int64) 0;
+        int32 overflow = 0;
+        int32 hs = 2 * numElems + 1;
+        int32 h = this.heapMax + 1;
+        while (h < hs) {
+            int32 nn = this.sheap[h];
+            h = h + 1;
+            int32 bits = this.slen[this.sdad[nn]] + 1;
+            if (bits > maxLength) { bits = maxLength; overflow = overflow + 1; }
+            this.slen[nn] = bits;
+            if (nn <= this.maxCode) {   // leaf
+                this.blCount[bits] = this.blCount[bits] + 1;
+                int32 xbits = 0;
+                if (nn >= extraBase) { xbits = extra[nn - extraBase]; }
+                int64 f = (int64) this.sfreq[nn];
+                this.optLen = this.optLen + f * (int64) (bits + xbits);
+            }
+        }
+        if (overflow > 0) {
+            boolean go = true;
+            while (go) {
+                int32 bb = maxLength - 1;
+                while (this.blCount[bb] == 0) { bb = bb - 1; }
+                this.blCount[bb] = this.blCount[bb] - 1;
+                this.blCount[bb + 1] = this.blCount[bb + 1] + 2;
+                this.blCount[maxLength] = this.blCount[maxLength] - 1;
+                overflow = overflow - 2;
+                if (overflow <= 0) { go = false; }
+            }
+            int32 bits = maxLength;
+            int32 hh = hs;
+            while (bits != 0) {
+                int32 cnt = this.blCount[bits];
+                while (cnt != 0) {
+                    hh = hh - 1;
+                    int32 m = this.sheap[hh];
+                    if (m <= this.maxCode) {
+                        if (this.slen[m] != bits) {
+                            this.optLen = this.optLen
+                                + ((int64) bits - (int64) this.slen[m])
+                                  * (int64) this.sfreq[m];
+                            this.slen[m] = bits;
+                        }
+                        cnt = cnt - 1;
+                    }
+                }
+                bits = bits - 1;
+            }
+        }
+    }
+
+    void genCodes(int32 maxCode) {
+        int32[] nextCode = heap int32[16];
+        int32 code = 0;
+        int32 bits = 1;
+        while (bits <= 15) {
+            code = (code + this.blCount[bits - 1]) << 1;
+            nextCode[bits] = code;
+            bits = bits + 1;
+        }
+        int32 n = 0;
+        while (n <= maxCode) {
+            int32 len = this.slen[n];
+            if (len != 0) {
+                int32 c = nextCode[len];
+                nextCode[len] = c + 1;
+                this.scode[n] = DynDeflate.biReverse(c, len);
+            } else {
+                this.scode[n] = 0;
+            }
+            n = n + 1;
+        }
+    }
+
+    // Tally the code-length alphabet frequencies for one tree's lengths.
+    void scanTree(int32[] len, int32 maxCode) {
+        int32 prevlen = -1;
+        int32 nextlen = len[0];
+        int32 count = 0;
+        int32 maxCount = 7;
+        int32 minCount = 4;
+        if (nextlen == 0) { maxCount = 138; minCount = 3; }
+        int32 n = 0;
+        while (n <= maxCode) {
+            int32 curlen = nextlen;
+            if (n + 1 <= maxCode) { nextlen = len[n + 1]; } else { nextlen = -1; }
+            count = count + 1;
+            boolean cont = false;
+            if (count < maxCount && curlen == nextlen) { cont = true; }
+            if (!cont) {
+                if (count < minCount) {
+                    this.freqBl[curlen] = this.freqBl[curlen] + count;
+                } else if (curlen != 0) {
+                    if (curlen != prevlen) {
+                        this.freqBl[curlen] = this.freqBl[curlen] + 1;
+                    }
+                    this.freqBl[16] = this.freqBl[16] + 1;
+                } else if (count <= 10) {
+                    this.freqBl[17] = this.freqBl[17] + 1;
+                } else {
+                    this.freqBl[18] = this.freqBl[18] + 1;
+                }
+                count = 0;
+                prevlen = curlen;
+                if (nextlen == 0) { maxCount = 138; minCount = 3; }
+                else if (curlen == nextlen) { maxCount = 6; minCount = 3; }
+                else { maxCount = 7; minCount = 4; }
+            }
+            n = n + 1;
+        }
+    }
+
+    void sendBl(BitWriter bw, int32 sym) {
+        bw.writeBits(this.blCode[sym], this.blLen[sym]);
+    }
+
+    // Emit one tree's lengths in the RLE-compressed bit-length form.
+    void sendTree(BitWriter bw, int32[] len, int32 maxCode) {
+        int32 prevlen = -1;
+        int32 nextlen = len[0];
+        int32 count = 0;
+        int32 maxCount = 7;
+        int32 minCount = 4;
+        if (nextlen == 0) { maxCount = 138; minCount = 3; }
+        int32 n = 0;
+        while (n <= maxCode) {
+            int32 curlen = nextlen;
+            if (n + 1 <= maxCode) { nextlen = len[n + 1]; } else { nextlen = -1; }
+            count = count + 1;
+            boolean cont = false;
+            if (count < maxCount && curlen == nextlen) { cont = true; }
+            if (!cont) {
+                if (count < minCount) {
+                    int32 r = 0;
+                    while (r < count) { this.sendBl(bw, curlen); r = r + 1; }
+                } else if (curlen != 0) {
+                    if (curlen != prevlen) {
+                        this.sendBl(bw, curlen);
+                        count = count - 1;
+                    }
+                    this.sendBl(bw, 16);
+                    bw.writeBits(count - 3, 2);
+                } else if (count <= 10) {
+                    this.sendBl(bw, 17);
+                    bw.writeBits(count - 3, 3);
+                } else {
+                    this.sendBl(bw, 18);
+                    bw.writeBits(count - 11, 7);
+                }
+                count = 0;
+                prevlen = curlen;
+                if (nextlen == 0) { maxCount = 138; minCount = 3; }
+                else if (curlen == nextlen) { maxCount = 6; minCount = 3; }
+                else { maxCount = 7; minCount = 4; }
+            }
+            n = n + 1;
+        }
+    }
+
+    // Canonical codes for a full (no zero-length) length assignment — the fixed
+    // tables. blCount[0] stays 0 because every symbol has a non-zero length.
+    void codesFromLens(int32[] len, int32 numElems, int32[] outCode) {
+        int32 b = 0;
+        while (b <= 15) { this.blCount[b] = 0; b = b + 1; }
+        int32 i = 0;
+        while (i < numElems) {
+            int32 L = len[i];
+            this.blCount[L] = this.blCount[L] + 1;
+            i = i + 1;
+        }
+        int32[] nextCode = heap int32[16];
+        int32 code = 0;
+        int32 bits = 1;
+        while (bits <= 15) {
+            code = (code + this.blCount[bits - 1]) << 1;
+            nextCode[bits] = code;
+            bits = bits + 1;
+        }
+        i = 0;
+        while (i < numElems) {
+            int32 L = len[i];
+            int32 c = nextCode[L];
+            nextCode[L] = c + 1;
+            outCode[i] = DynDeflate.biReverse(c, L);
+            i = i + 1;
+        }
+    }
+
+    void buildFixed() {
+        int32 i = 0;
+        while (i < 144) { this.litLen[i] = 8; i = i + 1; }
+        while (i < 256) { this.litLen[i] = 9; i = i + 1; }
+        while (i < 280) { this.litLen[i] = 7; i = i + 1; }
+        while (i < 288) { this.litLen[i] = 8; i = i + 1; }
+        this.codesFromLens(this.litLen, 288, this.litCode);
+        int32 d = 0;
+        while (d < 30) { this.distLen[d] = 5; d = d + 1; }
+        this.codesFromLens(this.distLen, 30, this.distCode);
+    }
+
+    // Emit the token stream + end-of-block using the current lit/dist tables.
+    void compressBlock(BitWriter bw) {
+        int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
+        int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
+        int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
+        int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+        int32 t = 0;
+        while (t < this.tokN) {
+            int32 a = this.tokA[t];
+            int32 dist = this.tokDist[t];
+            t = t + 1;
+            if (dist == 0) {
+                bw.writeBits(this.litCode[a], this.litLen[a]);
+            } else {
+                int32 li = 28;
+                while (li > 0 && lengthBase[li] > a) { li = li - 1; }
+                int32 sym = 257 + li;
+                bw.writeBits(this.litCode[sym], this.litLen[sym]);
+                int32 le = lengthExtra[li];
+                if (le > 0) { bw.writeBits(a - lengthBase[li], le); }
+                int32 di = 29;
+                while (di > 0 && distBase[di] > dist) { di = di - 1; }
+                bw.writeBits(this.distCode[di], this.distLen[di]);
+                int32 de = distExtra[di];
+                if (de > 0) { bw.writeBits(dist - distBase[di], de); }
+            }
+        }
+        bw.writeBits(this.litCode[256], this.litLen[256]);
+    }
+
+    // LZ77 match finder (whole input as one block) tallying tokens + freqs.
+    // Mirrors Deflate.deflateFixedInto's finder (hash-chain, level tuning,
+    // good_match, wide compare) — emitFrom is always 0 here (no history).
+    void lz77(int8[] src, int32 nLen, int32 level) {
+        int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
+        int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
+        int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
+        int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+
+        int32 HASHSIZE = 32768;
+        int32 WSIZE = 32768;
+        int32 WMASK = 32767;
+        int32 MINMATCH = 3;
+        int32 MAXMATCH = 258;
+        int32 lv = level;
+        if (lv < 1) { lv = 1; }
+        if (lv > 9) { lv = 9; }
+        int32[] chainByLevel = {0, 8, 16, 32, 48, 64, 128, 256, 512, 1024};
+        int32[] niceByLevel  = {0, 16, 16, 32, 64, 96, 128, 200, 258, 258};
+        int32 MAXCHAIN = chainByLevel[lv];
+        int32 NICEMATCH = niceByLevel[lv];
+        int32 GOODMATCH = 32;
+
+        int32[] head = heap int32[HASHSIZE];
+        int32[] prev = heap int32[WSIZE];
+        int32 t = 0;
+        while (t < HASHSIZE) { head[t] = -1; t = t + 1; }
+        t = 0;
+        while (t < WSIZE) { prev[t] = -1; t = t + 1; }
+
+        int32 prevMatchLen = 0;
+        int32 pos = 0;
+        while (pos < nLen) {
+            int32 bestLen = 0;
+            int32 bestDist = 0;
+            boolean canHash = (pos + MINMATCH) <= nLen;
+            int32 h = 0;
+            if (canHash) {
+                int32 i1 = pos + 1;
+                int32 i2 = pos + 2;
+                int32 c0 = ((int32) src[pos]) & 0xFF;
+                int32 c1 = ((int32) src[i1]) & 0xFF;
+                int32 c2 = ((int32) src[i2]) & 0xFF;
+                h = Deflate.hash3(c0, c1, c2);
+                int32 cand = head[h];
+                int32 depth = 0;
+                int32 chainLimit = MAXCHAIN;
+                if (prevMatchLen >= GOODMATCH) { chainLimit = MAXCHAIN >> 2; }
+                int32 maxCmp = MAXMATCH;
+                if (nLen - pos < maxCmp) { maxCmp = nLen - pos; }
+                while (cand >= 0 && depth < chainLimit) {
+                    int32 dist = pos - cand;
+                    if (dist > WSIZE) { depth = chainLimit; }
+                    else {
+                        boolean worth = true;
+                        if (bestLen > 0 && bestLen < maxCmp) {
+                            int32 cb = ((int32) src[cand + bestLen]) & 0xFF;
+                            int32 pb = ((int32) src[pos + bestLen]) & 0xFF;
+                            if (cb != pb) { worth = false; }
+                        }
+                        if (worth) {
+                            int32 mlen = 0;
+                            boolean wide = true;
+                            while (wide && mlen + 8 <= maxCmp) {
+                                uint64 a = Cajeta.loadU64(src, (int64) (pos + mlen));
+                                uint64 bb = Cajeta.loadU64(src, (int64) (cand + mlen));
+                                uint64 x = a ^ bb;
+                                if (x == (uint64) 0) {
+                                    mlen = mlen + 8;
+                                } else {
+                                    while ((x & (uint64) 0xFF) == (uint64) 0) {
+                                        mlen = mlen + 1;
+                                        x = x >> (uint64) 8;
+                                    }
+                                    wide = false;
+                                }
+                            }
+                            if (wide) {
+                                boolean tail = true;
+                                while (tail && mlen < maxCmp) {
+                                    int32 a2 = ((int32) src[pos + mlen]) & 0xFF;
+                                    int32 b2 = ((int32) src[cand + mlen]) & 0xFF;
+                                    if (a2 != b2) { tail = false; }
+                                    else { mlen = mlen + 1; }
+                                }
+                            }
+                            if (mlen > bestLen) {
+                                bestLen = mlen;
+                                bestDist = dist;
+                                if (bestLen >= NICEMATCH) { depth = chainLimit; }
+                            }
+                        }
+                        int32 slot = cand & WMASK;
+                        cand = prev[slot];
+                        depth = depth + 1;
+                    }
+                }
+                int32 cs = pos & WMASK;
+                prev[cs] = head[h];
+                head[h] = pos;
+            }
+
+            if (bestLen >= MINMATCH) {
+                this.tokA[this.tokN] = bestLen;
+                this.tokDist[this.tokN] = bestDist;
+                this.tokN = this.tokN + 1;
+                int32 li = 28;
+                while (li > 0 && lengthBase[li] > bestLen) { li = li - 1; }
+                this.freqLit[257 + li] = this.freqLit[257 + li] + 1;
+                int32 di = 29;
+                while (di > 0 && distBase[di] > bestDist) { di = di - 1; }
+                this.freqDist[di] = this.freqDist[di] + 1;
+                int32 lcodeBits = 8;
+                if (257 + li <= 279) { lcodeBits = 7; }
+                this.staticBits = this.staticBits + (int64) lcodeBits
+                    + (int64) lengthExtra[li] + (int64) 5 + (int64) distExtra[di];
+                int32 end = pos + bestLen;
+                int32 q = pos + 1;
+                while (q < end) {
+                    if ((q + MINMATCH) <= nLen) {
+                        int32 q1 = q + 1;
+                        int32 q2 = q + 2;
+                        int32 d0 = ((int32) src[q]) & 0xFF;
+                        int32 d1 = ((int32) src[q1]) & 0xFF;
+                        int32 d2 = ((int32) src[q2]) & 0xFF;
+                        int32 hq = Deflate.hash3(d0, d1, d2);
+                        int32 qs = q & WMASK;
+                        prev[qs] = head[hq];
+                        head[hq] = q;
+                    }
+                    q = q + 1;
+                }
+                prevMatchLen = bestLen;
+                pos = end;
+            } else {
+                int32 b = ((int32) src[pos]) & 0xFF;
+                this.tokA[this.tokN] = b;
+                this.tokDist[this.tokN] = 0;
+                this.tokN = this.tokN + 1;
+                this.freqLit[b] = this.freqLit[b] + 1;
+                int32 litBits = 9;
+                if (b < 144) { litBits = 8; }
+                this.staticBits = this.staticBits + (int64) litBits;
+                prevMatchLen = 0;
+                pos = pos + 1;
+            }
+        }
+    }
+
+    #int8[] run(int8[] src, int64 n64, int32 level) {
+        int32 n = (int32) n64;
+        int32[] ta = heap int32[n + 1];   this.tokA = #ta;
+        int32[] td = heap int32[n + 1];   this.tokDist = #td;
+        this.tokN = 0;
+        this.staticBits = (int64) 0;
+        int32[] fl = heap int32[286];  this.freqLit = #fl;
+        int32[] fd = heap int32[30];   this.freqDist = #fd;
+        int32[] fb = heap int32[19];   this.freqBl = #fb;
+        int32 z = 0;
+        while (z < 286) { this.freqLit[z] = 0; z = z + 1; }
+        z = 0; while (z < 30) { this.freqDist[z] = 0; z = z + 1; }
+        z = 0; while (z < 19) { this.freqBl[z] = 0; z = z + 1; }
+
+        int32[] sf = heap int32[600];  this.sfreq = #sf;
+        int32[] sd = heap int32[600];  this.sdad = #sd;
+        int32[] sh = heap int32[600];  this.sheap = #sh;
+        int32[] sp = heap int32[600];  this.sdepth = #sp;
+        int32[] sl = heap int32[600];  this.slen = #sl;
+        int32[] sc = heap int32[600];  this.scode = #sc;
+        int32[] bc = heap int32[16];   this.blCount = #bc;
+
+        int32[] ll = heap int32[288];  this.litLen = #ll;
+        int32[] lc = heap int32[288];  this.litCode = #lc;
+        int32[] dl = heap int32[30];   this.distLen = #dl;
+        int32[] dc = heap int32[30];   this.distCode = #dc;
+        int32[] bl = heap int32[19];   this.blLen = #bl;
+        int32[] bcd = heap int32[19];  this.blCode = #bcd;
+
+        int32[] extraLbits = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
+        int32[] extraDbits = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+        int32[] extraBlbits = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,3,7};
+        int32[] blOrder = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15};
+
+        this.lz77(src, n, level);
+        this.freqLit[256] = this.freqLit[256] + 1;
+        this.staticBits = this.staticBits + (int64) 7;
+
+        // Literal/length tree (286 symbols; length codes start at 257).
+        this.buildTree(this.freqLit, 286, 15, extraLbits, 257);
+        int32 i = 0;
+        while (i < 286) { this.litLen[i] = this.slen[i]; this.litCode[i] = this.scode[i]; i = i + 1; }
+        this.litLen[286] = 0; this.litLen[287] = 0;
+        this.litMax = this.maxCode;
+        int64 dynLit = this.optLen;
+
+        // Distance tree (30 symbols, no extra base).
+        this.buildTree(this.freqDist, 30, 15, extraDbits, 0);
+        i = 0;
+        while (i < 30) { this.distLen[i] = this.slen[i]; this.distCode[i] = this.scode[i]; i = i + 1; }
+        this.distMax = this.maxCode;
+        int64 dynDist = this.optLen;
+
+        // Bit-length tree describing the two trees above.
+        this.scanTree(this.litLen, this.litMax);
+        this.scanTree(this.distLen, this.distMax);
+        this.buildTree(this.freqBl, 19, 7, extraBlbits, 0);
+        i = 0;
+        while (i < 19) { this.blLen[i] = this.slen[i]; this.blCode[i] = this.scode[i]; i = i + 1; }
+        int64 blDesc = this.optLen;
+        int32 blindex = 18;
+        boolean scan = true;
+        while (scan && blindex >= 3) {
+            if (this.blLen[blOrder[blindex]] != 0) { scan = false; }
+            else { blindex = blindex - 1; }
+        }
+        int64 treeDesc = blDesc + (int64) (3 * (blindex + 1)) + (int64) 14;
+
+        int64 dynTotal = dynLit + dynDist + treeDesc + (int64) 3;
+        int64 staticTotal = this.staticBits + (int64) 3;
+        int64 optBytes = (dynTotal + (int64) 7) >> 3;
+        int64 staticBytes = (staticTotal + (int64) 7) >> 3;
+
+        int64 cap = (int64) n + ((int64) n >> 1) + (int64) 128;
+        BitWriter bw = heap BitWriter(cap);
+        bw.writeBits(1, 1);   // BFINAL = 1 (single block)
+        boolean useDyn = optBytes < staticBytes;
+        if (useDyn) {
+            bw.writeBits(2, 2);   // BTYPE = 10 (dynamic Huffman)
+            int32 hlit = this.litMax + 1;
+            if (hlit < 257) { hlit = 257; }
+            int32 hdist = this.distMax + 1;
+            if (hdist < 1) { hdist = 1; }
+            int32 hclen = blindex + 1;
+            bw.writeBits(hlit - 257, 5);
+            bw.writeBits(hdist - 1, 5);
+            bw.writeBits(hclen - 4, 4);
+            int32 r = 0;
+            while (r < hclen) {
+                bw.writeBits(this.blLen[blOrder[r]], 3);
+                r = r + 1;
+            }
+            this.sendTree(bw, this.litLen, hlit - 1);
+            this.sendTree(bw, this.distLen, hdist - 1);
+        } else {
+            bw.writeBits(1, 2);   // BTYPE = 01 (fixed Huffman)
+            this.buildFixed();
+        }
+        this.compressBlock(bw);
+        bw.flushByte();
+        return bw.result();
+    }
+
+    /**
+     * Encode `src[0..n)` as a single dynamic-or-fixed-Huffman DEFLATE block at
+     * compression `level` (1..9). Picks the smaller of the two entropy codings;
+     * the caller's `deflate` still falls back to a stored block if neither wins.
+     */
+    public static #int8[] encode(int8[] src, int64 n, int32 level) {
+        DynDeflate d = heap DynDeflate();
+        return d.run(src, n, level);
+    }
+}
