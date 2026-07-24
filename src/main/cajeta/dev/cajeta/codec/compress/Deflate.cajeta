@@ -54,7 +54,11 @@ public final class Deflate {
     void ensure(int64 need) {
         int64 cap = (int64) this.out.count();
         if (need <= cap) { return; }
+        // Floor the base to 1 before doubling: a zero-capacity buffer (destLen
+        // 0, e.g. `inflate(stream, n, 0)` / `Zlib.decompress(.., 0)`) would
+        // otherwise loop forever here — 0*2 stays 0 and never reaches `need`.
         int64 newcap = cap * (int64) 2;
+        if (newcap < (int64) 1) { newcap = (int64) 1; }
         while (newcap < need) { newcap = newcap * (int64) 2; }
         int8[] nb = heap int8[newcap];
         int64 oldop = this.op;
@@ -497,6 +501,9 @@ public final class Deflate {
      * DEFLATE and inflates identically regardless of the level it was made at.
      */
     public static #int8[] deflate(int8[] src, int64 n, int32 level) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.deflate(src, n, level);
+        }
         // DynDeflate emits the smaller of a dynamic- or fixed-Huffman block;
         // fall back to stored when even that expands (incompressible input).
         int8[] comp = DynDeflate.encode(src, n, level);
@@ -798,6 +805,9 @@ public final class Deflate {
 
     /** Inflate a raw DEFLATE stream (first `n` bytes) into `destLen` bytes. */
     public static #int8[] inflate(int8[] src, int64 n, int64 destLen) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.inflate(src, n, destLen);
+        }
         Deflate d = heap Deflate(src, n, destLen);
         d.inflateBlocks();
         return d.result();
@@ -808,6 +818,9 @@ public final class Deflate {
      * store no uncompressed length). Starts small and grows via `ensure()`.
      */
     public static #int8[] inflateGrow(int8[] src, int64 n) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.inflate(src, n, (int64) 256);
+        }
         Deflate d = heap Deflate(src, n, (int64) 256);
         d.inflateBlocks();
         return d.result();
