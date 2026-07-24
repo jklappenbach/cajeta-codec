@@ -145,17 +145,21 @@ build wiring in later units — that is expected; update this plan if so.
   - [x] 4.3.2 Results recorded — per-target table + provisioning steps + this
         host's snapshot in `native/CROSS-BUILD.md`.
 
-## 5. Licensing + docs  (spec 6.1)
+## 5. Licensing + docs  (spec 6.1)  ✅ DONE
 
-- [ ] **5.1 Coding**
-  - [ ] 5.1.1 `THIRD-PARTY` (or `native/zlib/README`) retaining zlib's license
-        notice verbatim + the vendored version.
-  - [ ] 5.1.2 Note the mixed license surface (Apache-2.0 codec + vendored
-        zlib-licensed native dep) in the repo README.
-  - [ ] 5.1.3 Update `cajeta.json` doc comments to describe the native backend +
-        fallback.
-- [ ] **5.2 Acceptance**
-  - [ ] 5.2.1 Notice present and accurate; license surface documented.
+- [x] **5.1 Coding**
+  - [x] 5.1.1 `THIRD-PARTY.md` retains zlib's full license notice verbatim +
+        version (1.3.1) + vendored scope (buffer-API subset, `gz*` omitted).
+        `native/zlib/LICENSE` + `VENDORED.txt` present.
+  - [x] 5.1.2 README: refined the "our own code" principle to name the one
+        vendored exception, and added a **License** section (Apache-2.0 codec +
+        zlib-licensed vendored zlib, → `THIRD-PARTY.md` / `CROSS-BUILD.md`).
+  - [x] 5.1.3 `cajeta.json` header comment describes the native backend +
+        transparent pure-cajeta fallback and the mixed-license surface.
+- [x] **5.2 Acceptance**
+  - [x] 5.2.1 Notice present and accurate (scope matches the vendored tree —
+        buffer-API subset verified); mixed license surface documented in README,
+        `cajeta.json`, `THIRD-PARTY.md`, `VENDORED.txt`.
 
 ## 6. Performance validation  (spec 5.4)
 

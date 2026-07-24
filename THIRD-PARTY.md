@@ -6,9 +6,12 @@ optional native compression backend:
 ## zlib
 
 - **Version:** 1.3.1 (tag `v1.3.1`), from https://github.com/madler/zlib
-- **Location:** `native/zlib/` (unmodified upstream C sources)
+- **Location:** `native/zlib/` — unmodified upstream C sources, buffer-API
+  subset (the `gz*` file-I/O TUs are omitted; `gzguts.h` kept for `zutil.c`).
+  See `native/zlib/VENDORED.txt`.
 - **Used by:** the native backend (`src/main/.../compress/NativeZlib.cajeta` via
-  the shim `native/cajeta_zlib_shim.c`), built static by `native/build.sh`.
+  the shim `native/cajeta_zlib_shim.c`), built static by `native/build.sh` (host)
+  and `native/cross-build.sh` (all six target triples).
 - **License:** the zlib License (permissive; static linking permitted with the
   notice retained). Full text in `native/zlib/LICENSE`:
 

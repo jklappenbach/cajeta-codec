@@ -8,8 +8,14 @@
     // codecs. These live under the `dev.cajeta.*` namespace (the convention for
     // our own non-stdlib libraries) — the core stdlib owns `cajeta.codec.*`
     // (json, csv, Base64) and a standalone `.cja` can't extend that namespace
-    // through classpath linking. All our own code; no third-party libraries
-    // (completeness by conformance corpus + fail-loud). See docs/ for the
+    // through classpath linking. Our own code throughout, with ONE vendored
+    // exception: the DEFLATE/gzip/zlib family has an optional native zlib
+    // backend (`dev.cajeta.codec.compress.NativeZlib` -> vendored zlib in
+    // native/, statically linked, DCE-gated) for zlib-class throughput, with the
+    // pure-cajeta encoder/decoder as a transparent fallback behind the same API
+    // (see DeflateBackend). License: codec Apache-2.0 + vendored zlib under the
+    // zlib License — THIRD-PARTY.md; per-target builds — native/CROSS-BUILD.md.
+    // Completeness by conformance corpus + fail-loud. See docs/ for the
     // framework spec and per-format specs. Core tier interfaces
     // (`cajeta.wire.*`) and the SIMD structural-scan pattern come from the
     // toolchain stdlib.
