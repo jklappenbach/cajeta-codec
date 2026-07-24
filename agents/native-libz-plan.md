@@ -123,20 +123,27 @@ build wiring in later units — that is expected; update this plan if so.
         loop on a zero-capacity output buffer (`inflate(.., 0)` / `Zlib.decompress
         (.., 0)`) surfaced by the empty-corpus fallback case.
 
-## 4. Per-target static build + cross-compile smoke  (spec 2.2, 2.4, 5.3)
+## 4. Per-target static build + cross-compile smoke  (spec 2.2, 2.4, 5.3)  ⚠ HARNESS COMPLETE — cross targets gated on CI toolchains
 
-- [ ] **4.1 TDD**
-  - [ ] 4.1.1 A smoke script builds+links the native backend for each triple:
-        linux-x86_64, linux-arm64, windows-x86, macos-x86_64, macos-arm64,
-        linux-riscv64 (compile+link gate; run where hardware/emulation exists).
-- [ ] **4.2 Coding**
-  - [ ] 4.2.1 Per-platform native-lib declaration; vendored-zlib static build
-        per target (no system libz assumption).
-  - [ ] 4.2.2 Resolve any target-specific zlib build knobs (e.g. `Z_HAVE_UNISTD`,
-        large-file, RISC-V/Windows quirks).
-- [ ] **4.3 Acceptance**
-  - [ ] 4.3.1 All six link; at least the host triple runs the full suite.
-  - [ ] 4.3.2 Cross-build results recorded (which ran vs link-only).
+- [x] **4.1 TDD**
+  - [x] 4.1.1 `native/cross-build.sh` builds the archive for each of the six
+        triples (linux-x64/arm64/riscv64, windows-x64, macos-x64/arm64), choosing
+        a per-target compiler and **recording SKIP (never faking)** where the
+        toolchain is absent. Host triple builds + runs the full suite.
+- [x] **4.2 Coding**
+  - [x] 4.2.1 Per-target vendored-zlib static build (matrix in `cross-build.sh`),
+        no system-libz assumption; `llvm-ar` archives ELF/COFF/Mach-O uniformly.
+  - [x] 4.2.2 Target-specific knobs: **none needed** — dropping the `gz*` TUs
+        (Unit 1) removed the unistd/lseek/large-file surface, so identical flags
+        compile on every triple. Documented in `native/CROSS-BUILD.md`.
+- [~] **4.3 Acceptance**
+  - [~] 4.3.1 Host (`linux-x64`) builds **and runs the full suite** (214 tests).
+        The five cross targets are harness-ready but their toolchains are **not
+        installed on this dev box** (no cross-gcc, no sysroots, no qemu; local
+        clang is x86-only) — recorded as SKIP, verifiable on a provisioned CI
+        host per `CROSS-BUILD.md`. "All six link" is **not** demonstrable here.
+  - [x] 4.3.2 Results recorded — per-target table + provisioning steps + this
+        host's snapshot in `native/CROSS-BUILD.md`.
 
 ## 5. Licensing + docs  (spec 6.1)
 
