@@ -200,9 +200,21 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
 - [x] **7.3** v0.9.5 (the installed CI toolchain) implements §3.3 baking — no
       separate explicit-bake step needed; the artifact must simply be resolvable
       when `cajeta build` runs.
-- [ ] **7.4** Release wiring: `release.yml`'s `.cja` build must have **all six**
-      `native/<platform>/*.a` present so all six bake (this host bakes only
-      linux-x64). Run `cross-build.sh` (linux×3 + windows) + fetch the
-      `native-macos` CI artifacts, set `CAJETA_NATIVE_PATH`, before the build step.
-- [ ] **7.5** End-to-end: bump cajeta-http's codec dep to the native-carrying
-      version and verify it links offline with **no** `CAJETA_NATIVE_PATH`.
+- [x] **7.4** Release wiring: `release.yml`'s `.cja` build has **all six**
+      `native/<platform>/*.a` present so all six bake. `native-linux` job
+      (cross-gcc + `cross-build.sh` → linux×3 + windows) and `native-macos` job
+      (SDK + `cross-build.sh`) upload archives; the build/publish job downloads
+      them into `native/` and sets `CAJETA_NATIVE_PATH` before the build +
+      verifies the six baked entries.
+- [x] **7.5 — END-TO-END FINDING.** The consumer link **does NOT auto-extract**
+      native from a classpath `.cja` (spec §3.2.2 unimplemented in v0.9.5):
+      `--emit=exe --classpath=<codec.cja>` errors `native library 'cajeta_zlib'
+      not found; searched: CAJETA_NATIVE_PATH / project native/ / ~/.cajeta/native`.
+      **The working path (verified, tour consumer, 11/11 offline):** the `.cja`
+      *carries* the artifact, so the consumer extracts it — `cajeta archive
+      extract <codec.cja>` → `CAJETA_NATIVE_PATH=<dir>/native` → links offline,
+      no vendoring, no network. cajeta-http adopts this extract-bridge in its
+      build.
+- [ ] **7.6** Toolchain gap (out of codec scope): implement §3.2.2 — the
+      consumer resolver should search dependency `.cja` `native/` trees directly,
+      so the extract-bridge becomes unnecessary. File against the compiler.

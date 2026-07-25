@@ -52,12 +52,68 @@ env:
   CAJETA_VERSION: v0.9.5
 
 jobs:
+  # Build the native zlib archives for every target so the .cja packaging step
+  # bakes native/<platform>/libcajeta_zlib.a into the published archive (Unit 7).
+  native-linux:
+    name: native archives (linux x3 + windows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu gcc-mingw-w64-x86-64
+      - name: Cross-build native archives
+        run: ./native/cross-build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux
+          path: |
+            native/linux-x64/libcajeta_zlib.a
+            native/linux-arm64/libcajeta_zlib.a
+            native/linux-riscv64/libcajeta_zlib.a
+            native/windows-x64/libcajeta_zlib.a
+          if-no-files-found: error
+
+  native-macos:
+    name: native archives (macos arm64 + x64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cross-build macOS archives
+        run: |
+          SDK="$(xcrun --show-sdk-path)"
+          CC_macos_arm64="clang -arch arm64  -isysroot $SDK" \
+          CC_macos_x64="clang -arch x86_64 -isysroot $SDK" \
+          ./native/cross-build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-macos
+          path: |
+            native/macos-arm64/libcajeta_zlib.a
+            native/macos-x64/libcajeta_zlib.a
+          if-no-files-found: error
+
   build-test:
     name: build + test (x86_64-linux)
     runs-on: ubuntu-latest
+    needs: [native-linux, native-macos]
     steps:
       - name: Checkout cajeta-codec
         uses: actions/checkout@v4
+
+      - name: Download native archives (all six platforms)
+        uses: actions/download-artifact@v4
+        with:
+          path: _native_dl
+      - name: Assemble the native/ tree for baking
+        run: |
+          set -euo pipefail
+          for p in linux-x64 linux-arm64 linux-riscv64 windows-x64 macos-arm64 macos-x64; do
+            a="$(find _native_dl -path "*${p}*" -name libcajeta_zlib.a | head -1 || true)"
+            if [ -n "$a" ]; then mkdir -p "native/$p"; cp "$a" "native/$p/"; echo "placed $p"; \
+            else echo "::warning::no native archive for $p"; fi
+          done
 
       - name: Checkout cajeta-unit (test framework dependency)
         uses: actions/checkout@v4
@@ -103,8 +159,12 @@ jobs:
           UNIT_REPO: ${{ github.workspace }}/cajeta-unit-dep
         run: ./run-bridge-test.sh
 
-      - name: Build the release .cja
+      - name: Build the release .cja (bakes native/<platform>/ for all present)
         id: build
+        env:
+          # The packaging step bakes every resolvable native/<platform>/*.a into
+          # the .cja's native/ tree (spec §3.3). Point it at the assembled tree.
+          CAJETA_NATIVE_PATH: ${{ github.workspace }}/native
         run: |
           set -euo pipefail
           VERSION="$(cat VERSION)"
@@ -115,6 +175,20 @@ jobs:
           cp "$out/dev.cajeta.codec-${VERSION}.cja" dist/
           echo "artifact=dist/dev.cajeta.codec-${VERSION}.cja" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the native artifacts baked into the .cja
+        run: |
+          set -euo pipefail
+          cja="${{ steps.build.outputs.artifact }}"
+          miss=0
+          for p in linux-x64 linux-arm64 linux-riscv64 windows-x64 macos-arm64 macos-x64; do
+            if cajeta archive list "$cja" | grep -q "native/$p/libcajeta_zlib.a"; then
+              echo "baked: $p"
+            else
+              echo "::error::native artifact NOT baked for $p"; miss=1
+            fi
+          done
+          exit $miss
 
       - name: Upload .cja as a build artifact
         uses: actions/upload-artifact@v4
