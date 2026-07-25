@@ -1,0 +1,35 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.compress.Lz4;
+
+// dev.cajeta.codec.compress.Lz4 — the LZ4 block format: fastest of the block
+// codecs, no entropy stage.
+//
+//   Lz4.compress(src, n)             -> fresh int8[]
+//   Lz4.decompress(src, n, destLen)  -> fresh int8[]
+//
+// Unlike Snappy, the raw LZ4 *block* format stores no uncompressed length, so
+// decompress needs the output size from the caller (the surrounding container —
+// Parquet/ORC page metadata — supplies it). Pass the true size and it round-
+// trips exactly.
+public class Lz4Demo extends DemoClass {
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.compress.Lz4: fastest block codec --");
+
+        String text =
+            "lz4 is all LZ77, no Huffman. lz4 is all LZ77, no Huffman. "
+          + "lz4 is all LZ77, no Huffman. lz4 is all LZ77, no Huffman.";
+        int8[] data = text.toBytes();
+        int64 n = (int64) data.count();
+
+        int8[] comp = Lz4.compress(data, n);
+        System.stdout.println("  " + n + " -> " + comp.count() + " bytes");
+
+        // The block carries no length header — decode with the known size.
+        int8[] out = Lz4.decompress(comp, (int64) comp.count(), n);
+        this.check(this.sameBytes(data, out), "lz4 round-trips byte-exact (destLen supplied)");
+    }
+}

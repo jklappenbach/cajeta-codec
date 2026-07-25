@@ -1,0 +1,29 @@
+package codectour;
+
+// dev.cajeta.codec tour — one runnable, self-checking demo per codec. Each demo
+// (a DemoClass subclass) walks its API with worked examples and verifies its own
+// output via check(); this entry runs them in order and returns nonzero if any
+// check failed, so `run-tour.sh` doubles as a smoke test.
+//
+// Add a codec: write a NewDemo extending DemoClass, then one line below.
+public final class CodecTour {
+
+    public static int32 main() {
+        System.stdout.println("=== dev.cajeta.codec tour ===");
+
+        CompressDemo compress = heap CompressDemo();
+        compress.execute();
+
+        SnappyDemo snappy = heap SnappyDemo();
+        snappy.execute();
+
+        Lz4Demo lz4 = heap Lz4Demo();
+        lz4.execute();
+
+        System.stdout.println("");
+        System.stdout.println("=== " + DemoClass.checks + " checks, "
+            + DemoClass.failures + " failures ===");
+        if (DemoClass.failures > 0) { return 1; }
+        return 0;
+    }
+}
