@@ -1,6 +1,6 @@
 # Spec: Native libz backend for DEFLATE / gzip / zlib
 
-Status: draft
+Status: active
 
 ## 1. Definition
 

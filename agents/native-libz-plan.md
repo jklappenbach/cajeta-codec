@@ -180,7 +180,16 @@ build wiring in later units — that is expected; update this plan if so.
         exact()-copy); fixed by returning the buffer directly on an exact-fit
         `destLen` (`r == cap`) → 1.02×. Suite still 214/214.
 
-## 7. Publish integration — self-contained `.cja` (spec §3.3)  ✅ BAKE VERIFIED (v0.9.5); release wiring + cajeta-http bump remain
+## 7. Publish integration — self-contained `.cja` (spec §3.3)  ⏸ RESUME HERE
+
+**STATE (2026-07-25):** codec native-zlib work is DONE and **PR #2 is green**
+(`native-zlib-backend → main`, https://github.com/jklappenbach/cajeta-codec/pull/2;
+release.yml all 3 jobs pass, suite 214/214 on v0.10.0). Remaining is downstream:
+**(a) merge PR #2, (b) cut a release** — bump `VERSION` past 0.6.0 first (it
+collides with the published pre-native codec), the tag runs release.yml which
+bakes linux-x64 into the `.cja` + publishes the six `libcajeta_zlib-<platform>.a`
+assets — **(c) 7.5 cajeta-http adoption** (blocked until (b)). 7.6/7.7 are
+toolchain gaps to file against the compiler (both have working workarounds).
 
 The native backend links locally (`CAJETA_NATIVE_PATH`), and a *published* `.cja`
 must carry the per-platform artifact so consumers (cajeta-http) link offline.
@@ -197,9 +206,11 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
       list`/`cat` — the entry-level truth. (My earlier "not baked" call was a
       **false negative**: the `.cja` is zstd-compressed, so the size-based A/B
       masked the delta. The size test was wrong; the artifact IS baked.)
-- [x] **7.3** v0.9.5 (the installed CI toolchain) implements §3.3 baking — no
-      separate explicit-bake step needed; the artifact must simply be resolvable
-      when `cajeta build` runs.
+- [x] **7.3** §3.3 baking works on the shipped toolchain — no separate
+      explicit-bake step; the artifact just needs to be resolvable when `cajeta
+      build` runs. (NB: v0.9.5 was a local dev build, never released; CI pins the
+      real release **v0.10.0**, which also builds + bakes + passes 214/214 — fixed
+      the "release not found" CI failure, `44099c0`.)
 - [x] **7.4** Release wiring: `native-linux` job (cross-gcc + `cross-build.sh` →
       linux×3 + windows) and `native-macos` job (SDK + `cross-build.sh`) build
       **all six** archives (CI-verified: all six BUILT + uploaded); the
@@ -209,15 +220,20 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
       `.cja` (linux-x64), even with all six genuine archives present — so the
       `.cja` is self-contained for linux-x64 and other platforms provision from
       the shipped asset via `CAJETA_NATIVE_PATH`. Verify requires the host bake.
-- [x] **7.5 — END-TO-END FINDING.** The consumer link **does NOT auto-extract**
-      native from a classpath `.cja` (spec §3.2.2 unimplemented in v0.9.5):
+- [~] **7.5 cajeta-http adoption — BLOCKED on publishing the native codec.**
+      **Mechanism verified** (end-to-end finding): the consumer link does NOT
+      auto-extract native from a classpath `.cja` (§3.2.2 unimplemented) —
       `--emit=exe --classpath=<codec.cja>` errors `native library 'cajeta_zlib'
       not found; searched: CAJETA_NATIVE_PATH / project native/ / ~/.cajeta/native`.
-      **The working path (verified, tour consumer, 11/11 offline):** the `.cja`
-      *carries* the artifact, so the consumer extracts it — `cajeta archive
-      extract <codec.cja>` → `CAJETA_NATIVE_PATH=<dir>/native` → links offline,
-      no vendoring, no network. cajeta-http adopts this extract-bridge in its
-      build.
+      **Working path (verified, tour consumer 11/11 offline):** the `.cja` carries
+      the artifact, so the consumer runs `cajeta archive extract <codec.cja>` →
+      `CAJETA_NATIVE_PATH=<dir>/native` → links offline (recipe in
+      `native/CROSS-BUILD.md`). **TODO when unblocked:** bump cajeta-http's
+      `dev.cajeta.codec` dep (2 spots in its `cajeta.json`: `dependencies` + the
+      hard-coded olla test classpath) to the new version; add the extract-bridge
+      to its build (cajeta-http drives `cajeta test`/`build` directly, no shell
+      script — likely add a `run-tests.sh` wrapper); verify it links offline +
+      the ContentCoding gzip path runs native.
 - [ ] **7.6** Toolchain gap (out of codec scope): implement §3.2.2 — the
       consumer resolver should search dependency `.cja` `native/` trees directly,
       so the extract-bridge becomes unnecessary. File against the compiler.
