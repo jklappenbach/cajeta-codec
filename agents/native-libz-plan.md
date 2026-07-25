@@ -200,12 +200,15 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
 - [x] **7.3** v0.9.5 (the installed CI toolchain) implements §3.3 baking — no
       separate explicit-bake step needed; the artifact must simply be resolvable
       when `cajeta build` runs.
-- [x] **7.4** Release wiring: `release.yml`'s `.cja` build has **all six**
-      `native/<platform>/*.a` present so all six bake. `native-linux` job
-      (cross-gcc + `cross-build.sh` → linux×3 + windows) and `native-macos` job
-      (SDK + `cross-build.sh`) upload archives; the build/publish job downloads
-      them into `native/` and sets `CAJETA_NATIVE_PATH` before the build +
-      verifies the six baked entries.
+- [x] **7.4** Release wiring: `native-linux` job (cross-gcc + `cross-build.sh` →
+      linux×3 + windows) and `native-macos` job (SDK + `cross-build.sh`) build
+      **all six** archives (CI-verified: all six BUILT + uploaded); the
+      build/publish job downloads + assembles them into `native/`, builds the
+      `.cja`, and ships each `libcajeta_zlib-<platform>.a` as a **release asset**.
+      **Finding (CI):** `cajeta build` bakes **only the host platform** into the
+      `.cja` (linux-x64), even with all six genuine archives present — so the
+      `.cja` is self-contained for linux-x64 and other platforms provision from
+      the shipped asset via `CAJETA_NATIVE_PATH`. Verify requires the host bake.
 - [x] **7.5 — END-TO-END FINDING.** The consumer link **does NOT auto-extract**
       native from a classpath `.cja` (spec §3.2.2 unimplemented in v0.9.5):
       `--emit=exe --classpath=<codec.cja>` errors `native library 'cajeta_zlib'
@@ -218,3 +221,9 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
 - [ ] **7.6** Toolchain gap (out of codec scope): implement §3.2.2 — the
       consumer resolver should search dependency `.cja` `native/` trees directly,
       so the extract-bridge becomes unnecessary. File against the compiler.
+- [ ] **7.7** Toolchain gap (out of codec scope): implement §3.B multi-platform
+      baking — `cajeta build` bakes only the host platform's native artifact even
+      when all declared platforms' archives are resolvable; a publisher can't
+      produce one self-contained multi-platform `.cja` from a single host. Until
+      then the release ships per-platform archives as separate assets. File
+      against the compiler.

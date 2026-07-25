@@ -177,25 +177,37 @@ jobs:
           echo "artifact=dist/dev.cajeta.codec-${VERSION}.cja" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the native artifacts baked into the .cja
+      - name: Verify host artifact baked + stage per-platform assets
         run: |
           set -euo pipefail
           cja="${{ steps.build.outputs.artifact }}"
-          miss=0
+          # The toolchain bakes ONLY the build host's platform (linux-x64 here);
+          # multi-platform baking from one host is unimplemented (plan 7.7). So
+          # the .cja is self-contained for linux-x64; every other platform's
+          # archive ships as a release asset for CAJETA_NATIVE_PATH provisioning
+          # (see native/CROSS-BUILD.md "Consuming the native backend").
+          if cajeta archive list "$cja" | grep -q "native/linux-x64/libcajeta_zlib.a"; then
+            echo "baked host platform into the .cja: linux-x64"
+          else
+            echo "::error::host native artifact NOT baked into the .cja"; exit 1
+          fi
+          mkdir -p dist
           for p in linux-x64 linux-arm64 linux-riscv64 windows-x64 macos-arm64 macos-x64; do
-            if cajeta archive list "$cja" | grep -q "native/$p/libcajeta_zlib.a"; then
-              echo "baked: $p"
+            if [ -f "native/$p/libcajeta_zlib.a" ]; then
+              cp "native/$p/libcajeta_zlib.a" "dist/libcajeta_zlib-$p.a"; echo "staged asset: $p"
             else
-              echo "::error::native artifact NOT baked for $p"; miss=1
+              echo "::warning::missing native archive for $p"
             fi
           done
-          exit $miss
+          ls -l dist/
 
-      - name: Upload .cja as a build artifact
+      - name: Upload .cja + native archives as build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: cajeta-codec-${{ steps.build.outputs.version }}
-          path: ${{ steps.build.outputs.artifact }}
+          path: |
+            ${{ steps.build.outputs.artifact }}
+            dist/libcajeta_zlib-*.a
 
       # Publish a GitHub Release only on a v* tag push, or a production dispatch.
       - name: Publish Release
@@ -205,7 +217,9 @@ jobs:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', steps.build.outputs.version) }}
           name: cajeta-codec ${{ steps.build.outputs.version }}
           generate_release_notes: true
-          files: ${{ steps.build.outputs.artifact }}
+          files: |
+            ${{ steps.build.outputs.artifact }}
+            dist/libcajeta_zlib-*.a
 
       # Signed publish to the Olla registry (olla.cajeta.dev). Requires the
       # OLLA_* repo/org secrets; see cajeta/docs/olla-ci-publish.md.

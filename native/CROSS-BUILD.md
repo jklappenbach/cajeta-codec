@@ -96,6 +96,13 @@ other archive source hidden, resolving solely from the extracted tree. When the
 toolchain implements §3.2.2, this extract step goes away and the baked `.cja`
 links directly.
 
+**Non-linux-x64 consumers:** the toolchain bakes only the publisher's host
+platform into the `.cja` (linux-x64), so the extract-bridge above yields an
+archive only for linux-x64. Every platform's archive is published as a **release
+asset** (`libcajeta_zlib-<platform>.a`) — download the one for your target into a
+`native/<platform>/` tree and point `CAJETA_NATIVE_PATH` at it. (This goes away
+when the toolchain implements multi-platform baking, plan 7.7.)
+
 ## "Link" vs "run"
 
 - **Archive build** (this script): compile the vendored TUs for the target and
