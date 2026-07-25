@@ -140,6 +140,12 @@ public final class NativeZlib {
             int8[] dst = heap int8[cap];
             int64 r = NativeZlib.uncompressRaw(dst, cap, src, n, wbits);
             if (r >= (int64) 0) {
+                // Exact fit (the caller sized `hint` to the real output, e.g.
+                // Zlib.decompress / Deflate.inflate with a known destLen): hand
+                // back the buffer directly — its length is already `r`, so the
+                // exact() copy would just be redundant 1:1 memory traffic on the
+                // fast inflate path.
+                if (r == cap) { return #dst; }
                 out = #NativeZlib.exact(dst, r);
                 go = false;
             } else if (r == NativeZlib.Z_BUF_ERROR) {   // dst too small

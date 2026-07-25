@@ -102,6 +102,26 @@ public final class CompressBench {
                 lvl, dms, CompressBench.mbps(sz, iters, dms), lcn, (lcn * 100) / sz);
             li = li + 1;
         }
+        // --- native one-shot compress (Deflate.deflate -> native zlib backend,
+        //     the gzip/zlib/content-coding path) — compare to raw zlib (Unit 6) ---
+        int32[] nlevels = {1, 6, 9};
+        int32 nli = 0;
+        while (nli < 3) {
+            int32 lvl = nlevels[nli];
+            int8[] nc0 = Deflate.deflate(data, (int64) sz, lvl);
+            int32 ncn = (int32) nc0.count();
+            int64 nt0 = CompressBench.nowMs();
+            int32 nk = 0;
+            while (nk < iters) {
+                int8[] nc = Deflate.deflate(data, (int64) sz, lvl);
+                nk = nk + 1;
+            }
+            int64 ndms = CompressBench.nowMs() - nt0;
+            System.stdout.println("  NATIVE COMPRESS L{} : {} ms, {} MB/s  ({} bytes, {}%)",
+                lvl, ndms, CompressBench.mbps(sz, iters, ndms), ncn, (ncn * 100) / sz);
+            nli = nli + 1;
+        }
+
         int64 t0 = CompressBench.nowMs();
         int32 k = 0;
 
@@ -137,7 +157,7 @@ public final class CompressBench {
         k = 0;
         while (k < iters) { int8[] d = Deflate.inflate(whole, wn, (int64) sz); k = k + 1; }
         int64 oms = CompressBench.nowMs() - t0;
-        System.stdout.println("  INFLATE one-shot : {} ms, {} MB/s (verify {})",
+        System.stdout.println("  NATIVE INFLATE one-shot : {} ms, {} MB/s (verify {})",
             oms, CompressBench.mbps(sz, iters, oms), okO);
         return 0;
     }

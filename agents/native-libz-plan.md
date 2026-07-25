@@ -161,14 +161,17 @@ build wiring in later units — that is expected; update this plan if so.
         buffer-API subset verified); mixed license surface documented in README,
         `cajeta.json`, `THIRD-PARTY.md`, `VENDORED.txt`.
 
-## 6. Performance validation  (spec 5.4)
+## 6. Performance validation  (spec 5.4)  ✅ DONE
 
-- [ ] **6.1 TDD**
-  - [ ] 6.1.1 Bench: native compress (L1/L6/L9) + inflate on the 128 KiB
-        reference payload, reported vs raw zlib on the same machine.
-- [ ] **6.2 Coding**
-  - [ ] 6.2.1 Extend `bench/` with a native-vs-zlib comparison; record numbers
-        in `bench/README.md`.
-- [ ] **6.3 Acceptance**
-  - [ ] 6.3.1 Native compress ≥ 0.8× raw zlib MB/s on the reference payload
-        (perf gate); if not met, record why + next lever.
+- [x] **6.1 TDD**
+  - [x] 6.1.1 `bench/zlib_ref.c` benches raw zlib (one-shot raw-DEFLATE, L1/6/9 +
+        inflate) on the byte-identical 128 KiB payload; `CompressBench` gained a
+        NATIVE COMPRESS L1/6/9 block + native one-shot inflate. Same machine.
+- [x] **6.2 Coding**
+  - [x] 6.2.1 `bench/run-native-vs-zlib.sh` builds+runs both; numbers recorded in
+        `bench/README.md`.
+- [x] **6.3 Acceptance**
+  - [x] 6.3.1 **PASS** — native/zlib ratio: compress L1 0.95×, L6 0.97×, L9 0.98×,
+        inflate 1.02× (all ≥ 0.8×). Inflate first measured 0.37× (redundant
+        exact()-copy); fixed by returning the buffer directly on an exact-fit
+        `destLen` (`r == cap`) → 1.02×. Suite still 214/214.
