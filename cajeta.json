@@ -42,6 +42,30 @@
         // consumer uses are linked into its binary (dead-code elimination).
         "dependencies": {},
 
+        // Native library dependencies (native-deps subsystem). `cajeta_zlib`
+        // is our static archive = the cajeta shim + vendored zlib 1.3.1, bound
+        // by dev.cajeta.codec.compress.NativeZlib for the DEFLATE/gzip/zlib
+        // fast path (pure-cajeta stays the fallback). It's redistributable
+        // (zlib License), so the .cja packaging step bakes the per-platform
+        // libcajeta_zlib.a into the archive's native/<platform>/ tree at
+        // publish and consumers link OFFLINE with zero action — no
+        // CAJETA_NATIVE_PATH, no fetch. No `artifacts` url/sha256: the archives
+        // are built from vendored source by native/build.sh (host) /
+        // native/cross-build.sh (all targets), not fetched. DCE-gated: a build
+        // that calls no NativeZlib method links no native artifact.
+        "native-libraries": {
+            "cajeta_zlib": {
+                "version":         "1.3.1",
+                "license":         "Zlib",
+                "redistributable": true,
+                "link":            "static",
+                "platforms": [
+                    "linux-x64", "linux-arm64", "linux-riscv64",
+                    "windows-x64", "macos-arm64", "macos-x64"
+                ]
+            }
+        },
+
         // Test-only dependencies — not shipped in the published .cja.
         "dev-dependencies": {
             "cajeta.testkit": "1.0.*"
