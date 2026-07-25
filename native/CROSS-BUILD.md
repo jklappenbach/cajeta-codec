@@ -76,6 +76,26 @@ a legitimately-sourced SDK, using the same overrides with `-isysroot <SDK>`.
 
 `cross-build.sh` auto-detects the `<triple>-gcc` these provide.
 
+## Consuming the native backend (e.g. cajeta-http)
+
+The published `.cja` **bakes** `native/<platform>/libcajeta_zlib.a` (spec §3.3,
+verified). But on the current toolchain (v0.9.5) the consumer's linker does **not
+auto-extract** native artifacts from a classpath `.cja` (spec §3.2.2 is
+unimplemented) — it searches only `CAJETA_NATIVE_PATH`, the project `native/`
+dir, and `~/.cajeta/native`. So a consumer bridges the gap by extracting the
+`native/` tree from the `.cja` it already has and pointing the resolver at it —
+**offline, no vendoring, no network**:
+
+    CJA=~/.olla/dev.cajeta.codec/<ver>/dev.cajeta.codec-<ver>.cja
+    cajeta archive extract "$CJA" -C .cajeta-native      # -> .cajeta-native/native/<platform>/…
+    export CAJETA_NATIVE_PATH="$PWD/.cajeta-native/native"
+    cajeta test        # or build — links the native backend from the extracted archive
+
+Verified end-to-end: a codec consumer linked and ran the native path with every
+other archive source hidden, resolving solely from the extracted tree. When the
+toolchain implements §3.2.2, this extract step goes away and the baked `.cja`
+links directly.
+
 ## "Link" vs "run"
 
 - **Archive build** (this script): compile the vendored TUs for the target and
