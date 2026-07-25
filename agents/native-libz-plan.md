@@ -179,3 +179,22 @@ build wiring in later units — that is expected; update this plan if so.
         inflate 1.02× (all ≥ 0.8×). Inflate first measured 0.37× (redundant
         exact()-copy); fixed by returning the buffer directly on an exact-fit
         `destLen` (`r == cap`) → 1.02×. Suite still 214/214.
+
+## 7. Publish integration — self-contained `.cja` (spec §3.3)  ⚠ PARTIAL — declaration done, artifact bake NOT firing
+
+The native backend links locally (`CAJETA_NATIVE_PATH`), but a *published* `.cja`
+must carry the per-platform artifact so consumers (cajeta-http) link offline.
+
+- [x] **7.1** Declare `cajeta_zlib` in `cajeta.json` `settings.native-libraries`
+      (version 1.3.1, license Zlib, redistributable, static, six platforms) —
+      parses, embeds in the `.cja` metadata (`03b840e`).
+- [~] **7.2** Bake the per-platform `libcajeta_zlib.a` into the `.cja`
+      `native/<platform>/` tree at publish (spec §3.3). **BLOCKED / open:** A/B
+      build (archive present vs hidden) yields a **byte-identical** `.cja`
+      (927,456 B both ways) on the `release-091` toolchain — the packaging step
+      does not bake the artifact bytes. Consumers still need `CAJETA_NATIVE_PATH`.
+- [ ] **7.3** Confirm whether the CI toolchain (`v0.9.5`) implements §3.3 baking;
+      if not, add an explicit bake (run `cross-build.sh` + the `native-macos` CI
+      artifacts, then bundle) to `release.yml` before `cajeta build`.
+- [ ] **7.4** End-to-end: bump cajeta-http's codec dep to the native-carrying
+      version and verify it links offline with no `CAJETA_NATIVE_PATH`.
