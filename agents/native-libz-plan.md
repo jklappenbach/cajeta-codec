@@ -180,21 +180,29 @@ build wiring in later units — that is expected; update this plan if so.
         exact()-copy); fixed by returning the buffer directly on an exact-fit
         `destLen` (`r == cap`) → 1.02×. Suite still 214/214.
 
-## 7. Publish integration — self-contained `.cja` (spec §3.3)  ⚠ PARTIAL — declaration done, artifact bake NOT firing
+## 7. Publish integration — self-contained `.cja` (spec §3.3)  ✅ BAKE VERIFIED (v0.9.5); release wiring + cajeta-http bump remain
 
-The native backend links locally (`CAJETA_NATIVE_PATH`), but a *published* `.cja`
+The native backend links locally (`CAJETA_NATIVE_PATH`), and a *published* `.cja`
 must carry the per-platform artifact so consumers (cajeta-http) link offline.
 
 - [x] **7.1** Declare `cajeta_zlib` in `cajeta.json` `settings.native-libraries`
       (version 1.3.1, license Zlib, redistributable, static, six platforms) —
       parses, embeds in the `.cja` metadata (`03b840e`).
-- [~] **7.2** Bake the per-platform `libcajeta_zlib.a` into the `.cja`
-      `native/<platform>/` tree at publish (spec §3.3). **BLOCKED / open:** A/B
-      build (archive present vs hidden) yields a **byte-identical** `.cja`
-      (927,456 B both ways) on the `release-091` toolchain — the packaging step
-      does not bake the artifact bytes. Consumers still need `CAJETA_NATIVE_PATH`.
-- [ ] **7.3** Confirm whether the CI toolchain (`v0.9.5`) implements §3.3 baking;
-      if not, add an explicit bake (run `cross-build.sh` + the `native-macos` CI
-      artifacts, then bundle) to `release.yml` before `cajeta build`.
-- [ ] **7.4** End-to-end: bump cajeta-http's codec dep to the native-carrying
-      version and verify it links offline with no `CAJETA_NATIVE_PATH`.
+- [x] **7.2** Bake the per-platform `libcajeta_zlib.a` into the `.cja`
+      `native/<platform>/` tree (spec §3.3). **VERIFIED on v0.9.5:** `cajeta build`
+      with the native-libraries block + a resolvable archive bakes
+      `native/linux-x64/libcajeta_zlib.a` **byte-identical** (sha256
+      `de575ef5…` == source) plus `native/native-libraries.json`
+      (`{"requires":["cajeta_zlib"],…}`). Confirmed via `cajeta archive
+      list`/`cat` — the entry-level truth. (My earlier "not baked" call was a
+      **false negative**: the `.cja` is zstd-compressed, so the size-based A/B
+      masked the delta. The size test was wrong; the artifact IS baked.)
+- [x] **7.3** v0.9.5 (the installed CI toolchain) implements §3.3 baking — no
+      separate explicit-bake step needed; the artifact must simply be resolvable
+      when `cajeta build` runs.
+- [ ] **7.4** Release wiring: `release.yml`'s `.cja` build must have **all six**
+      `native/<platform>/*.a` present so all six bake (this host bakes only
+      linux-x64). Run `cross-build.sh` (linux×3 + windows) + fetch the
+      `native-macos` CI artifacts, set `CAJETA_NATIVE_PATH`, before the build step.
+- [ ] **7.5** End-to-end: bump cajeta-http's codec dep to the native-carrying
+      version and verify it links offline with **no** `CAJETA_NATIVE_PATH`.
