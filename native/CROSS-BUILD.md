@@ -36,15 +36,39 @@ TUs were dropped), there is no `unistd`/`lseek`/large-file surface, and thus no
 per-target `configure` knobs: the same `-O3 -DNDEBUG` flags compile on every
 triple. (This is spec §2.4 / plan 4.2.2 — resolved by having nothing to resolve.)
 
-## Provisioning a full CI host
+## Provisioning
 
-    # Linux cross (compile + link, run under qemu-user):
-    apt install gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu qemu-user
-    # Windows cross (compile + link, run under wine):
-    apt install gcc-mingw-w64-x86-64 wine64
-    # macOS cross: osxcross with a macOS SDK, or build on Apple hardware.
+### Sudo-free (a full-backend clang + extracted sysroots)
 
-With those present, `./native/cross-build.sh` builds all six archives.
+Ubuntu's `llvm-N` clang (`clang-21`, `clang-20`, …) ships **every** LLVM target
+backend. All that's missing to cross-compile is each target's libc/SDK headers,
+which can be fetched and extracted **without root**:
+
+    # aarch64 example — repeat with riscv64 / x86-64 for the others
+    apt-get download libc6-dev-arm64-cross linux-libc-dev-arm64-cross
+    dpkg-deb -x libc6-dev-arm64-cross_*.deb   sysroots/arm64
+    dpkg-deb -x linux-libc-dev-arm64-cross_*.deb sysroots/arm64
+    # Windows headers come from the mingw-w64 dev packages:
+    apt-get download mingw-w64-x86-64-dev mingw-w64-common
+    dpkg-deb -x mingw-w64-x86-64-dev_*.deb sysroots/win64
+    dpkg-deb -x mingw-w64-common_*.deb     sysroots/win64
+
+Then point the per-target `CC_<platform>` overrides at `clang-N -target … --sysroot`:
+
+    CC_linux_arm64="clang-21 -target aarch64-linux-gnu --sysroot=sysroots/arm64/usr/aarch64-linux-gnu" \
+    CC_linux_riscv64="clang-21 -target riscv64-linux-gnu --sysroot=sysroots/riscv64/usr/riscv64-linux-gnu" \
+    CC_windows_x64="clang-21 -target x86_64-w64-windows-gnu --sysroot=sysroots/win64/usr/x86_64-w64-mingw32" \
+    ./native/cross-build.sh
+
+macOS needs Apple's SDK (osxcross) — not apt-installable and not fetchable this
+way; build those two on Apple hardware or an osxcross CI image.
+
+### With sudo (apt cross-toolchains)
+
+    apt install gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu gcc-mingw-w64-x86-64
+    # to RUN the cross builds: qemu-user (linux targets) / wine64 (windows)
+
+`cross-build.sh` auto-detects the `<triple>-gcc` these provide.
 
 ## "Link" vs "run"
 
@@ -58,18 +82,20 @@ With those present, `./native/cross-build.sh` builds all six archives.
 
 ## Snapshot — dev host (`x86_64-linux-gnu`)
 
-Toolchains for the five cross targets are **not installed on this host** (no
-cross-gcc, no sysroots, no qemu; the local clang is an x86-only ROCm build), so
-they record as SKIP here. This is a provisioning gap, not a portability one — the
-sources are ISO-C over zlib's portable buffer API.
+Built with `clang-21` + sysroots extracted sudo-free (above). Four of six targets
+compile+archive with the correct object format verified (`ar p … | file`); the
+two macOS targets are gated only on Apple's SDK.
 
-| platform        | result on this host                                  |
-|-----------------|------------------------------------------------------|
-| `linux-x64`     | **BUILT** (124K) + full suite verified (214 tests)   |
-| `linux-arm64`   | SKIP — no `aarch64-linux-gnu-gcc`, no sysroot         |
-| `linux-riscv64` | SKIP — no `riscv64-linux-gnu-gcc`, no sysroot         |
-| `windows-x64`   | SKIP — no mingw-w64 toolchain/sysroot                 |
-| `macos-x64`     | SKIP — no macOS SDK                                   |
-| `macos-arm64`   | SKIP — no macOS SDK                                   |
+| platform        | result on this host                                        |
+|-----------------|------------------------------------------------------------|
+| `linux-x64`     | **BUILT** (124K, x86-64 ELF) + full suite verified (214)   |
+| `linux-arm64`   | **BUILT** (112K, AArch64 ELF) — clang-21 + arm64 sysroot   |
+| `linux-riscv64` | **BUILT** (160K, RISC-V ELF)  — clang-21 + riscv64 sysroot |
+| `windows-x64`   | **BUILT** (100K, x86-64 COFF) — clang-21 + mingw sysroot   |
+| `macos-x64`     | SKIP — Apple SDK not present (osxcross / Apple hardware)    |
+| `macos-arm64`   | SKIP — Apple SDK not present (osxcross / Apple hardware)    |
 
-Re-run `./native/cross-build.sh` after provisioning to fill the matrix.
+All three ISAs (x86-64, AArch64, RISC-V) and both non-Apple object formats (ELF,
+COFF) are verified. Only the host triple *runs* here (no qemu/wine installed);
+the archive-build gate holds for all four. macOS is a licensing/hardware gate,
+not a portability one — the same ISO-C compiles once an SDK is available.

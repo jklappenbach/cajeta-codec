@@ -14,6 +14,13 @@
 #     macos-arm64    arm64-apple-macos11
 #
 # For each target a compiler is chosen in this order:
+#   0. a per-target override  CC_<platform>  (dashes -> underscores), a full
+#      compiler command — e.g.
+#        CC_linux_arm64="clang-21 -target aarch64-linux-gnu --sysroot=/path"
+#      This is the sudo-free route: a full-backend clang (Ubuntu's llvm-N clang
+#      has every LLVM target) + a target sysroot extracted without root via
+#        apt-get download libc6-dev-<arch>-cross linux-libc-dev-<arch>-cross
+#        dpkg-deb -x <pkg>.deb <dir>          # sysroot at <dir>/usr/<triple>
 #   1. a target-prefixed gcc/clang on PATH  (e.g. aarch64-linux-gnu-gcc)
 #   2. the host `cc` (for the host triple)
 #   3. clang -target <triple>               (needs the LLVM backend + a sysroot)
@@ -62,7 +69,10 @@ host_ok=1
 
 for entry in "${targets[@]}"; do
     plat="${entry%%|*}"; triple="${entry#*|}"
-    cc="$(pick_cc "$triple")"
+    # Per-target override CC_<platform> (dashes -> underscores) wins.
+    override_var="CC_${plat//-/_}"
+    cc="${!override_var:-}"
+    [ -z "$cc" ] && cc="$(pick_cc "$triple")"
     if [ -z "$cc" ]; then
         results+=("SKIP   $plat  ($triple) — no toolchain found")
         [ "$triple" = "$host_triple" ] && host_ok=0
