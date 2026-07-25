@@ -45,11 +45,12 @@ permissions:
 env:
   # A published cajeta toolchain that contains the codec synthesizers. Bump when
   # the next cajeta release ships them. Must match a release tag of jklappenbach/cajeta.
-  # 0.9.5 carries the codec synthesizers + the widened-reader intrinsics
-  # (Cajeta.bitsToF32/F64). The Arrow BRIDGE (run-bridge-test.sh) additionally
-  # needs cajeta.nucleo.* — unreleased until nucleo-frame ships; that step is
-  # non-blocking below and goes green once a nucleo-carrying release is pinned.
-  CAJETA_VERSION: v0.9.5
+  # NOTE: v0.9.5 was never released (it was a local dev build) — the "release not
+  # found" CI failure. v0.10.0 is the latest release: it builds the codec, bakes
+  # the native artifact into the .cja, and the full suite passes (214/214) —
+  # verified locally. The Arrow BRIDGE (run-bridge-test.sh) additionally needs
+  # cajeta.nucleo.* — that step is non-blocking below.
+  CAJETA_VERSION: v0.10.0
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
