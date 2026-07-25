@@ -60,8 +60,14 @@ Then point the per-target `CC_<platform>` overrides at `clang-N -target … --sy
     CC_windows_x64="clang-21 -target x86_64-w64-windows-gnu --sysroot=sysroots/win64/usr/x86_64-w64-mingw32" \
     ./native/cross-build.sh
 
-macOS needs Apple's SDK (osxcross) — not apt-installable and not fetchable this
-way; build those two on Apple hardware or an osxcross CI image.
+macOS needs Apple's SDK, which isn't apt-installable and whose license restricts
+it to Apple hardware. The **`native-macos` GitHub Actions workflow**
+(`.github/workflows/native-macos.yml`) closes both macOS targets on a hosted
+`macos-14` runner: one Apple-silicon runner cross-builds `macos-arm64` (native)
+and `macos-x64` (`-arch x86_64`) from the runner's SDK via the same
+`CC_<platform>` overrides, and verifies each archive's Mach-O arch. To build
+them locally instead, run on a Mac (Command Line Tools) or an osxcross image with
+a legitimately-sourced SDK, using the same overrides with `-isysroot <SDK>`.
 
 ### With sudo (apt cross-toolchains)
 
@@ -92,10 +98,10 @@ two macOS targets are gated only on Apple's SDK.
 | `linux-arm64`   | **BUILT** (112K, AArch64 ELF) — clang-21 + arm64 sysroot   |
 | `linux-riscv64` | **BUILT** (160K, RISC-V ELF)  — clang-21 + riscv64 sysroot |
 | `windows-x64`   | **BUILT** (100K, x86-64 COFF) — clang-21 + mingw sysroot   |
-| `macos-x64`     | SKIP — Apple SDK not present (osxcross / Apple hardware)    |
-| `macos-arm64`   | SKIP — Apple SDK not present (osxcross / Apple hardware)    |
+| `macos-x64`     | SKIP here → built + verified by the `native-macos` CI       |
+| `macos-arm64`   | SKIP here → built + verified by the `native-macos` CI       |
 
 All three ISAs (x86-64, AArch64, RISC-V) and both non-Apple object formats (ELF,
-COFF) are verified. Only the host triple *runs* here (no qemu/wine installed);
-the archive-build gate holds for all four. macOS is a licensing/hardware gate,
-not a portability one — the same ISO-C compiles once an SDK is available.
+COFF) are verified on this box; only the host triple *runs* here (no qemu/wine
+installed). The two macOS targets are covered by the `native-macos` GitHub
+Actions workflow (Mach-O arm64 + x86_64), so all six are verifiable in CI.

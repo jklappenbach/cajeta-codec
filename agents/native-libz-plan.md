@@ -123,7 +123,7 @@ build wiring in later units — that is expected; update this plan if so.
         loop on a zero-capacity output buffer (`inflate(.., 0)` / `Zlib.decompress
         (.., 0)`) surfaced by the empty-corpus fallback case.
 
-## 4. Per-target static build + cross-compile smoke  (spec 2.2, 2.4, 5.3)  ✅ DONE (4/6 built+verified; macOS×2 gated on Apple SDK)
+## 4. Per-target static build + cross-compile smoke  (spec 2.2, 2.4, 5.3)  ✅ DONE (4/6 built locally; macOS×2 via native-macos CI → all six verifiable)
 
 - [x] **4.1 TDD**
   - [x] 4.1.1 `native/cross-build.sh` builds the archive for each of the six
@@ -142,9 +142,10 @@ build wiring in later units — that is expected; update this plan if so.
         `dpkg-deb -x`): linux-x64 (x86-64 ELF), linux-arm64 (AArch64 ELF),
         linux-riscv64 (RISC-V ELF), windows-x64 (x86-64 COFF) — all three ISAs
         and both non-Apple object formats. Host triple also **runs the full suite**
-        (214). macOS×2 are the only SKIP — gated on Apple's SDK (osxcross/Apple
-        hardware), a licensing gate not a portability one; harness builds them
-        once an SDK is present. Enabled via the new `CC_<platform>` override.
+        (214). Enabled via the new `CC_<platform>` override. macOS×2 (the only
+        Linux-side SKIP — Apple SDK is a licensing gate) are built + Mach-O-arch
+        verified by the `native-macos` GitHub Actions workflow (`macos-14` runner,
+        arm64 + x86_64), so **all six are verifiable in CI**.
   - [x] 4.3.2 Results recorded — matrix, sudo-free + apt provisioning, and this
         host's per-arch snapshot in `native/CROSS-BUILD.md`.
 
