@@ -19,7 +19,7 @@ public class ColumnarEncodeTest {
 
     @Test
     public void bitPackRoundTrips() {
-        int32[] vals = { 5, 0, 9, 3, 14, 7, 1, 12, 8 };
+        int32[] vals = [ 5, 0, 9, 3, 14, 7, 1, 12, 8 ];
         int32 w = BitPack.minWidth(vals, 9);   // max 14 -> 4 bits
         Assert.that((int64) w).isEqualTo((int64) 4);
         int8[] packed = BitPack.pack(vals, w, 9);
@@ -34,7 +34,7 @@ public class ColumnarEncodeTest {
 
     @Test
     public void rleAllEqualRoundTrips() {
-        int32[] vals = { 7, 7, 7, 7, 7, 7 };
+        int32[] vals = [ 7, 7, 7, 7, 7, 7 ];
         int8[] enc = Rle.encode(vals, 3, 6);
         int32[] got = Rle.decode(enc, (int64) 0, 3, 6);
         int32 i = 0;
@@ -47,7 +47,7 @@ public class ColumnarEncodeTest {
 
     @Test
     public void rleBitPackedRoundTrips() {
-        int32[] vals = { 0, 1, 2, 3, 4, 5, 6, 7, 2, 4 };
+        int32[] vals = [ 0, 1, 2, 3, 4, 5, 6, 7, 2, 4 ];
         int8[] enc = Rle.encode(vals, 3, 10);
         int32[] got = Rle.decode(enc, (int64) 0, 3, 10);
         int32 i = 0;
@@ -60,7 +60,7 @@ public class ColumnarEncodeTest {
 
     @Test
     public void dictionaryRoundTrips() {
-        int32[] vals = { 100, 200, 300, 400, 400, 300, 200, 100 };
+        int32[] vals = [ 100, 200, 300, 400, 400, 300, 200, 100 ];
         int32[] dict = Dictionary.buildDict(vals, 8);
         Assert.that((int64) dict.count()).isEqualTo((int64) 4);
         int32[] idx = Dictionary.indicesFor(vals, 8, dict, (int32) dict.count());
@@ -77,10 +77,10 @@ public class ColumnarEncodeTest {
 
     @Test
     public void forRoundTrips() {
-        int32[] vals = { 1000, 1005, 1003, 1010, 1000, 1015 };
+        int32[] vals = [ 1000, 1005, 1003, 1010, 1000, 1015 ];
         int32 ref = FrameOfReference.referenceOf(vals, 6);
         Assert.that((int64) ref).isEqualTo((int64) 1000);
-        int32[] res = { 0, 5, 3, 10, 0, 15 };
+        int32[] res = [ 0, 5, 3, 10, 0, 15 ];
         int32 w = BitPack.minWidth(res, 6);     // 4 bits
         int8[] enc = FrameOfReference.encode(vals, 6, ref, w);
         int32[] got = FrameOfReference.decode(enc, (int64) 0, w, 6, ref);
@@ -94,7 +94,7 @@ public class ColumnarEncodeTest {
 
     @Test
     public void deltaRoundTrips() {
-        int32[] vals = { 10, 12, 15, 14, 19, 19, 25 };
+        int32[] vals = [ 10, 12, 15, 14, 19, 19, 25 ];
         int32 first = Delta.firstOf(vals, 7);
         int32[] deltas = Delta.encode(vals, 7);
         int32[] got = Delta.decode(first, deltas, 7);

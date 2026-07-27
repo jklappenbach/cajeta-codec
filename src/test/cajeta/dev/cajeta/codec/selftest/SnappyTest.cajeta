@@ -19,10 +19,10 @@ public class SnappyTest {
     @Test
     public void decompressesPureLiteral() {
         // "hello": varint(5)=05, literal tag (len-1=4)=0x10, then 'hello'.
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x05, (int8) 0x10,
             (int8) 0x68, (int8) 0x65, (int8) 0x6C, (int8) 0x6C, (int8) 0x6F
-        };
+        ];
         int8[] out = Snappy.decompress(blob, (int64) blob.count());
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("hello"));
@@ -33,11 +33,11 @@ public class SnappyTest {
     public void decompressesBackReference() {
         // "abcabc": varint(6)=06, literal "abc" (tag 0x08), copy offset 3 len 3
         // (copy-2 tag 0x0A, offset 03 00).
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x06,
             (int8) 0x08, (int8) 0x61, (int8) 0x62, (int8) 0x63,
             (int8) 0x0A, (int8) 0x03, (int8) 0x00
-        };
+        ];
         int8[] out = Snappy.decompress(blob, (int64) blob.count());
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("abcabc"));
@@ -48,11 +48,11 @@ public class SnappyTest {
     public void decompressesOverlappingRun() {
         // "aaaa": varint(4)=04, literal 'a' (tag 0x00), copy offset 1 len 3
         // (copy-2 tag 0x0A, offset 01 00) — overlapping byte-by-byte run.
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x04,
             (int8) 0x00, (int8) 0x61,
             (int8) 0x0A, (int8) 0x01, (int8) 0x00
-        };
+        ];
         int8[] out = Snappy.decompress(blob, (int64) blob.count());
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("aaaa"));

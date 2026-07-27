@@ -24,7 +24,7 @@ public class IonCursorTest {
     }
 
     static #int8[] fixture() {
-        int8[] b = {
+        int8[] b = [
             (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
             (int8) 0xDE, (int8) 0x93,
             (int8) 0x84, (int8) 0x82, (int8) 0x68, (int8) 0x69,
@@ -33,7 +33,7 @@ public class IonCursorTest {
             (int8) 0x87, (int8) 0x11,
             (int8) 0x88, (int8) 0xA2, (int8) 0x07, (int8) 0x09,
             (int8) 0x89, (int8) 0x71, (int8) 0x04
-        };
+        ];
         return #b;
     }
 

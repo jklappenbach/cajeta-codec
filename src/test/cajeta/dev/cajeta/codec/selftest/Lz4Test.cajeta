@@ -20,10 +20,10 @@ public class Lz4Test {
     @Test
     public void decompressesPureLiterals() {
         // "hello": token 0x50 (litLen 5, matchLen nibble 0), then 'hello'.
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x50,
             (int8) 0x68, (int8) 0x65, (int8) 0x6C, (int8) 0x6C, (int8) 0x6F
-        };
+        ];
         int8[] out = Lz4.decompress(blob, (int64) blob.count(), (int64) 5);
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("hello"));
@@ -33,11 +33,11 @@ public class Lz4Test {
     @Test
     public void decompressesBackReference() {
         // "abcabcabc": token 0x32 (litLen 3, matchLen 2→6), 'abc', offset 03 00.
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x32,
             (int8) 0x61, (int8) 0x62, (int8) 0x63,
             (int8) 0x03, (int8) 0x00
-        };
+        ];
         int8[] out = Lz4.decompress(blob, (int64) blob.count(), (int64) 9);
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("abcabcabc"));
@@ -47,11 +47,11 @@ public class Lz4Test {
     @Test
     public void decompressesOverlappingRun() {
         // "aaaaa": token 0x10 (litLen 1, matchLen 0→4), 'a', offset 01 00.
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x10,
             (int8) 0x61,
             (int8) 0x01, (int8) 0x00
-        };
+        ];
         int8[] out = Lz4.decompress(blob, (int64) blob.count(), (int64) 5);
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("aaaaa"));

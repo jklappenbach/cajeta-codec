@@ -17,7 +17,7 @@ public class GzipTest {
     @Test
     public void decompressesRealGzipMember() {
         // python gzip.compress(b"hello hello hello hello world\n").
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x1F, (int8) 0x8B, (int8) 0x08, (int8) 0x00, (int8) 0x5C,
             (int8) 0x83, (int8) 0x37, (int8) 0x6A, (int8) 0x00, (int8) 0xFF,
             (int8) 0xCB, (int8) 0x48, (int8) 0xCD, (int8) 0xC9, (int8) 0xC9,
@@ -25,7 +25,7 @@ public class GzipTest {
             (int8) 0xF3, (int8) 0x8B, (int8) 0x72, (int8) 0x52, (int8) 0xB8,
             (int8) 0x00, (int8) 0xE0, (int8) 0x53, (int8) 0x33, (int8) 0x8D,
             (int8) 0x1E, (int8) 0x00, (int8) 0x00, (int8) 0x00
-        };
+        ];
         int8[] out = Gzip.decompress(blob, (int64) blob.count());
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("hello hello hello hello world\n"));

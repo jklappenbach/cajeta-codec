@@ -18,12 +18,12 @@ public class DeflateTest {
     @Test
     public void inflatesStoredBlock() {
         // zlib level 0, "hello world".
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x01, (int8) 0x0B, (int8) 0x00, (int8) 0xF4, (int8) 0xFF,
             (int8) 0x68, (int8) 0x65, (int8) 0x6C, (int8) 0x6C, (int8) 0x6F,
             (int8) 0x20, (int8) 0x77, (int8) 0x6F, (int8) 0x72, (int8) 0x6C,
             (int8) 0x64
-        };
+        ];
         int8[] out = Deflate.inflate(blob, (int64) blob.count(), (int64) 11);
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("hello world"));
@@ -33,10 +33,10 @@ public class DeflateTest {
     @Test
     public void inflatesShortMatch() {
         // zlib default, "abcabcabcabcabcabc" (18 bytes).
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x4B, (int8) 0x4C, (int8) 0x4A, (int8) 0x4E, (int8) 0x44,
             (int8) 0x45, (int8) 0x00
-        };
+        ];
         int8[] out = Deflate.inflate(blob, (int64) blob.count(), (int64) 18);
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals("abcabcabcabcabcabc"));
@@ -158,8 +158,8 @@ public class DeflateTest {
     // LZ matches at a spread of distances, so chain depth (the compression
     // level) actually changes the result.
     static #int8[] levelPayload(int32 n) {
-        String[] w = {"the ", "quick ", "brown ", "fox ", "jumps ", "over ",
-            "a ", "lazy ", "dog ", "while ", "counting ", "numbers "};
+        String[] w = ["the ", "quick ", "brown ", "fox ", "jumps ", "over ",
+            "a ", "lazy ", "dog ", "while ", "counting ", "numbers "];
         int8[] p = heap int8[n];
         int64 st = (int64) 0x9E3779B97F4A7C15;
         int32 off = 0;
@@ -247,7 +247,7 @@ public class DeflateTest {
     @Test
     public void inflatesDynamicHuffman() {
         // zlib level 9, "the quick brown fox jumps over the lazy dog. " x4 (180).
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x2B, (int8) 0xC9, (int8) 0x48, (int8) 0x55, (int8) 0x28,
             (int8) 0x2C, (int8) 0xCD, (int8) 0x4C, (int8) 0xCE, (int8) 0x56,
             (int8) 0x48, (int8) 0x2A, (int8) 0xCA, (int8) 0x2F, (int8) 0xCF,
@@ -258,7 +258,7 @@ public class DeflateTest {
             (int8) 0x24, (int8) 0x56, (int8) 0x55, (int8) 0x2A, (int8) 0xA4,
             (int8) 0xE4, (int8) 0xA7, (int8) 0xEB, (int8) 0x81, (int8) 0x79,
             (int8) 0x83, (int8) 0x40, (int8) 0x31, (int8) 0x00
-        };
+        ];
         int8[] out = Deflate.inflate(blob, (int64) blob.count(), (int64) 180);
         String s = heap cajeta.lang.String(#out, (int32) out.count());
         Assert.isTrue(s.equals(

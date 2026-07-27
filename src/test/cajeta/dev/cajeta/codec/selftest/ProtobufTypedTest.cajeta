@@ -26,7 +26,7 @@ public class ProtobufTypedTest {
         w.writeLenField(2, nb, (int32) nb.count());    // name
         w.writeVarintField(3, (int64) 1);              // active = true
         w.writeVarintField(4, (int64) 42);             // count
-        int8[] pay = {(int8) 0x07, (int8) 0x09};
+        int8[] pay = [(int8) 0x07, (int8) 0x09];
         w.writeLenField(5, pay, (int32) 2);            // payload
         int8[] bytes = w.toBytes();
 
@@ -52,7 +52,7 @@ public class ProtobufTypedTest {
         m.name = "hi";
         m.active = true;
         m.count = 42;
-        int8[] pay = {(int8) 0x07, (int8) 0x09};
+        int8[] pay = [(int8) 0x07, (int8) 0x09];
         m.payload = pay;
 
         int8[] bytes = Protobuf.toBytes<ProtoScalarMsg>(m);

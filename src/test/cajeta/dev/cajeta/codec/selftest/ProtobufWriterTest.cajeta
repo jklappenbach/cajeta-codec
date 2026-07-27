@@ -35,7 +35,7 @@ public class ProtobufWriterTest {
     public void roundTripsVarintAndLenThroughCursor() {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(1, (int64) 150);
-        int8[] hi = {(int8) 0x68, (int8) 0x69};
+        int8[] hi = [(int8) 0x68, (int8) 0x69];
         w.writeLenField(2, hi, (int32) 2);
         w.writeVarintField(3, (int64) 7);
         int8[] bytes = w.toBytes();

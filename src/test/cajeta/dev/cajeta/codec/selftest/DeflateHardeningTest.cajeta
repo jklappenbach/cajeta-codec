@@ -58,7 +58,7 @@ public class DeflateHardeningTest {
     @Test
     public void truncatedStreamRaises() {
         // First 3 bytes of the "abcabc..." fixed-Huffman blob.
-        int8[] blob = { (int8) 0x4B, (int8) 0x4C, (int8) 0x4A };
+        int8[] blob = [ (int8) 0x4B, (int8) 0x4C, (int8) 0x4A ];
         boolean caught = false;
         try {
             int8[] out = Deflate.inflateGrow(blob, (int64) 3);
@@ -72,7 +72,7 @@ public class DeflateHardeningTest {
     @Test
     public void reservedBlockTypeRaises() {
         // BFINAL=1, BTYPE=11 (reserved).
-        int8[] blob = { (int8) 0x07 };
+        int8[] blob = [ (int8) 0x07 ];
         boolean caught = false;
         try {
             int8[] out = Deflate.inflateGrow(blob, (int64) 1);
@@ -88,7 +88,7 @@ public class DeflateHardeningTest {
         // Fixed block whose FIRST symbol is a length code (257, len 3)
         // followed by distance code 4 (dist 5) — a back-reference with
         // nothing produced yet (the historical `index -4` abort).
-        int8[] blob = { (int8) 0x03, (int8) 0x12 };
+        int8[] blob = [ (int8) 0x03, (int8) 0x12 ];
         boolean caught = false;
         try {
             int8[] out = Deflate.inflateGrow(blob, (int64) 2);
@@ -102,12 +102,12 @@ public class DeflateHardeningTest {
     @Test
     public void storedNlenMismatchRaises() {
         // The stored-block "hello world" blob with NLEN's low byte flipped.
-        int8[] blob = {
+        int8[] blob = [
             (int8) 0x01, (int8) 0x0B, (int8) 0x00, (int8) 0xF3, (int8) 0xFF,
             (int8) 0x68, (int8) 0x65, (int8) 0x6C, (int8) 0x6C, (int8) 0x6F,
             (int8) 0x20, (int8) 0x77, (int8) 0x6F, (int8) 0x72, (int8) 0x6C,
             (int8) 0x64
-        };
+        ];
         boolean caught = false;
         try {
             int8[] out = Deflate.inflateGrow(blob, (int64) blob.count());

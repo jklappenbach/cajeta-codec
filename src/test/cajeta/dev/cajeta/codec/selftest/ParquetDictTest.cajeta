@@ -16,7 +16,7 @@ public class ParquetDictTest {
     }
 
     static #int8[] dictParquet() {  // 456 bytes
-        int8[] b = {
+        int8[] b = [
             (int8) 0x50, (int8) 0x41, (int8) 0x52, (int8) 0x31, (int8) 0x15, (int8) 0x04, (int8) 0x15, (int8) 0x18, (int8) 0x15, (int8) 0x1C, (int8) 0x4C, (int8) 0x15,
             (int8) 0x06, (int8) 0x15, (int8) 0x04, (int8) 0x12, (int8) 0x00, (int8) 0x00, (int8) 0x0C, (int8) 0x2C, (int8) 0x0A, (int8) 0x00, (int8) 0x00, (int8) 0x00,
             (int8) 0x14, (int8) 0x00, (int8) 0x00, (int8) 0x00, (int8) 0x1E, (int8) 0x00, (int8) 0x00, (int8) 0x00, (int8) 0x15, (int8) 0x00, (int8) 0x15, (int8) 0x14,
@@ -55,7 +55,7 @@ public class ParquetDictTest {
             (int8) 0x70, (int8) 0x2D, (int8) 0x61, (int8) 0x72, (int8) 0x72, (int8) 0x6F, (int8) 0x77, (int8) 0x20, (int8) 0x76, (int8) 0x65, (int8) 0x72, (int8) 0x73,
             (int8) 0x69, (int8) 0x6F, (int8) 0x6E, (int8) 0x20, (int8) 0x32, (int8) 0x34, (int8) 0x2E, (int8) 0x30, (int8) 0x2E, (int8) 0x30, (int8) 0x19, (int8) 0x1C,
             (int8) 0x1C, (int8) 0x00, (int8) 0x00, (int8) 0x00, (int8) 0x65, (int8) 0x01, (int8) 0x00, (int8) 0x00, (int8) 0x50, (int8) 0x41, (int8) 0x52, (int8) 0x31
-        };
+        ];
         return #b;
     }
 
@@ -63,7 +63,7 @@ public class ParquetDictTest {
     public void readsDictionarySnappyColumn() {
         int8[] f = ParquetDictTest.dictParquet();
         int32[] vals = ParquetColumnReader.readInt32Column(f, (int64) f.count(), 0);
-        int32[] want = { 10, 20, 10, 30, 20, 10, 30, 30 };
+        int32[] want = [ 10, 20, 10, 30, 20, 10, 30, 30 ];
         Assert.that((int64) vals.count()).isEqualTo((int64) 8);
         int32 i = 0;
         while (i < 8) {

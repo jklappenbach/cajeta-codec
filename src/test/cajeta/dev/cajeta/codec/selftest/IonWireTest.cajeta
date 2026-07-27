@@ -19,9 +19,9 @@ public class IonWireTest {
 
     @Test
     public void recognizesBvm() {
-        int8[] b = {(int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA};
+        int8[] b = [(int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA];
         Assert.isTrue(IonWire.isBvm(b, (int64) 0));
-        int8[] bad = {(int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEB};
+        int8[] bad = [(int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEB];
         Assert.isFalse(IonWire.isBvm(bad, (int64) 0));
         Assert.that(IonWire.bvmLen()).isEqualTo((int64) 4);
         return;
@@ -30,12 +30,12 @@ public class IonWireTest {
     @Test
     public void varUIntSingleOctet() {
         // 0 = 0x80 (stop bit, magnitude 0); 14 = 0x8E; 127 = 0xFF
-        int8[] z = {(int8) 0x80};
+        int8[] z = [(int8) 0x80];
         Assert.that(IonWire.decodeVarUInt(z, (int64) 0)).isEqualTo((int64) 0);
         Assert.that(IonWire.varUIntLen(z, (int64) 0)).isEqualTo((int64) 1);
-        int8[] f = {(int8) 0x8E};
+        int8[] f = [(int8) 0x8E];
         Assert.that(IonWire.decodeVarUInt(f, (int64) 0)).isEqualTo((int64) 14);
-        int8[] m = {(int8) 0xFF};
+        int8[] m = [(int8) 0xFF];
         Assert.that(IonWire.decodeVarUInt(m, (int64) 0)).isEqualTo((int64) 127);
         return;
     }
@@ -43,11 +43,11 @@ public class IonWireTest {
     @Test
     public void varUIntTwoOctets() {
         // 128 = 0x01 0x80 (high group 1, low group 0 + stop)
-        int8[] a = {(int8) 0x01, (int8) 0x80};
+        int8[] a = [(int8) 0x01, (int8) 0x80];
         Assert.that(IonWire.decodeVarUInt(a, (int64) 0)).isEqualTo((int64) 128);
         Assert.that(IonWire.varUIntLen(a, (int64) 0)).isEqualTo((int64) 2);
         // 729 = 0x05 0xD9 (spec example: 5*128 + 89)
-        int8[] b = {(int8) 0x05, (int8) 0xD9};
+        int8[] b = [(int8) 0x05, (int8) 0xD9];
         Assert.that(IonWire.decodeVarUInt(b, (int64) 0)).isEqualTo((int64) 729);
         Assert.that(IonWire.varUIntLen(b, (int64) 0)).isEqualTo((int64) 2);
         return;
@@ -55,7 +55,7 @@ public class IonWireTest {
 
     @Test
     public void varUIntAtOffset() {
-        int8[] b = {(int8) 0xFF, (int8) 0x05, (int8) 0xD9};
+        int8[] b = [(int8) 0xFF, (int8) 0x05, (int8) 0xD9];
         Assert.that(IonWire.decodeVarUInt(b, (int64) 1)).isEqualTo((int64) 729);
         Assert.that(IonWire.varUIntLen(b, (int64) 1)).isEqualTo((int64) 2);
         return;
@@ -78,9 +78,9 @@ public class IonWireTest {
     @Test
     public void uIntMagnitudeBigEndian() {
         // 150 = 0x96 (one byte); 0x01 0x00 = 256
-        int8[] a = {(int8) 0x96};
+        int8[] a = [(int8) 0x96];
         Assert.that(IonWire.decodeUIntMag(a, (int64) 0, (int64) 1)).isEqualTo((int64) 150);
-        int8[] b = {(int8) 0x01, (int8) 0x00};
+        int8[] b = [(int8) 0x01, (int8) 0x00];
         Assert.that(IonWire.decodeUIntMag(b, (int64) 0, (int64) 2)).isEqualTo((int64) 256);
         return;
     }
@@ -88,11 +88,11 @@ public class IonWireTest {
     @Test
     public void scalarHeaderAndContent() {
         // posint 150: TD 0x21, content 0x96 → header 1, content 1
-        int8[] i = {(int8) 0x21, (int8) 0x96};
+        int8[] i = [(int8) 0x21, (int8) 0x96];
         Assert.that(IonWire.headerLen(i, (int64) 0)).isEqualTo((int64) 1);
         Assert.that(IonWire.contentLength(i, (int64) 0)).isEqualTo((int64) 1);
         // string "hi": TD 0x82, content 0x68 0x69 → header 1, content 2
-        int8[] s = {(int8) 0x82, (int8) 0x68, (int8) 0x69};
+        int8[] s = [(int8) 0x82, (int8) 0x68, (int8) 0x69];
         Assert.that(IonWire.headerLen(s, (int64) 0)).isEqualTo((int64) 1);
         Assert.that(IonWire.contentLength(s, (int64) 0)).isEqualTo((int64) 2);
         return;
@@ -101,10 +101,10 @@ public class IonWireTest {
     @Test
     public void boolValueIsInNibble() {
         // bool true 0x11 / false 0x10 — L is the value, content length 0
-        int8[] t = {(int8) 0x11};
+        int8[] t = [(int8) 0x11];
         Assert.that(IonWire.contentLength(t, (int64) 0)).isEqualTo((int64) 0);
         Assert.that(IonWire.headerLen(t, (int64) 0)).isEqualTo((int64) 1);
-        int8[] f = {(int8) 0x10};
+        int8[] f = [(int8) 0x10];
         Assert.that(IonWire.contentLength(f, (int64) 0)).isEqualTo((int64) 0);
         return;
     }
@@ -112,7 +112,7 @@ public class IonWireTest {
     @Test
     public void nullHasNoContent() {
         // null.string 0x8F → content 0, header 1
-        int8[] n = {(int8) 0x8F};
+        int8[] n = [(int8) 0x8F];
         Assert.that(IonWire.contentLength(n, (int64) 0)).isEqualTo((int64) 0);
         Assert.that(IonWire.headerLen(n, (int64) 0)).isEqualTo((int64) 1);
         Assert.isTrue(IonWire.isNull((int8) 0x8F));
@@ -135,7 +135,7 @@ public class IonWireTest {
     @Test
     public void emptyAndOrderedStruct() {
         // empty struct 0xD0 → content 0, header 1
-        int8[] e = {(int8) 0xD0};
+        int8[] e = [(int8) 0xD0];
         Assert.that(IonWire.contentLength(e, (int64) 0)).isEqualTo((int64) 0);
         Assert.that(IonWire.headerLen(e, (int64) 0)).isEqualTo((int64) 1);
         // ordered struct 0xD1 <VarUInt len=5=0x85> ... → header 2, content 5

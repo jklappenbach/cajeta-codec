@@ -22,7 +22,7 @@ public class IonEncodeTest {
         m.name = "hi";
         m.active = true;
         m.count = 42;
-        int8[] pay = {(int8) 0x07, (int8) 0x09};
+        int8[] pay = [(int8) 0x07, (int8) 0x09];
         m.payload = pay;
 
         int8[] bytes = Ion.toBytes<IonScalarMsg>(m);

@@ -18,7 +18,7 @@ public class ParquetWriteTest {
 
     @Test
     public void writesReadableFooter() {
-        int32[] vals = { 11, 22, 33, 44 };
+        int32[] vals = [ 11, 22, 33, 44 ];
         int8[] file = ParquetWriter.writeInt32Column(vals, 4);
         int64 fc = (int64) file.count();
         ParquetMetadata m = ParquetMetadata.parse(file, fc);
@@ -29,7 +29,7 @@ public class ParquetWriteTest {
 
     @Test
     public void roundTripsColumn() {
-        int32[] vals = { 1, 2, 3, 4, 5 };
+        int32[] vals = [ 1, 2, 3, 4, 5 ];
         int8[] file = ParquetWriter.writeInt32Column(vals, 5);
         int64 fc = (int64) file.count();
         int32[] back = ParquetColumnReader.readInt32Column(file, fc, 0);

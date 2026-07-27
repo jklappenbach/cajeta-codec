@@ -16,9 +16,9 @@ public class BitPackTest {
 
     @Test
     public void unpacksWidth3() {
-        int8[] w3 = { (int8) 0xD1, (int8) 0x58, (int8) 0x1F };
+        int8[] w3 = [ (int8) 0xD1, (int8) 0x58, (int8) 0x1F ];
         int32[] got = BitPack.unpack(w3, (int64) 0, 3, 8);
-        int32[] want = { 1, 2, 3, 4, 5, 6, 7, 0 };
+        int32[] want = [ 1, 2, 3, 4, 5, 6, 7, 0 ];
         int32 i = 0;
         while (i < 8) {
             Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
@@ -29,9 +29,9 @@ public class BitPackTest {
 
     @Test
     public void unpacksWidth5() {
-        int8[] w5 = { (int8) 0x1F, (int8) 0x44, (int8) 0xE4, (int8) 0x01 };
+        int8[] w5 = [ (int8) 0x1F, (int8) 0x44, (int8) 0xE4, (int8) 0x01 ];
         int32[] got = BitPack.unpack(w5, (int64) 0, 5, 5);
-        int32[] want = { 31, 0, 17, 8, 30 };
+        int32[] want = [ 31, 0, 17, 8, 30 ];
         int32 i = 0;
         while (i < 5) {
             Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
@@ -42,9 +42,9 @@ public class BitPackTest {
 
     @Test
     public void unpacksWidth1() {
-        int8[] w1 = { (int8) 0x4D, (int8) 0x03 };
+        int8[] w1 = [ (int8) 0x4D, (int8) 0x03 ];
         int32[] got = BitPack.unpack(w1, (int64) 0, 1, 10);
-        int32[] want = { 1, 0, 1, 1, 0, 0, 1, 0, 1, 1 };
+        int32[] want = [ 1, 0, 1, 1, 0, 0, 1, 0, 1, 1 ];
         int32 i = 0;
         while (i < 10) {
             Assert.that((int64) got[i]).isEqualTo((int64) want[i]);
@@ -55,7 +55,7 @@ public class BitPackTest {
 
     @Test
     public void widthZeroIsAllZeros() {
-        int8[] empty = { (int8) 0x00 };
+        int8[] empty = [ (int8) 0x00 ];
         int32[] got = BitPack.unpack(empty, (int64) 0, 0, 4);
         int32 i = 0;
         while (i < 4) {

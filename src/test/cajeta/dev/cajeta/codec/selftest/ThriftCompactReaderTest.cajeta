@@ -16,12 +16,12 @@ public class ThriftCompactReaderTest {
 
     @Test
     public void decodesCompactStruct() {
-        int8[] s = { (int8) 0x15, (int8) 0x0A, (int8) 0x16, (int8) 0x80,
+        int8[] s = [ (int8) 0x15, (int8) 0x0A, (int8) 0x16, (int8) 0x80,
                      (int8) 0x89, (int8) 0x7A, (int8) 0x18, (int8) 0x02,
                      (int8) 0x68, (int8) 0x69, (int8) 0x11, (int8) 0x29,
                      (int8) 0x35, (int8) 0x14, (int8) 0x28, (int8) 0x3C,
                      (int8) 0x1C, (int8) 0x15, (int8) 0xC6, (int8) 0x01,
-                     (int8) 0x00, (int8) 0x00 };
+                     (int8) 0x00, (int8) 0x00 ];
         ThriftCompactReader r = heap ThriftCompactReader(s, (int64) 0);
         r.enterStruct();
 
@@ -80,12 +80,12 @@ public class ThriftCompactReaderTest {
 
     @Test
     public void skipsUnwantedFields() {
-        int8[] s = { (int8) 0x15, (int8) 0x0A, (int8) 0x16, (int8) 0x80,
+        int8[] s = [ (int8) 0x15, (int8) 0x0A, (int8) 0x16, (int8) 0x80,
                      (int8) 0x89, (int8) 0x7A, (int8) 0x18, (int8) 0x02,
                      (int8) 0x68, (int8) 0x69, (int8) 0x11, (int8) 0x29,
                      (int8) 0x35, (int8) 0x14, (int8) 0x28, (int8) 0x3C,
                      (int8) 0x1C, (int8) 0x15, (int8) 0xC6, (int8) 0x01,
-                     (int8) 0x00, (int8) 0x00 };
+                     (int8) 0x00, (int8) 0x00 ];
         ThriftCompactReader r = heap ThriftCompactReader(s, (int64) 0);
         r.enterStruct();
         // Skip everything, expect to land on the final STOP cleanly.

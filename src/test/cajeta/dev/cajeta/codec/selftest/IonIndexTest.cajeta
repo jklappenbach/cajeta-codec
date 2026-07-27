@@ -33,7 +33,7 @@ public class IonIndexTest {
     }
 
     static #int8[] fixture() {
-        int8[] b = {
+        int8[] b = [
             (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
             (int8) 0xEE, (int8) 0x96,
             (int8) 0x81, (int8) 0x83,
@@ -48,7 +48,7 @@ public class IonIndexTest {
             (int8) 0x8A, (int8) 0x21, (int8) 0x96,
             (int8) 0x8B, (int8) 0x82, (int8) 0x68, (int8) 0x69,
             (int8) 0x8C, (int8) 0x11
-        };
+        ];
         return #b;
     }
 
@@ -107,10 +107,10 @@ public class IonIndexTest {
     @Test
     public void unsupportedTypeFailsLoud() {
         // BVM + struct { name(SID 4): decimal 0x50 } — decimal (tc 5) unsupported.
-        int8[] b = {
+        int8[] b = [
             (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
             (int8) 0xD2, (int8) 0x84, (int8) 0x50
-        };
+        ];
         Assert.assertThrows(() -> {
             IonIndex.build(b, (int64) b.count());
         });

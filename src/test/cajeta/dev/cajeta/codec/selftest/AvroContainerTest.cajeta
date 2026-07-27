@@ -18,7 +18,7 @@ public class AvroContainerTest {
     }
 
     static #int8[] fixture() {
-        int8[] b = {
+        int8[] b = [
             (int8) 0x4F, (int8) 0x62, (int8) 0x6A, (int8) 0x01,
             (int8) 0x04,
             (int8) 0x16, (int8) 0x61, (int8) 0x76, (int8) 0x72, (int8) 0x6F,
@@ -40,7 +40,7 @@ public class AvroContainerTest {
             (int8) 0x05, (int8) 0x06, (int8) 0x07, (int8) 0x08, (int8) 0x09,
             (int8) 0x0A, (int8) 0x0B, (int8) 0x0C, (int8) 0x0D, (int8) 0x0E,
             (int8) 0x0F
-        };
+        ];
         return #b;
     }
 

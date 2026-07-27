@@ -65,8 +65,8 @@ public final class OrcWriter {
         int8[] siBytes = si.toBytes();
 
         // Types: [0] STRUCT{subtypes=[1], fieldNames=["x"]}, [1] LONG.
-        int8[] subPacked = { (int8) 0x01 };
-        int8[] nameX = { (int8) 0x78 };                      // "x"
+        int8[] subPacked = [ (int8) 0x01 ];
+        int8[] nameX = [ (int8) 0x78 ];                      // "x"
         ProtobufWriter t0 = heap ProtobufWriter();
         t0.writeVarintField(1, (int64) 12);                  // STRUCT
         t0.writeLenField(2, subPacked, 1);
@@ -90,8 +90,8 @@ public final class OrcWriter {
         int32 footerLen = (int32) footerBytes.count();
 
         // PostScript.
-        int8[] ver = { (int8) 0x00, (int8) 0x0C };           // version [0,12]
-        int8[] orcMagic = { (int8) 0x4F, (int8) 0x52, (int8) 0x43 };
+        int8[] ver = [ (int8) 0x00, (int8) 0x0C ];           // version [0,12]
+        int8[] orcMagic = [ (int8) 0x4F, (int8) 0x52, (int8) 0x43 ];
         ProtobufWriter ps = heap ProtobufWriter();
         ps.writeVarintField(1, (int64) footerLen);
         ps.writeVarintField(2, (int64) 0);                   // compression NONE

@@ -18,10 +18,10 @@ public class AvroCursorTest {
     @Test
     public void readsZigzagLongs() {
         // zigzag: 0x00→0, 0x01→-1, 0x02→1, 0x03→-2, 0x04→2, [0x80,0x01]→64.
-        int8[] b = {
+        int8[] b = [
             (int8) 0x00, (int8) 0x01, (int8) 0x02, (int8) 0x03, (int8) 0x04,
             (int8) 0x80, (int8) 0x01
-        };
+        ];
         AvroCursor c = heap AvroCursor(b, (int64) 0);
         Assert.that(c.readLong()).isEqualTo((int64) 0);
         Assert.that(c.readLong()).isEqualTo((int64) 0 - (int64) 1);
@@ -36,10 +36,10 @@ public class AvroCursorTest {
     @Test
     public void readsBooleanAndString() {
         // true (0x01), then string "hi": long len 2 (zigzag 4 → 0x04) + 'h','i'.
-        int8[] b = {
+        int8[] b = [
             (int8) 0x01,
             (int8) 0x04, (int8) 0x68, (int8) 0x69
-        };
+        ];
         AvroCursor c = heap AvroCursor(b, (int64) 0);
         Assert.isTrue(c.readBoolean());
         Assert.isTrue(c.readString().equals("hi"));
@@ -50,7 +50,7 @@ public class AvroCursorTest {
     @Test
     public void readsBytes() {
         // bytes [0x07,0x09]: long len 2 (0x04) + the two bytes.
-        int8[] b = { (int8) 0x04, (int8) 0x07, (int8) 0x09 };
+        int8[] b = [ (int8) 0x04, (int8) 0x07, (int8) 0x09 ];
         AvroCursor c = heap AvroCursor(b, (int64) 0);
         int8[] out = c.readBytes();
         Assert.that((int64) out.count()).isEqualTo((int64) 2);
