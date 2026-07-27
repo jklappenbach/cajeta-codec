@@ -222,20 +222,38 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
       `.cja` (linux-x64), even with all six genuine archives present — so the
       `.cja` is self-contained for linux-x64 and other platforms provision from
       the shipped asset via `CAJETA_NATIVE_PATH`. Verify requires the host bake.
-- [~] **7.5 cajeta-http adoption — BLOCKED on publishing the native codec.**
-      **Mechanism verified** (end-to-end finding): the consumer link does NOT
-      auto-extract native from a classpath `.cja` (§3.2.2 unimplemented) —
-      `--emit=exe --classpath=<codec.cja>` errors `native library 'cajeta_zlib'
-      not found; searched: CAJETA_NATIVE_PATH / project native/ / ~/.cajeta/native`.
-      **Working path (verified, tour consumer 11/11 offline):** the `.cja` carries
-      the artifact, so the consumer runs `cajeta archive extract <codec.cja>` →
+- [x] **7.5 cajeta-http adoption — DONE (2026-07-27).** Shipped in codec
+      **v0.7.0** (PR #2 merged `60d5bc5`; `VERSION`+`cajeta.json` bumped 0.6.0 →
+      0.7.0 in `fa8055a` because 0.6.0 collides with the published pre-native
+      build; tag `v0.7.0` → release run 30274656170 all green, Release + Olla
+      publish both succeeded). The published `.cja` carries
+      `native/linux-x64/libcajeta_zlib.a` (123,904 B — byte-matches the release
+      asset) + `native/native-libraries.json`.
+      **cajeta-http side:** `dev.cajeta.codec` bumped in both spots; the
+      extract-bridge landed as `cajeta-http/run-tests.sh` (reads the codec
+      version from `cajeta.json`, re-extracts every run so a stale tree can't
+      silently link an old backend). **Also found + fixed there:** cajeta-http's
+      `repositories` URL `https://repo.cajeta.org` is **NXDOMAIN** and always
+      has been — resolution only ever worked off a hand-seeded `~/.olla`. The
+      live registry is `https://olla.cajeta.dev`. **NOTE: this manifest
+      (cajeta-codec/cajeta.json line 75) still has the dead URL — fix it here
+      too.**
+      **Verified end-to-end:** `DeflateBackend.useNative() = true` on
+      cajeta-http's `ContentCoding` path; 4 MiB gzip round-trip byte-exact;
+      encode ~800 MiB/s native vs 17.8 MiB/s forced-fallback (**~45×**), output
+      also ~2.5× smaller (56,152 vs 139,327 B). cajeta-http suite 1434/1434.
+      *(Unrelated blocker surfaced: the suite needs cajeta ≥ 0.10.0 — the
+      installed 0.9.5 `22df4e60` aborts deterministically in a middleware test,
+      proven a compiler regression by reproducing it against pre-native 0.6.0.)*
+      **Mechanism** (the finding this unit rests on, kept for 7.6): the consumer
+      link does NOT auto-extract native from a classpath `.cja` (§3.2.2
+      unimplemented) — `--emit=exe --classpath=<codec.cja>` errors `native
+      library 'cajeta_zlib' not found; searched: CAJETA_NATIVE_PATH / project
+      native/ / ~/.cajeta/native`. The `.cja` carries the artifact, so the
+      consumer runs `cajeta archive extract <codec.cja>` →
       `CAJETA_NATIVE_PATH=<dir>/native` → links offline (recipe in
-      `native/CROSS-BUILD.md`). **TODO when unblocked:** bump cajeta-http's
-      `dev.cajeta.codec` dep (2 spots in its `cajeta.json`: `dependencies` + the
-      hard-coded olla test classpath) to the new version; add the extract-bridge
-      to its build (cajeta-http drives `cajeta test`/`build` directly, no shell
-      script — likely add a `run-tests.sh` wrapper); verify it links offline +
-      the ContentCoding gzip path runs native.
+      `native/CROSS-BUILD.md`). Verified twice: the tour consumer (11/11
+      offline) and now cajeta-http.
 - [ ] **7.6** Toolchain gap (out of codec scope): implement §3.2.2 — the
       consumer resolver should search dependency `.cja` `native/` trees directly,
       so the extract-bridge becomes unnecessary. File against the compiler.
