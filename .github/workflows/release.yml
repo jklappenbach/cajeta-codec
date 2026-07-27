@@ -43,14 +43,10 @@ permissions:
   contents: write   # publish the Release on a tag / production run
 
 env:
-  # A published cajeta toolchain that contains the codec synthesizers. Bump when
-  # the next cajeta release ships them. Must match a release tag of jklappenbach/cajeta.
-  # NOTE: v0.9.5 was never released (it was a local dev build) — the "release not
-  # found" CI failure. v0.10.0 is the latest release: it builds the codec, bakes
-  # the native artifact into the .cja, and the full suite passes (214/214) —
-  # verified locally. The Arrow BRIDGE (run-bridge-test.sh) additionally needs
-  # cajeta.nucleo.* — that step is non-blocking below.
-  CAJETA_VERSION: v0.10.0
+  # Must match a release tag of jklappenbach/cajeta. v0.10.1 is a floor, not a
+  # preference: these sources use bracket array literals `[1, 2, 3]`, and v0.10.0
+  # predates the collection-literals work entirely, so it cannot parse them.
+  CAJETA_VERSION: v0.10.1
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
