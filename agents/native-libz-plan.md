@@ -182,14 +182,16 @@ build wiring in later units — that is expected; update this plan if so.
 
 ## 7. Publish integration — self-contained `.cja` (spec §3.3)  ⏸ RESUME HERE
 
-**STATE (2026-07-25):** codec native-zlib work is DONE and **PR #2 is green**
-(`native-zlib-backend → main`, https://github.com/jklappenbach/cajeta-codec/pull/2;
-release.yml all 3 jobs pass, suite 214/214 on v0.10.0). Remaining is downstream:
-**(a) merge PR #2, (b) cut a release** — bump `VERSION` past 0.6.0 first (it
-collides with the published pre-native codec), the tag runs release.yml which
-bakes linux-x64 into the `.cja` + publishes the six `libcajeta_zlib-<platform>.a`
-assets — **(c) 7.5 cajeta-http adoption** (blocked until (b)). 7.6/7.7 are
-toolchain gaps to file against the compiler (both have working workarounds).
+**STATE (2026-07-27):** codec native-zlib work is DONE and **PR #2 is MERGED**
+(`native-zlib-backend → main` at `60d5bc5`,
+https://github.com/jklappenbach/cajeta-codec/pull/2; release.yml all 3 jobs
+pass, suite 214/214 on v0.10.0). `VERSION` + `cajeta.json` bumped 0.6.0 → **0.7.0**
+(0.6.0 collides with the published pre-native codec). Remaining: **(b) cut the
+release** — push tag `v0.7.0`, which runs release.yml: bakes linux-x64 into the
+`.cja`, publishes the six `libcajeta_zlib-<platform>.a` assets, and signs+publishes
+to the Olla registry — then **(c) 7.5 cajeta-http adoption** (unblocked by (b)).
+7.6/7.7 are toolchain gaps to file against the compiler (both have working
+workarounds).
 
 The native backend links locally (`CAJETA_NATIVE_PATH`), and a *published* `.cja`
 must carry the per-platform artifact so consumers (cajeta-http) link offline.
