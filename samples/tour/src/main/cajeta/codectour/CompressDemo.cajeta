@@ -1,0 +1,99 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.compress.Gzip;
+import dev.cajeta.codec.compress.Zlib;
+import dev.cajeta.codec.compress.Deflate;
+import dev.cajeta.codec.compress.DeflateBackend;
+
+// dev.cajeta.codec.compress — the DEFLATE family (RFC 1951/1950/1952).
+//
+// Three one-shot framings share one encoder/decoder, each a pair of statics
+// over flat byte buffers:
+//
+//   Deflate.deflate(src, n[, level])   /  Deflate.inflate(src, n, destLen)   raw DEFLATE (1951)
+//   Zlib.compress(src, n[, level])     /  Zlib.decompress(src, n, destLen)   zlib stream (1950)
+//   Gzip.compress(src, n[, level])     /  Gzip.decompress(src, n)            gzip member (1952)
+//
+// gzip is self-describing (ISIZE in the trailer) so decompress needs no size;
+// zlib/raw take a destLen hint that self-corrects if wrong. `level` is 1
+// (fastest) .. 9 (max ratio), clamped into range. Every compressor returns a
+// fresh caller-owned int8[]; malformed input raises DeflateException, never a
+// trap. Checksums: Gzip.crc32 / Zlib.adler32.
+//
+// Under the hood a native zlib backend runs these at zlib speed when linked,
+// with the pure-cajeta encoder as a transparent fallback (DeflateBackend) —
+// same bytes out either way, shown in step 5.
+public class CompressDemo extends DemoClass {
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.compress: DEFLATE / gzip / zlib --");
+
+        // A compressible, text-like payload (repetition -> real LZ77 matches).
+        String text =
+            "the quick brown fox jumps over the lazy dog. "
+          + "pack my box with five dozen liquor jugs. "
+          + "the quick brown fox jumps over the lazy dog. "
+          + "how vexingly quick daft zebras jump! "
+          + "the quick brown fox jumps over the lazy dog. ";
+        int8[] data = text.toBytes();
+        int64 n = (int64) data.count();
+        System.stdout.println("  payload: " + n + " bytes");
+
+        // 1. gzip (RFC 1952) — self-describing, decompress needs no length.
+        int8[] gz = Gzip.compress(data, n, 6);
+        int8[] gzOut = Gzip.decompress(gz, (int64) gz.count());
+        System.stdout.println("  gzip  : " + n + " -> " + gz.count()
+            + " bytes (" + ((gz.count() * (int64) 100) / n) + "%)");
+        this.check(this.sameBytes(data, gzOut), "gzip round-trips byte-exact");
+
+        // 2. zlib (RFC 1950) — decompress takes a destLen hint (here exact).
+        int8[] zl = Zlib.compress(data, n, 6);
+        int8[] zlOut = Zlib.decompress(zl, (int64) zl.count(), n);
+        System.stdout.println("  zlib  : " + n + " -> " + zl.count() + " bytes");
+        this.check(this.sameBytes(data, zlOut), "zlib round-trips byte-exact");
+
+        // 3. raw DEFLATE (RFC 1951) — the bare bitstream, no envelope.
+        int8[] df = Deflate.deflate(data, n, 6);
+        int8[] dfOut = Deflate.inflate(df, (int64) df.count(), n);
+        System.stdout.println("  raw   : " + n + " -> " + df.count() + " bytes");
+        this.check(this.sameBytes(data, dfOut), "raw deflate round-trips byte-exact");
+
+        // 4. the level knob: 1 = fastest, 9 = max ratio (clamped into [1,9]).
+        int8[] c1 = Gzip.compress(data, n, 1);
+        int8[] c9 = Gzip.compress(data, n, 9);
+        System.stdout.println("  level : L1=" + c1.count() + "  L9=" + c9.count() + " bytes");
+        this.check((int64) c9.count() <= (int64) c1.count(),
+            "L9 is no larger than L1 on compressible data");
+
+        // 5. native backend vs pure-cajeta fallback — identical round-trips.
+        //    forceFallback(true) routes to the software encoder; the default
+        //    (false) uses native zlib. Both decode each other and the input.
+        DeflateBackend.forceFallback(true);
+        int8[] cajComp = Gzip.compress(data, n, 6);
+        int8[] cajOut = Gzip.decompress(cajComp, (int64) cajComp.count());
+        DeflateBackend.forceFallback(false);
+        int8[] natOut = Gzip.decompress(cajComp, (int64) cajComp.count());   // native decodes cajeta output
+        this.check(this.sameBytes(data, cajOut), "pure-cajeta fallback round-trips");
+        this.check(this.sameBytes(data, natOut), "native decodes the fallback's output (interop)");
+
+        // 6. checksums — gzip's CRC-32 and zlib's Adler-32 over the same bytes.
+        int64 crc = Gzip.crc32(data, n);
+        int64 adler = Zlib.adler32(data, n);
+        System.stdout.println("  crc32=" + crc + "  adler32=" + adler);
+        this.check(crc != (int64) 0 && adler != (int64) 0, "checksums computed");
+
+        // 7. malformed input raises DeflateException — never a crash.
+        int8[] junk = heap int8[24];
+        int32 j = 0;
+        while (j < 24) { junk[j] = (int8) ((j * 7 + 3) & 0xFF); j = j + 1; }
+        boolean raised = false;
+        try {
+            int8[] bad = Gzip.decompress(junk, (int64) 24);
+        } catch (dev.cajeta.codec.compress.DeflateException e) {
+            raised = true;
+        }
+        this.check(raised, "corrupt gzip input raises DeflateException");
+    }
+}

@@ -4,3 +4,9 @@ gen/
 *.o
 *.exe
 .cajeta/
+
+# Native backend build artifacts (vendored source in native/zlib/ IS tracked;
+# the per-platform static archives are built by native/build.sh).
+native/linux-*/
+native/macos-*/
+native/windows-*/

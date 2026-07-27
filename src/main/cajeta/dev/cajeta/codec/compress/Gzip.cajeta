@@ -61,6 +61,9 @@ public final class Gzip {
      * [`DeflateException`](DeflateException.cajeta), never a trap.
      */
     public static #int8[] decompress(int8[] src, int64 n) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.gzipDecompress(src, n);
+        }
         if (n < (int64) 18) {
             throw heap DeflateException("gzip member too short", (int64) 0);
         }
@@ -129,9 +132,20 @@ public final class Gzip {
         return #out;
     }
 
-    /** Compress `src` (first `n` bytes) into a gzip member (stored DEFLATE). */
+    /** Compress `src` (first `n` bytes) into a gzip member at the default level. */
     public static #int8[] compress(int8[] src, int64 n) {
-        int8[] def = Deflate.deflate(src, n);
+        return Gzip.compress(src, n, 6);
+    }
+
+    /**
+     * Compress into a gzip member at compression `level` (1 = fastest ..
+     * 9 = max ratio; see [`Deflate.deflate`](Deflate.cajeta#deflate)).
+     */
+    public static #int8[] compress(int8[] src, int64 n, int32 level) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.gzipCompress(src, n, level);
+        }
+        int8[] def = Deflate.deflate(src, n, level);
         int64 dlen = (int64) def.count();
         int64 crc = Gzip.crc32(src, n);
 

@@ -1,0 +1,122 @@
+package dev.cajeta.codec.compress;
+
+/**
+ * A **multi-bit Huffman decode table** for fast INFLATE (the throughput
+ * replacement for the per-bit canonical tree walk). A `FAST_BITS`-wide root
+ * table (`fast[]`) maps the next `FAST_BITS` stream bits (LSB-first, as they
+ * arrive) directly to `(length, symbol)` in one lookup for every code whose
+ * length is `<= FAST_BITS` — which is the overwhelming majority of symbols.
+ * Codes longer than `FAST_BITS` (rare) fall back to the canonical
+ * `count`/`symbol` per-bit walk (kept here too), so the table stays a small
+ * `2^FAST_BITS` array instead of a full `2^15`.
+ *
+ * `fast[i]` packs `(len << 16) | symbol` when the `FAST_BITS`-bit prefix `i`
+ * begins a code of length `len <= FAST_BITS`; `len == 0` (a zero entry) marks a
+ * miss → canonical fallback. Built from a DEFLATE code-length vector exactly as
+ * [`Deflate.build`](Deflate.cajeta) builds the canonical table, so the two
+ * decode bit-identically.
+ */
+public final class FastHuff {
+    public static final int32 FAST_BITS = 9;
+    public static final int32 FAST_SIZE = 512;   // 1 << FAST_BITS
+    public static final int32 FAST_MASK = 511;   // FAST_SIZE - 1
+
+    /** Root table: (len << 16) | sym for len <= FAST_BITS; 0 = miss. */
+    int32[] fast;
+    /** Canonical per-length code counts (for the long-code fallback). */
+    int32[] count;
+    /** Length-then-symbol-sorted symbol list (canonical fallback). */
+    int32[] symbol;
+
+    FastHuff(#int32[] fast, #int32[] count, #int32[] symbol) {
+        this.fast = #fast;
+        this.count = #count;
+        this.symbol = #symbol;
+    }
+
+    /** Reverse the low `len` bits of `code` (DEFLATE packs codes MSB-first). */
+    static int32 rev(int32 code, int32 len) {
+        int32 r = 0;
+        int32 i = 0;
+        while (i < len) {
+            r = (r << 1) | ((code >> i) & 1);
+            i = i + 1;
+        }
+        return r;
+    }
+
+    /**
+     * Build a fast+canonical table from `lengths[0 .. numSyms)` (each a code
+     * length 0..15). `maxSym` sizes the canonical symbol list.
+     */
+    public static #FastHuff build(int32[] lengths, int32 numSyms, int32 maxSym) {
+        // -- canonical count + length-sorted symbol list (as Deflate.build) --
+        int32[] count = heap int32[16];
+        int32 len = 0;
+        while (len <= 15) { count[len] = 0; len = len + 1; }
+        int32 s = 0;
+        while (s < numSyms) {
+            int32 lv = lengths[s];
+            count[lv] = count[lv] + 1;
+            s = s + 1;
+        }
+        int32[] symbol = heap int32[maxSym];
+        int32[] offs = heap int32[16];
+        offs[1] = 0;
+        len = 1;
+        while (len < 15) {
+            int32 ln = len + 1;
+            offs[ln] = offs[len] + count[len];
+            len = len + 1;
+        }
+        s = 0;
+        while (s < numSyms) {
+            int32 lv = lengths[s];
+            if (lv != 0) {
+                int32 o = offs[lv];
+                symbol[o] = s;
+                offs[lv] = o + 1;
+            }
+            s = s + 1;
+        }
+
+        // -- canonical first code per length (MSB-first) --
+        int32[] nextCode = heap int32[16];
+        int32 code = 0;
+        nextCode[0] = 0;
+        len = 1;
+        while (len <= 15) {
+            int32 prev = 0;
+            if (len - 1 >= 1) { prev = count[len - 1]; }
+            code = (code + prev) << 1;
+            nextCode[len] = code;
+            len = len + 1;
+        }
+
+        // -- fill the fast root table (codes <= FAST_BITS) --
+        int32[] fast = heap int32[FastHuff.FAST_SIZE];
+        int32 z = 0;
+        while (z < FastHuff.FAST_SIZE) { fast[z] = 0; z = z + 1; }
+        s = 0;
+        while (s < numSyms) {
+            int32 L = lengths[s];
+            if (L > 0) {
+                int32 c = nextCode[L];
+                nextCode[L] = c + 1;
+                if (L <= FastHuff.FAST_BITS) {
+                    int32 r = FastHuff.rev(c, L);
+                    int32 entry = (L << 16) | s;
+                    int32 step = 1 << L;
+                    int32 j = r;
+                    while (j < FastHuff.FAST_SIZE) {
+                        fast[j] = entry;
+                        j = j + step;
+                    }
+                }
+            }
+            s = s + 1;
+        }
+
+        return heap FastHuff(#fast, #count, #symbol);
+    }
+}

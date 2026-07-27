@@ -1,0 +1,164 @@
+package dev.cajeta.codec.bench;
+
+import cajeta.lang.String;
+import cajeta.time.Clock;
+import dev.cajeta.codec.compress.Deflate;
+import dev.cajeta.codec.compress.DeflateStream;
+import dev.cajeta.codec.compress.InflateStream;
+
+/**
+ * Throughput benchmark for the DEFLATE/INFLATE hot paths (self-contained —
+ * generates a realistic, text-like payload in code, ~30% ratio). Reports MB/s
+ * for compress (`DeflateStream`), streaming inflate (`InflateStream`, the
+ * WebSocket path), and one-shot inflate (`Deflate.inflate`, the gzip/zlib
+ * path), and verifies each decode is byte-exact. Build `--opt=O3`.
+ */
+public final class CompressBench {
+
+    // Text-like payload: a small word dictionary emitted in xorshift order, so
+    // it carries real LZ matches AND Huffman entropy (like HTML/JSON/prose).
+    static #int8[] payload(int32 n) {
+        String[] w = {"the ", "quick ", "brown ", "fox ", "jumps ", "over ",
+            "a ", "lazy ", "dog ", "while ", "counting ", "numbers ", "and ",
+            "letters ", "in ", "streams ", "of ", "data ", "that ",
+            "compresses ", "well ", "like ", "real ", "text. ", "json ",
+            "html ", "content ", "here ", "now ", "then ", "again ", "yes "};
+        int8[] p = heap int8[n];
+        int64 st = (int64) 0x243F6A8885A308D3;
+        int32 off = 0;
+        while (off < n) {
+            st = st ^ (st << 13);
+            st = st ^ (st >> 7);
+            st = st ^ (st << 17);
+            int32 wi = (int32) ((st >> (int64) 40) & (int64) 31);
+            String word = w[wi];
+            int8[] wb = word.toBytes();
+            int32 wl = word.byteLength();
+            int32 j = 0;
+            while (j < wl && off < n) { p[off] = wb[j]; off = off + 1; j = j + 1; }
+        }
+        return #p;
+    }
+
+    static int64 nowMs() { return Clock.now().toEpochMilli(); }
+
+    static int64 mbps(int32 sz, int32 iters, int64 ms) {
+        return ((int64) sz * (int64) iters * (int64) 1000) / (ms * (int64) 1048576 + (int64) 1);
+    }
+
+    // Drain a stream fully into `acc`; return the byte count.
+    static int32 drainAll(InflateStream is, int8[] acc, int32 cap) {
+        int32 al = 0;
+        boolean go = true;
+        while (go) {
+            int8[] got = is.drain();
+            int32 gn = (int32) got.count();
+            if (gn == 0) { go = false; }
+            else {
+                int32 j = 0;
+                while (j < gn) { if (al < cap) { acc[al] = got[j]; al = al + 1; } j = j + 1; }
+            }
+        }
+        return al;
+    }
+
+    static boolean same(int8[] a, int8[] b, int32 n) {
+        int32 i = 0;
+        while (i < n) { if (a[i] != b[i]) { return false; } i = i + 1; }
+        return true;
+    }
+
+    public static int32 main() {
+        int32 sz = 131072;
+        int32 iters = 200;
+        int8[] data = CompressBench.payload(sz);
+
+        // --- compress across levels (DeflateStream: the WS echo path) ---
+        DeflateStream warm = heap DeflateStream();
+        warm.write(data, sz);
+        int8[] comp = warm.syncFlush();
+        int32 cn = (int32) comp.count();
+        System.stdout.println("payload={} bytes (level-6 compressed={}, {}%)",
+            sz, cn, (cn * 100) / sz);
+
+        int32[] levels = {1, 3, 6, 9};
+        int32 li = 0;
+        while (li < 4) {
+            int32 lvl = levels[li];
+            DeflateStream lz = heap DeflateStream(lvl);
+            lz.write(data, sz);
+            int8[] lc = lz.syncFlush();
+            int32 lcn = (int32) lc.count();
+            int64 t0 = CompressBench.nowMs();
+            int32 k = 0;
+            while (k < iters) {
+                DeflateStream ds = heap DeflateStream(lvl);
+                ds.write(data, sz);
+                int8[] c = ds.syncFlush();
+                k = k + 1;
+            }
+            int64 dms = CompressBench.nowMs() - t0;
+            System.stdout.println("  COMPRESS L{}      : {} ms, {} MB/s  ({} bytes, {}%)",
+                lvl, dms, CompressBench.mbps(sz, iters, dms), lcn, (lcn * 100) / sz);
+            li = li + 1;
+        }
+        // --- native one-shot compress (Deflate.deflate -> native zlib backend,
+        //     the gzip/zlib/content-coding path) — compare to raw zlib (Unit 6) ---
+        int32[] nlevels = {1, 6, 9};
+        int32 nli = 0;
+        while (nli < 3) {
+            int32 lvl = nlevels[nli];
+            int8[] nc0 = Deflate.deflate(data, (int64) sz, lvl);
+            int32 ncn = (int32) nc0.count();
+            int64 nt0 = CompressBench.nowMs();
+            int32 nk = 0;
+            while (nk < iters) {
+                int8[] nc = Deflate.deflate(data, (int64) sz, lvl);
+                nk = nk + 1;
+            }
+            int64 ndms = CompressBench.nowMs() - nt0;
+            System.stdout.println("  NATIVE COMPRESS L{} : {} ms, {} MB/s  ({} bytes, {}%)",
+                lvl, ndms, CompressBench.mbps(sz, iters, ndms), ncn, (ncn * 100) / sz);
+            nli = nli + 1;
+        }
+
+        int64 t0 = CompressBench.nowMs();
+        int32 k = 0;
+
+        // --- streaming inflate (InflateStream: the WS receive path) ---
+        int8[] marker = { (int8) 0x00, (int8) 0x00, (int8) 0xFF, (int8) 0xFF };
+        int8[] acc = heap int8[sz];
+        InflateStream chk = heap InflateStream();
+        chk.feed(comp, cn); chk.feed(marker, 4);
+        int32 dl = CompressBench.drainAll(chk, acc, sz);
+        boolean okS = dl == sz && CompressBench.same(acc, data, sz);
+        t0 = CompressBench.nowMs();
+        k = 0;
+        while (k < iters) {
+            InflateStream is = heap InflateStream();
+            is.feed(comp, cn); is.feed(marker, 4);
+            CompressBench.drainAll(is, acc, sz);
+            k = k + 1;
+        }
+        int64 sms = CompressBench.nowMs() - t0;
+        System.stdout.println("  INFLATE stream   : {} ms, {} MB/s (verify {})",
+            sms, CompressBench.mbps(sz, iters, sms), okS);
+
+        // --- one-shot ratio: dynamic-Huffman (deflate) vs fixed-only ---
+        int8[] whole = Deflate.deflate(data, (int64) sz);
+        int64 wn = whole.count();
+        int8[] wfix = Deflate.deflateFixed(data, (int64) sz, 6);
+        System.stdout.println("  ONE-SHOT ratio   : dynamic={} ({}%)  fixed={} ({}%)",
+            (int32) wn, ((int32) wn * 100) / sz,
+            (int32) wfix.count(), ((int32) wfix.count() * 100) / sz);
+        int8[] one = Deflate.inflate(whole, wn, (int64) sz);
+        boolean okO = (int32) one.count() == sz && CompressBench.same(one, data, sz);
+        t0 = CompressBench.nowMs();
+        k = 0;
+        while (k < iters) { int8[] d = Deflate.inflate(whole, wn, (int64) sz); k = k + 1; }
+        int64 oms = CompressBench.nowMs() - t0;
+        System.stdout.println("  NATIVE INFLATE one-shot : {} ms, {} MB/s (verify {})",
+            oms, CompressBench.mbps(sz, iters, oms), okO);
+        return 0;
+    }
+}

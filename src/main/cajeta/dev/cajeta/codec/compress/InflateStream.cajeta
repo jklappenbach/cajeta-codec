@@ -38,8 +38,14 @@ public final class InflateStream {
     int64 inLen;
     /** Committed bit position within `inbuf` (start of the next block). */
     int64 ckBit;
-    /** Working bit cursor of the current trial decode. */
+    /** Working bit cursor of the current trial decode (logical position). */
     int64 bitpos;
+    /** Bit accumulator (LSB = next unread bit) prefetched ahead of `bitpos`. */
+    uint64 bitAcc;
+    int32 bitAccN;
+    /** Next byte to load into `bitAcc`, and bits to drop from the first load. */
+    int64 accByte;
+    int32 accSkew;
     /** Output window: committed + trial bytes; `win[0]` is `base` absolute. */
     int8[] win;
     int64 wp;
@@ -56,6 +62,10 @@ public final class InflateStream {
         this.inLen = (int64) 0;
         this.ckBit = (int64) 0;
         this.bitpos = (int64) 0;
+        this.bitAcc = (uint64) 0;
+        this.bitAccN = 0;
+        this.accByte = (int64) 0;
+        this.accSkew = 0;
         int8[] wb = heap int8[65536];
         this.win = #wb;
         this.wp = (int64) 0;
@@ -129,6 +139,7 @@ public final class InflateStream {
         boolean more = true;
         while (more && !this.done) {
             this.bitpos = this.ckBit;
+            this.sReset();
             this.wp = this.committedWp;
             try {
                 int32 bfinal = this.sGetBits(1);
@@ -192,33 +203,91 @@ public final class InflateStream {
     // resumable InflateNeedMore instead of the terminal DeflateException,
     // and output goes through winEnsure/wp.)
 
-    int32 sGetBits(int32 cnt) {
-        int64 bp = this.bitpos;
-        int64 limit = this.inLen << 3;
-        int32 val = 0;
-        int32 i = 0;
-        while (i < cnt) {
-            if (bp >= limit) {
-                throw heap InflateNeedMore(bp >> 3);
+    /** Re-sync the bit accumulator to the logical cursor `bitpos`. */
+    void sReset() {
+        this.accByte = this.bitpos >> 3;
+        this.accSkew = (int32) (this.bitpos & (int64) 7);
+        this.bitAcc = (uint64) 0;
+        this.bitAccN = 0;
+    }
+
+    /** Fill the accumulator to `>= need` bits; raise resumable NeedMore at EOF. */
+    @Inline
+    void sRefill(int32 need) {
+        while (this.bitAccN < need) {
+            if (this.accByte >= this.inLen) {
+                throw heap InflateNeedMore(this.accByte);
             }
-            int64 byteIdx = bp >> 3;
-            int32 bitIdx = (int32) (bp & (int64) 7);
-            int32 byteVal = ((int32) this.inbuf[byteIdx]) & 0xFF;
-            int32 bit = (byteVal >> bitIdx) & 1;
-            val = val | (bit << i);
-            bp = bp + 1;
-            i = i + 1;
+            uint64 b = (uint64) (((int32) this.inbuf[this.accByte]) & 0xFF);
+            this.accByte = this.accByte + 1;
+            if (this.accSkew > 0) {
+                int32 avail = 8 - this.accSkew;
+                b = b >> (uint64) this.accSkew;
+                this.accSkew = 0;
+                this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                this.bitAccN = this.bitAccN + avail;
+            } else {
+                this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                this.bitAccN = this.bitAccN + 8;
+            }
         }
-        this.bitpos = bp;
+    }
+
+    /** Fill up to `need` bits but stop (no throw) if the input is exhausted. */
+    @Inline
+    void sTryRefill(int32 need) {
+        while (this.bitAccN < need && this.accByte < this.inLen) {
+            uint64 b = (uint64) (((int32) this.inbuf[this.accByte]) & 0xFF);
+            this.accByte = this.accByte + 1;
+            if (this.accSkew > 0) {
+                int32 avail = 8 - this.accSkew;
+                b = b >> (uint64) this.accSkew;
+                this.accSkew = 0;
+                this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                this.bitAccN = this.bitAccN + avail;
+            } else {
+                this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                this.bitAccN = this.bitAccN + 8;
+            }
+        }
+    }
+
+    @Inline
+    int32 sGetBits(int32 cnt) {
+        if (cnt == 0) { return 0; }
+        this.sRefill(cnt);
+        uint64 mask = ((uint64) 1 << (uint64) cnt) - (uint64) 1;
+        int32 val = (int32) (this.bitAcc & mask);
+        this.bitAcc = this.bitAcc >> (uint64) cnt;
+        this.bitAccN = this.bitAccN - cnt;
+        this.bitpos = this.bitpos + (int64) cnt;
         return val;
     }
 
-    int32 sDecodeSym(HuffTable t) {
+    @Inline
+    int32 sDecodeSym(FastHuff t) {
+        this.sTryRefill(FastHuff.FAST_BITS);
+        if (this.bitAccN >= FastHuff.FAST_BITS) {
+            int32 idx = (int32) (this.bitAcc & (uint64) FastHuff.FAST_MASK);
+            int32 e = t.fast[idx];
+            int32 fl = e >> 16;
+            if (fl > 0) {
+                this.bitAcc = this.bitAcc >> (uint64) fl;
+                this.bitAccN = this.bitAccN - fl;
+                this.bitpos = this.bitpos + (int64) fl;
+                return e & 0xFFFF;
+            }
+        }
+        return this.sDecodeCanon(t);
+    }
+
+    // Canonical per-bit walk — the fallback for codes > FAST_BITS and for the
+    // last symbol(s) before the input runs out (where NeedMore must be exact).
+    int32 sDecodeCanon(FastHuff t) {
         int32 code = 0;
         int32 first = 0;
         int32 index = 0;
         int32 len = 1;
-        int32 result = -1;
         boolean go = true;
         while (go) {
             if (len > 15) {
@@ -230,17 +299,14 @@ public final class InflateStream {
             int32 cnt = t.count[len];
             int32 diff = code - first;
             if (diff < cnt) {
-                int32 si = index + diff;
-                result = t.symbol[si];
-                go = false;
-            } else {
-                index = index + cnt;
-                first = (first + cnt) << 1;
-                code = code << 1;
-                len = len + 1;
+                return t.symbol[index + diff];
             }
+            index = index + cnt;
+            first = (first + cnt) << 1;
+            code = code << 1;
+            len = len + 1;
         }
-        return result;
+        return -1;
     }
 
     void sStored() {
@@ -277,52 +343,68 @@ public final class InflateStream {
         this.bitpos = (bp + (int64) len) << 3;
     }
 
-    void sHuffman(HuffTable litTable, HuffTable distTable) {
+    void sHuffman(FastHuff litTable, FastHuff distTable) {
         int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
         int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
         int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
         int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
+        // Window capacity, refreshed only when the margin runs low — so the
+        // per-symbol hot path is a single compare, not a winEnsure call.
+        int64 winCap = (int64) this.win.count();
+        int8[] w = this.win;
         boolean go = true;
         while (go) {
+            // A max match is 258 bytes; keep 300 of headroom so a literal or a
+            // match writes without any per-op bounds call.
+            if (this.wp + (int64) 300 > winCap) {
+                this.winEnsure(this.wp + (int64) 300);
+                winCap = (int64) this.win.count();
+                w = this.win;
+            }
             int32 sym = this.sDecodeSym(litTable);
-            if (sym == 256) { go = false; }
-            else if (sym >= 0 && sym < 256) {
-                this.winEnsure(this.wp + (int64) 1);
-                this.win[this.wp] = (int8) sym;
+            if (sym < 256) {
+                if (sym < 0) {
+                    throw heap DeflateException(
+                        "invalid literal/length symbol", this.bitpos >> 3);
+                }
+                w[this.wp] = (int8) sym;
                 this.wp = this.wp + 1;
-            } else if (sym >= 257 && sym <= 285) {
+            } else if (sym == 256) {
+                go = false;
+            } else if (sym <= 285) {
                 int32 li = sym - 257;
-                int32 leBits = lengthExtra[li];
-                int32 lenE = this.sGetBits(leBits);
+                int32 lenE = this.sGetBits(lengthExtra[li]);
                 int32 len = lengthBase[li] + lenE;
                 int32 dsym = this.sDecodeSym(distTable);
                 if (dsym < 0 || dsym > 29) {
                     throw heap DeflateException(
                         "invalid distance symbol", this.bitpos >> 3);
                 }
-                int32 deBits = distExtra[dsym];
-                int32 distE = this.sGetBits(deBits);
+                int32 distE = this.sGetBits(distExtra[dsym]);
                 int32 dist = distBase[dsym] + distE;
-                // The reach check is against TOTAL output (absolute),
-                // not this window's fill — context carried from prior
-                // feeds counts, which is the whole point.
+                // Reach check against TOTAL output (absolute), so context
+                // carried from prior feeds counts — the point of the stream.
                 if ((int64) dist > this.base + this.wp) {
                     throw heap DeflateException(
                         "back-reference distance exceeds output produced",
                         this.bitpos >> 3);
                 }
-                this.winEnsure(this.wp + (int64) len);
                 int64 op = this.wp;
                 int64 from = op - (int64) dist;
-                int32 c = 0;
-                while (c < len) {
-                    int8 v = this.win[from];
-                    this.win[op] = v;
-                    op = op + 1;
-                    from = from + 1;
-                    c = c + 1;
+                if (dist >= 8) {
+                    // dist>=8 → each forward 8-byte chunk reads only bytes
+                    // already written, so an 8-wide copy is safe even when the
+                    // match overlaps the output (a common RLE-ish case).
+                    InflateStream.blit(w, op, w, from, (int64) len);
+                } else {
+                    // Short-distance overlap (dist<8) → byte-by-byte propagation.
+                    int32 c = 0;
+                    while (c < len) {
+                        w[op + (int64) c] = w[from + (int64) c];
+                        c = c + 1;
+                    }
                 }
-                this.wp = op;
+                this.wp = op + (int64) len;
             } else {
                 throw heap DeflateException(
                     "invalid literal/length symbol", this.bitpos >> 3);
@@ -337,11 +419,11 @@ public final class InflateStream {
         while (i < 256) { litLengths[i] = 9; i = i + 1; }
         while (i < 280) { litLengths[i] = 7; i = i + 1; }
         while (i < 288) { litLengths[i] = 8; i = i + 1; }
-        HuffTable litTable = Deflate.build(litLengths, 288, 288);
+        FastHuff litTable = FastHuff.build(litLengths, 288, 288);
         int32[] distLengths = heap int32[30];
         int32 d = 0;
         while (d < 30) { distLengths[d] = 5; d = d + 1; }
-        HuffTable distTable = Deflate.build(distLengths, 30, 30);
+        FastHuff distTable = FastHuff.build(distLengths, 30, 30);
         this.sHuffman(litTable, distTable);
     }
 
@@ -361,7 +443,7 @@ public final class InflateStream {
             clLengths[pos] = v;
             i = i + 1;
         }
-        HuffTable clTable = Deflate.build(clLengths, 19, 19);
+        FastHuff clTable = FastHuff.build(clLengths, 19, 19);
 
         int32 nsym = hlit + hdist;
         int32[] lengths = heap int32[320];
@@ -424,9 +506,29 @@ public final class InflateStream {
         }
         while (j < 30) { distLengths[j] = 0; j = j + 1; }
 
-        HuffTable litTable = Deflate.build(litLengths, 288, 288);
-        HuffTable distTable = Deflate.build(distLengths, 30, 30);
+        FastHuff litTable = FastHuff.build(litLengths, 288, 288);
+        FastHuff distTable = FastHuff.build(distLengths, 30, 30);
         this.sHuffman(litTable, distTable);
+    }
+
+    // ----- bulk copy (8-byte wide, scalar tail) ---------------------------
+
+    /**
+     * Copy `len` bytes `src[s .. s+len)` → `dst[d .. d+len)` eight at a time
+     * via the wide load/store intrinsics (the LZ77 back-reference primitive).
+     * The 8-byte window never exceeds `len`, so neither buffer is overrun.
+     */
+    @Inline
+    static void blit(int8[] dst, int64 d, int8[] src, int64 s, int64 len) {
+        int64 k = (int64) 0;
+        while (k + (int64) 8 <= len) {
+            Cajeta.storeU64(dst, d + k, Cajeta.loadU64(src, s + k));
+            k = k + (int64) 8;
+        }
+        while (k < len) {
+            dst[d + k] = src[s + k];
+            k = k + (int64) 1;
+        }
     }
 
     // ----- growth ----------------------------------------------------------

@@ -11,4 +11,9 @@ public final class TestMain {
     public static int32 run() {
         return Runner.runAll();
     }
+
+    /** Program entry for a manually-built test binary (`--emit=exe`). */
+    public static int32 main() {
+        return Runner.runAll();
+    }
 }

@@ -1,0 +1,42 @@
+package codectour;
+
+import cajeta.lang.String;
+
+// Base class for every demo in the codec tour. Each demo extends DemoClass and
+// overrides execute() to walk one codec's API with worked, self-checking
+// examples. CodecTour.main() runs one instance of each, then turns any failed
+// check() into a nonzero exit code — so the tour doubles as a smoke test and
+// can't silently rot as the APIs evolve.
+//
+// (Cajeta has no `abstract` keyword yet, so execute() lands as an empty
+// concrete method that every subclass overrides.)
+public class DemoClass {
+
+    public static int32 checks = 0;
+    public static int32 failures = 0;
+
+    public void execute() {
+    }
+
+    // The tour's assertion: quiet when it holds, loud (and counted) when it
+    // doesn't. Demos verify their own output instead of only printing it.
+    public void check(boolean cond, String what) {
+        DemoClass.checks = DemoClass.checks + 1;
+        if (!cond) {
+            DemoClass.failures = DemoClass.failures + 1;
+            System.stdout.println("  FAIL: " + what);
+        }
+    }
+
+    // Byte-for-byte equality of two buffers (both borrowed).
+    public boolean sameBytes(int8[] a, int8[] b) {
+        if (a.count() != b.count()) { return false; }
+        int32 n = (int32) a.count();
+        int32 i = 0;
+        while (i < n) {
+            if (a[i] != b[i]) { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+}

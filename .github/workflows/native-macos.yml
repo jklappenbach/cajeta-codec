@@ -1,0 +1,80 @@
+# macOS native zlib backend — the two targets the Linux CI/dev box can't build
+# (Apple's SDK is not apt-installable and its license restricts use to Apple
+# hardware). A hosted macOS runner already has Xcode + the SDK, so it closes
+# plan Unit 4's 4.3.1 to 6/6.
+#
+# One Apple-silicon runner cross-builds BOTH slices from a single SDK:
+#   macos-arm64  (native)     via  clang -arch arm64
+#   macos-x64    (cross)      via  clang -arch x86_64
+# fed to native/cross-build.sh through its CC_<platform> overrides. The job
+# fails if either archive is missing or carries the wrong Mach-O arch.
+#
+# (A matrix over macos-14 + macos-13 would build each slice on its native arch,
+# but one runner produces valid Mach-O for both and halves the macOS minutes.)
+#
+# Triggers are path-scoped so macOS minutes are only spent when the native
+# backend changes, plus on-demand via workflow_dispatch.
+
+name: native-macos
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-macos.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-macos.yml'
+
+jobs:
+  build:
+    name: build + verify (macos-arm64 + macos-x64)
+    runs-on: macos-14   # Apple silicon; ships Xcode + the macOS SDK
+    steps:
+      - name: Checkout cajeta-codec
+        uses: actions/checkout@v4
+
+      - name: Show toolchain + SDK
+        run: |
+          clang --version
+          echo "SDK: $(xcrun --show-sdk-path)"
+
+      - name: Cross-build the native zlib archives (arm64 + x86_64)
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --show-sdk-path)"
+          export CC_macos_arm64="clang -arch arm64  -isysroot $SDK"
+          export CC_macos_x64="clang -arch x86_64 -isysroot $SDK"
+          ./native/cross-build.sh
+
+      - name: Verify both archives exist with the correct Mach-O arch
+        run: |
+          set -euo pipefail
+          fail=0
+          check() {   # $1=platform  $2=expected arch substring
+            local a="native/$1/libcajeta_zlib.a"
+            if [ ! -f "$a" ]; then echo "MISSING: $a"; fail=1; return; fi
+            ar p "$a" crc32.o > /tmp/m.o
+            local desc; desc="$(file /tmp/m.o)"
+            echo "$1: $desc"
+            case "$desc" in
+              *Mach-O*"$2"*) ;;
+              *) echo "  WRONG ARCH (expected Mach-O $2)"; fail=1 ;;
+            esac
+          }
+          check macos-arm64 arm64
+          check macos-x64   x86_64
+          exit $fail
+
+      - name: Upload macOS archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: libcajeta_zlib-macos
+          path: |
+            native/macos-arm64/libcajeta_zlib.a
+            native/macos-x64/libcajeta_zlib.a
+          if-no-files-found: error

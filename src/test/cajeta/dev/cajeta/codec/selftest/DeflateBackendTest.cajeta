@@ -1,0 +1,204 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.compress.DeflateBackend;
+import dev.cajeta.codec.compress.Deflate;
+import dev.cajeta.codec.compress.Gzip;
+import dev.cajeta.codec.compress.Zlib;
+
+/**
+ * Backend selector (unit 3) — differential parity between the native zlib
+ * backend and the pure-cajeta fallback. Every corpus case (text, binary,
+ * empty, incompressible, repetitive, large) must round-trip byte-exact under
+ * **both** backends, and each backend's output must decode under the other
+ * (cross-backend interop). One process drives both via
+ * [`DeflateBackend.forceFallback`](../compress/DeflateBackend.cajeta).
+ *
+ * The selector is left in native mode (`forceFallback(false)`) at the end of
+ * every helper so later tests in the run use native.
+ */
+public class DeflateBackendTest {
+
+    public DeflateBackendTest() {
+        return;
+    }
+
+    // ---- payload generators ----
+
+    // Cyclic ASCII text — compresses well, exercises LZ77 matches.
+    static #int8[] textPayload(int64 n) {
+        int8[] b = heap int8[n];
+        int64 i = (int64) 0;
+        while (i < n) {
+            int64 m = i % (int64) 43;
+            b[i] = (int8) ((int32) 32 + (int32) (m * (int64) 2 % (int64) 90));
+            i = i + 1;
+        }
+        return #b;
+    }
+
+    // One repeated byte — maximally compressible.
+    static #int8[] repetitivePayload(int64 n) {
+        int8[] b = heap int8[n];
+        int64 i = (int64) 0;
+        while (i < n) { b[i] = (int8) 0x41; i = i + 1; }
+        return #b;
+    }
+
+    // High-entropy LCG stream — near-incompressible. State kept under 2^31 and
+    // the multiplier under 2^31 so the product stays within int64 (cajeta traps
+    // signed overflow).
+    static #int8[] incompressiblePayload(int64 n) {
+        int8[] b = heap int8[n];
+        int64 state = (int64) 88172645;
+        int64 i = (int64) 0;
+        while (i < n) {
+            state = (state * (int64) 1103515245 + (int64) 12345) & (int64) 0x7FFFFFFF;
+            b[i] = (int8) ((state >> 15) & (int64) 0xFF);
+            i = i + 1;
+        }
+        return #b;
+    }
+
+    static boolean sameBytes(int8[] a, int8[] b, int64 n) {
+        if ((int64) a.count() < n) { return false; }
+        if ((int64) b.count() < n) { return false; }
+        int64 i = (int64) 0;
+        while (i < n) {
+            if (a[i] != b[i]) { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    // ---- per-format both-backend + cross-interop checks ----
+    // Each computes under both backends, restores native mode, returns whether
+    // every round-trip and both cross-backend decodes recovered the input.
+
+    static boolean checkRaw(int8[] in, int64 n) {
+        DeflateBackend.forceFallback(true);
+        int8[] cajC = Deflate.deflate(in, n, 6);
+        int8[] cajO = Deflate.inflate(cajC, (int64) cajC.count(), n);
+        DeflateBackend.forceFallback(false);
+        int8[] natC = Deflate.deflate(in, n, 6);
+        int8[] natO = Deflate.inflate(natC, (int64) natC.count(), n);
+        // native decodes the cajeta-produced stream
+        int8[] natDecCaj = Deflate.inflate(cajC, (int64) cajC.count(), n);
+        // cajeta decodes the native-produced stream
+        DeflateBackend.forceFallback(true);
+        int8[] cajDecNat = Deflate.inflate(natC, (int64) natC.count(), n);
+        DeflateBackend.forceFallback(false);
+        boolean ok = DeflateBackendTest.sameBytes(in, cajO, n)
+            && DeflateBackendTest.sameBytes(in, natO, n)
+            && DeflateBackendTest.sameBytes(in, natDecCaj, n)
+            && DeflateBackendTest.sameBytes(in, cajDecNat, n);
+        return ok;
+    }
+
+    static boolean checkZlib(int8[] in, int64 n) {
+        DeflateBackend.forceFallback(true);
+        int8[] cajC = Zlib.compress(in, n, 6);
+        int8[] cajO = Zlib.decompress(cajC, (int64) cajC.count(), n);
+        DeflateBackend.forceFallback(false);
+        int8[] natC = Zlib.compress(in, n, 6);
+        int8[] natO = Zlib.decompress(natC, (int64) natC.count(), n);
+        int8[] natDecCaj = Zlib.decompress(cajC, (int64) cajC.count(), n);
+        DeflateBackend.forceFallback(true);
+        int8[] cajDecNat = Zlib.decompress(natC, (int64) natC.count(), n);
+        DeflateBackend.forceFallback(false);
+        boolean ok = DeflateBackendTest.sameBytes(in, cajO, n)
+            && DeflateBackendTest.sameBytes(in, natO, n)
+            && DeflateBackendTest.sameBytes(in, natDecCaj, n)
+            && DeflateBackendTest.sameBytes(in, cajDecNat, n);
+        return ok;
+    }
+
+    static boolean checkGzip(int8[] in, int64 n) {
+        DeflateBackend.forceFallback(true);
+        int8[] cajC = Gzip.compress(in, n, 6);
+        int8[] cajO = Gzip.decompress(cajC, (int64) cajC.count());
+        DeflateBackend.forceFallback(false);
+        int8[] natC = Gzip.compress(in, n, 6);
+        int8[] natO = Gzip.decompress(natC, (int64) natC.count());
+        int8[] natDecCaj = Gzip.decompress(cajC, (int64) cajC.count());
+        DeflateBackend.forceFallback(true);
+        int8[] cajDecNat = Gzip.decompress(natC, (int64) natC.count());
+        DeflateBackend.forceFallback(false);
+        boolean ok = DeflateBackendTest.sameBytes(in, cajO, n)
+            && DeflateBackendTest.sameBytes(in, natO, n)
+            && DeflateBackendTest.sameBytes(in, natDecCaj, n)
+            && DeflateBackendTest.sameBytes(in, cajDecNat, n);
+        return ok;
+    }
+
+    static boolean checkAll(int8[] in, int64 n) {
+        boolean r = DeflateBackendTest.checkRaw(in, n);
+        boolean z = DeflateBackendTest.checkZlib(in, n);
+        boolean g = DeflateBackendTest.checkGzip(in, n);
+        return r && z && g;
+    }
+
+    // ---- corpus cases (spec 3.1.1 / 5.2) ----
+
+    @Test
+    public void textParityBothBackends() {
+        int64 n = (int64) 4000;
+        int8[] in = DeflateBackendTest.textPayload(n);
+        Assert.isTrue(DeflateBackendTest.checkAll(in, n));
+        return;
+    }
+
+    @Test
+    public void repetitiveParityBothBackends() {
+        int64 n = (int64) 4000;
+        int8[] in = DeflateBackendTest.repetitivePayload(n);
+        Assert.isTrue(DeflateBackendTest.checkAll(in, n));
+        return;
+    }
+
+    @Test
+    public void incompressibleParityBothBackends() {
+        int64 n = (int64) 4000;
+        int8[] in = DeflateBackendTest.incompressiblePayload(n);
+        Assert.isTrue(DeflateBackendTest.checkAll(in, n));
+        return;
+    }
+
+    @Test
+    public void emptyParityBothBackends() {
+        int8[] in = heap int8[0];
+        Assert.isTrue(DeflateBackendTest.checkAll(in, (int64) 0));
+        return;
+    }
+
+    @Test
+    public void largeParityBothBackends() {
+        int64 n = (int64) 40000;
+        int8[] in = DeflateBackendTest.textPayload(n);
+        Assert.isTrue(DeflateBackendTest.checkAll(in, n));
+        return;
+    }
+
+    @Test
+    public void selectorSwitchesBackends() {
+        // Forcing the fallback must actually route to a different encoder:
+        // on compressible data the two backends' byte streams differ, yet
+        // both round-trip. (Proves the selector isn't a no-op.)
+        int64 n = (int64) 2000;
+        int8[] in = DeflateBackendTest.textPayload(n);
+        DeflateBackend.forceFallback(true);
+        int8[] cajC = Deflate.deflate(in, n, 6);
+        DeflateBackend.forceFallback(false);
+        int8[] natC = Deflate.deflate(in, n, 6);
+        boolean differ = (int64) cajC.count() != (int64) natC.count();
+        if (!differ) {
+            int64 m = (int64) cajC.count();
+            int64 i = (int64) 0;
+            while (i < m) {
+                if (cajC[i] != natC[i]) { differ = true; i = m; } else { i = i + 1; }
+            }
+        }
+        Assert.isTrue(differ);
+        return;
+    }
+}

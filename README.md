@@ -16,15 +16,20 @@ linking):
 | `dev.cajeta.codec.orc`      | Apache ORC       | Phase 7 — planned |
 
 Plus the columnar tier (`XFile` / `ColumnVector<T>`) and the compression codecs
-(`Compressor` / `Decompressor`).
+(`Compressor` / `Decompressor`). The DEFLATE / gzip / zlib family has a native
+[zlib](native/) fast path with a pure-cajeta fallback (see **License** below).
 
 ## Principles
 
-- **All our own code — no third-party libraries.** Completeness is carried by
-  *our implementation + a conformance corpus (golden fixtures generated offline
-  by reference tools, never linked) + fail-loud*: an unimplemented feature
-  raises `UnsupportedFeatureException` naming the encoding/type/version, never a
-  silent miscode or partial read.
+- **Our own code is the reference — one vendored exception.** Every format
+  implementation is ours; completeness is carried by *our implementation + a
+  conformance corpus (golden fixtures generated offline by reference tools,
+  never linked) + fail-loud*: an unimplemented feature raises
+  `UnsupportedFeatureException` naming the encoding/type/version, never a silent
+  miscode or partial read. The sole third-party component is **vendored zlib**,
+  statically linked as the optional native DEFLATE backend for zlib-class
+  throughput; the pure-cajeta encoder/decoder remains as the transparent
+  fallback, so the guarantee holds functionally with or without the native lib.
 - **Read *and* write in v1** — writers ship with readers.
 - **SIMD the structural scan** (varint/tag index) and the columnar integer
   encodings; never SIMD the LZ match-copy chain.
@@ -60,3 +65,14 @@ The codec framework spec lives at `docs/` here and in the toolchain at
 (`cajeta.wire.{Encoder, SchemaEncoder, StreamingEncoder, Compressor,
 Decompressor}`) and the JSON/CSV reference implementations are in the core
 stdlib.
+
+## License
+
+`dev.cajeta.codec` is **Apache-2.0**. It has one mixed-license surface: the
+optional native DEFLATE backend statically links **vendored zlib 1.3.1**
+(`native/zlib/`), which is under the permissive **zlib License** — static
+linking is allowed with the notice retained. The full notice and the exact
+vendored scope are in [`THIRD-PARTY.md`](THIRD-PARTY.md); per-target builds are
+described in [`native/CROSS-BUILD.md`](native/CROSS-BUILD.md). The native path is
+a drop-in speed-up: with the artifact unlinked, the pure-cajeta backend (all
+Apache-2.0) serves the same public API.

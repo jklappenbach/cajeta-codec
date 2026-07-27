@@ -5,12 +5,23 @@ package dev.cajeta.codec.compress;
  * gzip/zlib. A DEFLATE stream is a series of blocks (BFINAL + BTYPE): **stored**
  * (uncompressed), **fixed-Huffman**, or **dynamic-Huffman**. Symbols are LZ77
  * literal/length/distance codes entropy-coded with canonical Huffman; bits are
- * packed LSB-first. Inflation uses the canonical puff.c decode structure
- * (per-length `count` + sorted `symbol` arrays).
+ * packed LSB-first.
  *
- * The Huffman/LZ chain is inherently bit-serial — not a SIMD target (the codec's
- * SIMD wins live in the structural scanners, not here). zstd is parked to the
- * native-dependency subsystem (P-ZSTD-NATIVE).
+ * ## Throughput
+ *
+ * The Huffman/LZ *bit* chain is serial, but the hot paths are fast:
+ *   - **Inflate** decodes symbols through a [`FastHuff`](FastHuff.cajeta)
+ *     multi-bit root table (one lookup per code, not a per-bit tree walk) fed
+ *     from a 64-bit bit accumulator refilled in bulk, and copies LZ77
+ *     back-references 8 bytes at a time via the wide `Cajeta.loadU64`/`storeU64`
+ *     intrinsics (`blit`) — ~15× the old per-bit decoder.
+ *   - **Deflate** extends match candidates 8 bytes per step (wide load + XOR),
+ *     prunes the hash chain with zlib's byte-at-`bestLen` test, and stops at a
+ *     `nice_length` match.
+ *
+ * That wide load/store IS the CPU-SIMD path (a single stream cannot be
+ * GPU-parallelized — a batch of independent streams could, a future offload).
+ * zstd is parked to the native-dependency subsystem (P-ZSTD-NATIVE).
  */
 public final class Deflate {
     int8[] src;
@@ -18,6 +29,11 @@ public final class Deflate {
     int64 bitpos;
     int8[] out;
     int64 op;
+    // Bit accumulator (LSB = next unread bit), prefetched ahead of `bitpos`.
+    uint64 bitAcc;
+    int32 bitAccN;
+    int64 accByte;
+    int32 accSkew;
 
     public Deflate(int8[] src, int64 n, int64 destLen) {
         this.src = src;
@@ -26,6 +42,10 @@ public final class Deflate {
         int8[] ob = heap int8[destLen];
         this.out = #ob;
         this.op = (int64) 0;
+        this.bitAcc = (uint64) 0;
+        this.bitAccN = 0;
+        this.accByte = (int64) 0;
+        this.accSkew = 0;
     }
 
     // Ensure `out` can hold `need` bytes; doubles + copies when short. Lets a
@@ -34,7 +54,11 @@ public final class Deflate {
     void ensure(int64 need) {
         int64 cap = (int64) this.out.count();
         if (need <= cap) { return; }
+        // Floor the base to 1 before doubling: a zero-capacity buffer (destLen
+        // 0, e.g. `inflate(stream, n, 0)` / `Zlib.decompress(.., 0)`) would
+        // otherwise loop forever here — 0*2 stays 0 and never reaches `need`.
         int64 newcap = cap * (int64) 2;
+        if (newcap < (int64) 1) { newcap = (int64) 1; }
         while (newcap < need) { newcap = newcap * (int64) 2; }
         int8[] nb = heap int8[newcap];
         int64 oldop = this.op;
@@ -65,39 +89,90 @@ public final class Deflate {
     // Reading past the input is a MALFORMED stream (truncation), reported as
     // a catchable DeflateException — never an array-bounds trap: an HTTP peer
     // can hand this decoder a cut-off body at any bit.
-    int32 getBits(int32 cnt) {
-        int64 bp = this.bitpos;
-        int8[] s = this.src;
-        int64 limit = this.n << 3;
-        int32 val = 0;
-        int32 i = 0;
-        while (i < cnt) {
-            if (bp >= limit) {
+    // Re-sync the bit accumulator to the logical cursor `bitpos` (called at
+    // each block boundary, since a stored block byte-aligns and reads direct).
+    void reset() {
+        this.accByte = this.bitpos >> 3;
+        this.accSkew = (int32) (this.bitpos & (int64) 7);
+        this.bitAcc = (uint64) 0;
+        this.bitAccN = 0;
+    }
+
+    @Inline
+    void refill(int32 need) {
+        while (this.bitAccN < need) {
+            if (this.accByte >= this.n) {
                 throw heap DeflateException(
                     "unexpected end of DEFLATE input", this.n);
             }
-            int64 byteIdx = bp >> 3;
-            int32 bitIdx = (int32) (bp & (int64) 7);
-            int32 byteVal = ((int32) s[byteIdx]) & 0xFF;
-            int32 bit = (byteVal >> bitIdx) & 1;
-            val = val | (bit << i);
-            bp = bp + 1;
-            i = i + 1;
+            uint64 b = (uint64) (((int32) this.src[this.accByte]) & 0xFF);
+            this.accByte = this.accByte + 1;
+            if (this.accSkew > 0) {
+                int32 avail = 8 - this.accSkew;
+                b = b >> (uint64) this.accSkew;
+                this.accSkew = 0;
+                this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                this.bitAccN = this.bitAccN + avail;
+            } else {
+                this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                this.bitAccN = this.bitAccN + 8;
+            }
         }
-        this.bitpos = bp;
+    }
+
+    @Inline
+    int32 getBits(int32 cnt) {
+        if (cnt == 0) { return 0; }
+        this.refill(cnt);
+        uint64 mask = ((uint64) 1 << (uint64) cnt) - (uint64) 1;
+        int32 val = (int32) (this.bitAcc & mask);
+        this.bitAcc = this.bitAcc >> (uint64) cnt;
+        this.bitAccN = this.bitAccN - cnt;
+        this.bitpos = this.bitpos + (int64) cnt;
         return val;
     }
 
-    // Canonical Huffman decode (puff.c): pull bits MSB-into-code until matched.
-    // A code longer than 15 bits matches nothing in any DEFLATE table — the
-    // stream is malformed; raise rather than return a sentinel a caller could
-    // mistake for end-of-block (silent partial output was the old failure).
-    int32 decodeSym(HuffTable t) {
+    // Fast Huffman decode: one root-table lookup for codes <= FAST_BITS, else
+    // the canonical per-bit walk.
+    @Inline
+    int32 decodeSym(FastHuff t) {
+        if (this.bitAccN < FastHuff.FAST_BITS) {
+            // Best-effort refill without throwing past EOF (the last few
+            // symbols; the canonical fallback raises precisely if truncated).
+            while (this.bitAccN < FastHuff.FAST_BITS && this.accByte < this.n) {
+                uint64 b = (uint64) (((int32) this.src[this.accByte]) & 0xFF);
+                this.accByte = this.accByte + 1;
+                if (this.accSkew > 0) {
+                    int32 avail = 8 - this.accSkew;
+                    b = b >> (uint64) this.accSkew;
+                    this.accSkew = 0;
+                    this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                    this.bitAccN = this.bitAccN + avail;
+                } else {
+                    this.bitAcc = this.bitAcc | (b << (uint64) this.bitAccN);
+                    this.bitAccN = this.bitAccN + 8;
+                }
+            }
+        }
+        if (this.bitAccN >= FastHuff.FAST_BITS) {
+            int32 idx = (int32) (this.bitAcc & (uint64) FastHuff.FAST_MASK);
+            int32 e = t.fast[idx];
+            int32 fl = e >> 16;
+            if (fl > 0) {
+                this.bitAcc = this.bitAcc >> (uint64) fl;
+                this.bitAccN = this.bitAccN - fl;
+                this.bitpos = this.bitpos + (int64) fl;
+                return e & 0xFFFF;
+            }
+        }
+        return this.decodeCanon(t);
+    }
+
+    int32 decodeCanon(FastHuff t) {
         int32 code = 0;
         int32 first = 0;
         int32 index = 0;
         int32 len = 1;
-        int32 result = -1;
         boolean go = true;
         while (go) {
             if (len > 15) {
@@ -109,17 +184,44 @@ public final class Deflate {
             int32 cnt = t.count[len];
             int32 diff = code - first;
             if (diff < cnt) {
-                int32 si = index + diff;
-                result = t.symbol[si];
-                go = false;
-            } else {
-                index = index + cnt;
-                first = (first + cnt) << 1;
-                code = code << 1;
-                len = len + 1;
+                return t.symbol[index + diff];
             }
+            index = index + cnt;
+            first = (first + cnt) << 1;
+            code = code << 1;
+            len = len + 1;
         }
-        return result;
+        return -1;
+    }
+
+    // DEFLATE match-finder hash of the 3 bytes at a position. A multiplicative
+    // (Fibonacci) hash — `(v * 2654435761) >> (32 - 15)` on the low 32 bits of
+    // the product — avalanches the 24-bit trigram across the 15-bit table far
+    // better than the old `(c0<<10)^(c1<<5)^c2`, whose fields overlapped
+    // heavily for ASCII text and clustered distinct trigrams into the same
+    // buckets (spurious chain entries). Same 3 input bytes → same match
+    // semantics, just shorter chains of genuinely-relevant candidates. (On
+    // *exact-recurrence* data — the same bytes repeating — the chains are
+    // inherently deep and no hash shortens them; the win is on diverse text.)
+    @Inline
+    static int32 hash3(int32 c0, int32 c1, int32 c2) {
+        int32 v = c0 | (c1 << 8) | (c2 << 16);
+        int64 p = ((int64) v * (int64) 2654435761) & (int64) 0xFFFFFFFF;
+        return (int32) (p >> (int64) 17);
+    }
+
+    // 8-byte-wide back-reference copy (scalar tail).
+    @Inline
+    static void blit(int8[] dst, int64 d, int8[] src, int64 s, int64 len) {
+        int64 k = (int64) 0;
+        while (k + (int64) 8 <= len) {
+            Cajeta.storeU64(dst, d + k, Cajeta.loadU64(src, s + k));
+            k = k + (int64) 8;
+        }
+        while (k < len) {
+            dst[d + k] = src[s + k];
+            k = k + (int64) 1;
+        }
     }
 
     // Build a canonical Huffman table from per-symbol code lengths.
@@ -194,56 +296,63 @@ public final class Deflate {
         this.bitpos = (bp + (int64) len) << 3;
     }
 
-    void huffmanBlock(HuffTable litTable, HuffTable distTable) {
+    void huffmanBlock(FastHuff litTable, FastHuff distTable) {
         int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
         int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
         int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
         int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
         // Terminator is the end-of-block symbol (256), not a buffer-full guard,
         // so a size-less stream inflates correctly; ensure() grows on demand.
+        int64 cap = (int64) this.out.count();
+        int8[] o = this.out;
         boolean go = true;
         while (go) {
+            // Keep 300 bytes of headroom (a max match is 258) so literals and
+            // matches write without a per-op ensure() call.
+            if (this.op + (int64) 300 > cap) {
+                this.ensure(this.op + (int64) 300);
+                cap = (int64) this.out.count();
+                o = this.out;
+            }
             int32 sym = this.decodeSym(litTable);
-            if (sym == 256) { go = false; }
-            else if (sym >= 0 && sym < 256) {
-                this.ensure(this.op + (int64) 1);
-                int8[] o = this.out;
+            if (sym < 256) {
+                if (sym < 0) {
+                    throw heap DeflateException(
+                        "invalid literal/length symbol", this.bitpos >> 3);
+                }
                 o[this.op] = (int8) sym;
                 this.op = this.op + 1;
-            } else if (sym >= 257 && sym <= 285) {
+            } else if (sym == 256) {
+                go = false;
+            } else if (sym <= 285) {
                 int32 li = sym - 257;
-                int32 leBits = lengthExtra[li];
-                int32 lenE = this.getBits(leBits);
+                int32 lenE = this.getBits(lengthExtra[li]);
                 int32 len = lengthBase[li] + lenE;
                 int32 dsym = this.decodeSym(distTable);
                 if (dsym < 0 || dsym > 29) {
                     throw heap DeflateException(
                         "invalid distance symbol", this.bitpos >> 3);
                 }
-                int32 deBits = distExtra[dsym];
-                int32 distE = this.getBits(deBits);
+                int32 distE = this.getBits(distExtra[dsym]);
                 int32 dist = distBase[dsym] + distE;
-                // A back-reference may only reach into bytes already
-                // produced — dist > op walks before the output's start
-                // (the historical uncatchable `index -4` abort).
+                // A back-reference may only reach into bytes already produced.
                 if ((int64) dist > this.op) {
                     throw heap DeflateException(
                         "back-reference distance exceeds output produced",
                         this.bitpos >> 3);
                 }
-                this.ensure(this.op + (int64) len);
-                int8[] o = this.out;
                 int64 op = this.op;
                 int64 from = op - (int64) dist;
-                int32 c = 0;
-                while (c < len) {
-                    int8 v = o[from];
-                    o[op] = v;
-                    op = op + 1;
-                    from = from + 1;
-                    c = c + 1;
+                if (dist >= 8) {
+                    Deflate.blit(o, op, o, from, (int64) len);
+                } else {
+                    int32 c = 0;
+                    while (c < len) {
+                        o[op + (int64) c] = o[from + (int64) c];
+                        c = c + 1;
+                    }
                 }
-                this.op = op;
+                this.op = op + (int64) len;
             } else {
                 // 286/287 are reserved, and decodeSym no longer returns -1.
                 throw heap DeflateException(
@@ -259,11 +368,11 @@ public final class Deflate {
         while (i < 256) { litLengths[i] = 9; i = i + 1; }
         while (i < 280) { litLengths[i] = 7; i = i + 1; }
         while (i < 288) { litLengths[i] = 8; i = i + 1; }
-        HuffTable litTable = Deflate.build(litLengths, 288, 288);
+        FastHuff litTable = FastHuff.build(litLengths, 288, 288);
         int32[] distLengths = heap int32[30];
         int32 d = 0;
         while (d < 30) { distLengths[d] = 5; d = d + 1; }
-        HuffTable distTable = Deflate.build(distLengths, 30, 30);
+        FastHuff distTable = FastHuff.build(distLengths, 30, 30);
         this.huffmanBlock(litTable, distTable);
     }
 
@@ -283,7 +392,7 @@ public final class Deflate {
             clLengths[pos] = v;
             i = i + 1;
         }
-        HuffTable clTable = Deflate.build(clLengths, 19, 19);
+        FastHuff clTable = FastHuff.build(clLengths, 19, 19);
 
         int32 nsym = hlit + hdist;
         int32[] lengths = heap int32[320];
@@ -346,14 +455,15 @@ public final class Deflate {
         }
         while (j < 30) { distLengths[j] = 0; j = j + 1; }
 
-        HuffTable litTable = Deflate.build(litLengths, 288, 288);
-        HuffTable distTable = Deflate.build(distLengths, 30, 30);
+        FastHuff litTable = FastHuff.build(litLengths, 288, 288);
+        FastHuff distTable = FastHuff.build(distLengths, 30, 30);
         this.huffmanBlock(litTable, distTable);
     }
 
     void inflateBlocks() {
         boolean last = false;
         while (!last) {
+            this.reset();
             int32 bfinal = this.getBits(1);
             int32 btype = this.getBits(2);
             if (bfinal == 1) { last = true; }
@@ -378,10 +488,28 @@ public final class Deflate {
      * result.
      */
     public static #int8[] deflate(int8[] src, int64 n) {
-        int8[] fixed = Deflate.deflateFixed(src, n);
-        int64 flen = (int64) fixed.count();
+        return Deflate.deflate(src, n, 6);
+    }
+
+    /**
+     * Encode at compression `level` — **1 = fastest, 9 = maximum ratio**; 6 is
+     * the balanced default the no-level [`deflate`](#deflate) uses. The level
+     * tunes only the LZ77 match finder (hash-chain search depth and the
+     * `nice_length` early-exit): lower levels search fewer candidates, trading
+     * a larger output for less CPU; higher levels search harder for the best
+     * matches. Out-of-range levels clamp into [1, 9]. Output is always valid
+     * DEFLATE and inflates identically regardless of the level it was made at.
+     */
+    public static #int8[] deflate(int8[] src, int64 n, int32 level) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.deflate(src, n, level);
+        }
+        // DynDeflate emits the smaller of a dynamic- or fixed-Huffman block;
+        // fall back to stored when even that expands (incompressible input).
+        int8[] comp = DynDeflate.encode(src, n, level);
+        int64 clen = (int64) comp.count();
         int64 storedLen = n + ((n / (int64) 65535) + (int64) 1) * (int64) 5;
-        if (flen <= storedLen) { return fixed; }
+        if (clen <= storedLen) { return comp; }
         return Deflate.deflateStored(src, n);
     }
 
@@ -455,9 +583,14 @@ public final class Deflate {
      * owns the result.
      */
     public static #int8[] deflateFixed(int8[] src, int64 n) {
+        return Deflate.deflateFixed(src, n, 6);
+    }
+
+    /** Fixed-Huffman encode at compression `level` (see [`deflate`](#deflate)). */
+    public static #int8[] deflateFixed(int8[] src, int64 n, int32 level) {
         int64 cap = n + (n >> 1) + (int64) 16;
         BitWriter bw = heap BitWriter(cap);
-        Deflate.deflateFixedInto(bw, src, 0, (int32) n, 1);
+        Deflate.deflateFixedInto(bw, src, 0, (int32) n, 1, level);
         bw.flushByte();
         return bw.result();
     }
@@ -476,18 +609,33 @@ public final class Deflate {
      */
     static void deflateFixedInto(BitWriter bw, int8[] src, int32 emitFrom,
                                  int32 nLen, int32 bfinal) {
+        Deflate.deflateFixedInto(bw, src, emitFrom, nLen, bfinal, 6);
+    }
+
+    static void deflateFixedInto(BitWriter bw, int8[] src, int32 emitFrom,
+                                 int32 nLen, int32 bfinal, int32 level) {
         int32[] lengthBase = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
         int32[] lengthExtra = {0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0};
         int32[] distBase = {1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577};
         int32[] distExtra = {0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13};
 
         int32 HASHSIZE = 32768;
-        int32 HASHMASK = 32767;
         int32 WSIZE = 32768;
         int32 WMASK = 32767;
-        int32 MAXCHAIN = 128;
         int32 MINMATCH = 3;
         int32 MAXMATCH = 258;
+        // Compression level → match-finder effort. `MAXCHAIN` caps how many
+        // hash-chain candidates a position examines; `NICEMATCH` stops the
+        // walk once a match this long is found. Both climb with the level
+        // (zlib-shaped): level 6 reproduces the historical 128/128 default.
+        // Index 0 is unused; levels clamp into [1, 9].
+        int32 lv = level;
+        if (lv < 1) { lv = 1; }
+        if (lv > 9) { lv = 9; }
+        int32[] chainByLevel = {0, 8, 16, 32, 48, 64, 128, 256, 512, 1024};
+        int32[] niceByLevel  = {0, 16, 16, 32, 64, 96, 128, 200, 258, 258};
+        int32 MAXCHAIN = chainByLevel[lv];
+        int32 NICEMATCH = niceByLevel[lv];
 
         int32[] head = heap int32[HASHSIZE];
         int32[] prev = heap int32[WSIZE];
@@ -509,13 +657,19 @@ public final class Deflate {
                 int32 e0 = ((int32) src[pos]) & 0xFF;
                 int32 e1 = ((int32) src[p1]) & 0xFF;
                 int32 e2 = ((int32) src[p2]) & 0xFF;
-                int32 hp = ((e0 << 10) ^ (e1 << 5) ^ e2) & HASHMASK;
+                int32 hp = Deflate.hash3(e0, e1, e2);
                 int32 ps = pos & WMASK;
                 prev[ps] = head[hp];
                 head[hp] = pos;
             }
             pos = pos + 1;
         }
+
+        // Length of the match found at the previous position — drives zlib's
+        // `good_match` heuristic: once we are already landing long matches,
+        // search only a quarter as deep (a longer one is unlikely).
+        int32 GOODMATCH = 32;
+        int32 prevMatchLen = 0;
 
         while (pos < nLen) {
             int32 bestLen = 0;
@@ -530,30 +684,66 @@ public final class Deflate {
                 int32 c0 = ((int32) src[pos]) & 0xFF;
                 int32 c1 = ((int32) src[i1]) & 0xFF;
                 int32 c2 = ((int32) src[i2]) & 0xFF;
-                h = ((c0 << 10) ^ (c1 << 5) ^ c2) & HASHMASK;
+                h = Deflate.hash3(c0, c1, c2);
                 int32 cand = head[h];
                 int32 depth = 0;
-                while (cand >= 0 && depth < MAXCHAIN) {
+                // Adaptive chain depth (zlib good_match): shrink the walk 4×
+                // once the neighbourhood is already yielding long matches.
+                int32 chainLimit = MAXCHAIN;
+                if (prevMatchLen >= GOODMATCH) { chainLimit = MAXCHAIN >> 2; }
+                // Longest legal match at this position: capped at MAXMATCH and
+                // at the remaining input.
+                int32 maxCmp = MAXMATCH;
+                if (nLen - pos < maxCmp) { maxCmp = nLen - pos; }
+                while (cand >= 0 && depth < chainLimit) {
                     int32 dist = pos - cand;
-                    if (dist > WSIZE) { depth = MAXCHAIN; }
+                    if (dist > WSIZE) { depth = chainLimit; }
                     else {
-                        int32 mlen = 0;
-                        boolean go = true;
-                        while (go) {
-                            if (mlen >= MAXMATCH) { go = false; }
-                            else {
-                                int32 pp = pos + mlen;
-                                if (pp >= nLen) { go = false; }
-                                else {
-                                    int32 cc = cand + mlen;
-                                    int32 a = ((int32) src[pp]) & 0xFF;
-                                    int32 b = ((int32) src[cc]) & 0xFF;
-                                    if (a != b) { go = false; }
+                        // Cheap prune (zlib's key trick): a candidate can only
+                        // BEAT the current best if its byte at `bestLen` already
+                        // matches — one compare skips the full extend otherwise.
+                        boolean worth = true;
+                        if (bestLen > 0 && bestLen < maxCmp) {
+                            int32 cb = ((int32) src[cand + bestLen]) & 0xFF;
+                            int32 pb = ((int32) src[pos + bestLen]) & 0xFF;
+                            if (cb != pb) { worth = false; }
+                        }
+                        if (worth) {
+                            // Match-extend, 8 bytes per step (wide load + XOR);
+                            // the mismatch byte in the last word is found by a
+                            // ≤8-step byte scan, with a short scalar tail.
+                            int32 mlen = 0;
+                            boolean wide = true;
+                            while (wide && mlen + 8 <= maxCmp) {
+                                uint64 a = Cajeta.loadU64(src, (int64) (pos + mlen));
+                                uint64 b = Cajeta.loadU64(src, (int64) (cand + mlen));
+                                uint64 x = a ^ b;
+                                if (x == (uint64) 0) {
+                                    mlen = mlen + 8;
+                                } else {
+                                    while ((x & (uint64) 0xFF) == (uint64) 0) {
+                                        mlen = mlen + 1;
+                                        x = x >> (uint64) 8;
+                                    }
+                                    wide = false;
+                                }
+                            }
+                            if (wide) {
+                                boolean tail = true;
+                                while (tail && mlen < maxCmp) {
+                                    int32 a2 = ((int32) src[pos + mlen]) & 0xFF;
+                                    int32 b2 = ((int32) src[cand + mlen]) & 0xFF;
+                                    if (a2 != b2) { tail = false; }
                                     else { mlen = mlen + 1; }
                                 }
                             }
+                            if (mlen > bestLen) {
+                                bestLen = mlen;
+                                bestDist = dist;
+                                // Good enough — stop searching the chain.
+                                if (bestLen >= NICEMATCH) { depth = MAXCHAIN; }
+                            }
                         }
-                        if (mlen > bestLen) { bestLen = mlen; bestDist = dist; }
                         int32 slot = cand & WMASK;
                         cand = prev[slot];
                         depth = depth + 1;
@@ -594,15 +784,17 @@ public final class Deflate {
                         int32 d0 = ((int32) src[q]) & 0xFF;
                         int32 d1 = ((int32) src[q1]) & 0xFF;
                         int32 d2 = ((int32) src[q2]) & 0xFF;
-                        int32 hq = ((d0 << 10) ^ (d1 << 5) ^ d2) & HASHMASK;
+                        int32 hq = Deflate.hash3(d0, d1, d2);
                         int32 qs = q & WMASK;
                         prev[qs] = head[hq];
                         head[hq] = q;
                     }
                     q = q + 1;
                 }
+                prevMatchLen = bestLen;
                 pos = end;
             } else {
+                prevMatchLen = 0;
                 int32 lit = ((int32) src[pos]) & 0xFF;
                 Deflate.emitLiteral(bw, lit);
                 pos = pos + 1;
@@ -613,6 +805,9 @@ public final class Deflate {
 
     /** Inflate a raw DEFLATE stream (first `n` bytes) into `destLen` bytes. */
     public static #int8[] inflate(int8[] src, int64 n, int64 destLen) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.inflate(src, n, destLen);
+        }
         Deflate d = heap Deflate(src, n, destLen);
         d.inflateBlocks();
         return d.result();
@@ -623,6 +818,9 @@ public final class Deflate {
      * store no uncompressed length). Starts small and grows via `ensure()`.
      */
     public static #int8[] inflateGrow(int8[] src, int64 n) {
+        if (DeflateBackend.useNative()) {
+            return #NativeZlib.inflate(src, n, (int64) 256);
+        }
         Deflate d = heap Deflate(src, n, (int64) 256);
         d.inflateBlocks();
         return d.result();

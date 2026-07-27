@@ -29,6 +29,11 @@ if [[ ! -f "$unit_cja" ]]; then
     ( cd "$UNIT_REPO" && "$CAJETA" build >/dev/null )
 fi
 
+echo ">> building native zlib backend (vendored zlib + shim -> native/<platform>/)"
+"$here/native/build.sh" >/dev/null
+# The @Native(lib="cajeta_zlib") bindings resolve libcajeta_zlib.a from here.
+export CAJETA_NATIVE_PATH="$here/native"
+
 echo ">> building codec library .cja"
 "$CAJETA" --emit=cja -o "$out/codec.cja" \
     dev.cajeta.codec.protobuf.Protobuf.run "$here/src/main/cajeta" "$out" >/dev/null

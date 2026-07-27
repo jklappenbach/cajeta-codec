@@ -1,0 +1,38 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.compress.Snappy;
+
+// dev.cajeta.codec.compress.Snappy — Google's Snappy block codec: very fast,
+// modest ratio, the codec Avro/Parquet/ORC reach for when speed beats size.
+//
+//   Snappy.compress(src, n)            -> fresh int8[]  (self-describing:
+//                                         a varint uncompressed-length header)
+//   Snappy.decompress(src, n)          -> fresh int8[]  (no destLen needed)
+//   Snappy.uncompressedLength(src, n)  -> the size decompress will produce
+//
+// Self-describing framing means a Snappy blob carries its own output size, so
+// decode needs nothing external — unlike raw LZ4 (see Lz4Demo).
+public class SnappyDemo extends DemoClass {
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.compress.Snappy: fast block codec --");
+
+        String text =
+            "snappy trades ratio for speed. snappy trades ratio for speed. "
+          + "snappy trades ratio for speed. snappy trades ratio for speed.";
+        int8[] data = text.toBytes();
+        int64 n = (int64) data.count();
+
+        int8[] comp = Snappy.compress(data, n);
+        System.stdout.println("  " + n + " -> " + comp.count() + " bytes");
+
+        // The blob is self-describing: its length header predicts the output.
+        int64 predicted = Snappy.uncompressedLength(comp, (int64) comp.count());
+        this.check(predicted == n, "uncompressedLength() matches the original size");
+
+        int8[] out = Snappy.decompress(comp, (int64) comp.count());
+        this.check(this.sameBytes(data, out), "snappy round-trips byte-exact");
+    }
+}

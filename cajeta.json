@@ -8,8 +8,14 @@
     // codecs. These live under the `dev.cajeta.*` namespace (the convention for
     // our own non-stdlib libraries) — the core stdlib owns `cajeta.codec.*`
     // (json, csv, Base64) and a standalone `.cja` can't extend that namespace
-    // through classpath linking. All our own code; no third-party libraries
-    // (completeness by conformance corpus + fail-loud). See docs/ for the
+    // through classpath linking. Our own code throughout, with ONE vendored
+    // exception: the DEFLATE/gzip/zlib family has an optional native zlib
+    // backend (`dev.cajeta.codec.compress.NativeZlib` -> vendored zlib in
+    // native/, statically linked, DCE-gated) for zlib-class throughput, with the
+    // pure-cajeta encoder/decoder as a transparent fallback behind the same API
+    // (see DeflateBackend). License: codec Apache-2.0 + vendored zlib under the
+    // zlib License — THIRD-PARTY.md; per-target builds — native/CROSS-BUILD.md.
+    // Completeness by conformance corpus + fail-loud. See docs/ for the
     // framework spec and per-format specs. Core tier interfaces
     // (`cajeta.wire.*`) and the SIMD structural-scan pattern come from the
     // toolchain stdlib.
@@ -35,6 +41,30 @@
         // toolchain — neither declared nor fetched — and only the parts a
         // consumer uses are linked into its binary (dead-code elimination).
         "dependencies": {},
+
+        // Native library dependencies (native-deps subsystem). `cajeta_zlib`
+        // is our static archive = the cajeta shim + vendored zlib 1.3.1, bound
+        // by dev.cajeta.codec.compress.NativeZlib for the DEFLATE/gzip/zlib
+        // fast path (pure-cajeta stays the fallback). It's redistributable
+        // (zlib License), so the .cja packaging step bakes the per-platform
+        // libcajeta_zlib.a into the archive's native/<platform>/ tree at
+        // publish and consumers link OFFLINE with zero action — no
+        // CAJETA_NATIVE_PATH, no fetch. No `artifacts` url/sha256: the archives
+        // are built from vendored source by native/build.sh (host) /
+        // native/cross-build.sh (all targets), not fetched. DCE-gated: a build
+        // that calls no NativeZlib method links no native artifact.
+        "native-libraries": {
+            "cajeta_zlib": {
+                "version":         "1.3.1",
+                "license":         "Zlib",
+                "redistributable": true,
+                "link":            "static",
+                "platforms": [
+                    "linux-x64", "linux-arm64", "linux-riscv64",
+                    "windows-x64", "macos-arm64", "macos-x64"
+                ]
+            }
+        },
 
         // Test-only dependencies — not shipped in the published .cja.
         "dev-dependencies": {
