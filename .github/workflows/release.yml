@@ -7,29 +7,21 @@
 # GitHub Release asset.
 #
 # Triggers:
-#   - push to main / PR        → build + test (no publish)
+#   - push to main             → build + test (no publish)
 #   - push a `v*` tag          → build + test + publish the Release
 #   - workflow_dispatch        → dry-run (build+test) or production (also tags +
-#                                publishes, reading VERSION)
+#                                publishes)
 #
-# TOOLCHAIN DEPENDENCY (important): the codec's typed facades (Protobuf/Ion/Avro
-# parse<T> + toBytes<T>) require the codec *synthesizers*, which live in cajeta
-# `main` but are NOT in any published release yet (latest is v0.7.1). CI will be
-# fully green only once a cajeta release that includes them ships — then bump
-# CAJETA_VERSION below. Until then the pure-Cajeta paths (columnar/Parquet/ORC)
-# build, but the typed-codec tests need the newer toolchain.
+# No `pull_request:` trigger by design — this project lands changes by pushing
+# straight to main, so a PR trigger would never fire and main-push CI is the
+# only thing standing between a bad commit and a tag.
 
 name: release
 
 on:
   push:
-    # Per-commit CI on main is intentionally disabled until CAJETA_VERSION points
-    # at a release containing the codec synthesizers (see note above) — otherwise
-    # every push would go red on the typed-codec tests. Uncomment then:
-    # branches: [main]
-    tags: ['v*']
-  pull_request:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       mode:
@@ -136,14 +128,11 @@ jobs:
         run: ./run-tests.sh
 
       - name: Run the GPU-decode oracle (CPU backend)
-        # Was documented as blocked on an unreleased XPU surface (GpuBuffer<T>
-        # "lives on cajeta feature branches"). That is no longer true: gpu -> xpu
-        # collapsed, the types ship as cajeta.xpu.KernelBuffer / KernelStream /
-        # KernelThread, and gpu/ now compiles and passes on the CPU backend.
-        # Still continue-on-error because gpu/ is not part of the released .cja
-        # and a GPU-oracle regression should not block publishing the codec —
-        # but it is now real signal rather than a permanently-red step.
-        continue-on-error: true
+        # Blocking as of v0.7.1. It was continue-on-error while blocked on an
+        # unreleased XPU surface (GpuBuffer<T> "lives on cajeta feature
+        # branches"); gpu -> xpu collapsed, the types ship as
+        # cajeta.xpu.KernelBuffer / KernelStream / KernelThread, and this has
+        # passed green since. A step that cannot fail is not a test.
         env:
           # Same as the bridge test below: without this the oracle exe fails to
           # LINK ("native library 'cajeta_zlib' (linux-x64) not found"), so the
@@ -153,12 +142,11 @@ jobs:
 
       - name: Run the Arrow bridge test (parquet -> Arrow -> Table<R>)
         # The cross-repo integration (nucleo-frame U17): parquet decode crosses
-        # the Arrow C Data Interface into a typed stdlib Table<R>. It depends on
-        # cajeta.nucleo.column + cajeta.nucleo.frame, which are UNRELEASED at
-        # authoring time, so this is RED until CAJETA_VERSION points at a release
-        # carrying nucleo — deliberately non-blocking (like the GPU oracle), and
-        # kept out of run-tests.sh so a nucleo import never fails the whole suite.
-        continue-on-error: true
+        # the Arrow C Data Interface into a typed stdlib Table<R>. Blocking as of
+        # v0.7.1 — it was non-blocking while cajeta.nucleo.column/frame were
+        # unreleased, and CAJETA_VERSION now points at a release carrying them.
+        # Still kept out of run-tests.sh so a nucleo import cannot fail the
+        # whole suite, but its own step must now pass.
         env:
           CAJETA: cajeta
           UNIT_REPO: ${{ github.workspace }}/cajeta-unit-dep
