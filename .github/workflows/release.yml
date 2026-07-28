@@ -154,6 +154,13 @@ jobs:
         env:
           CAJETA: cajeta
           UNIT_REPO: ${{ github.workspace }}/cajeta-unit-dep
+          # Without this the bridge exe fails to LINK ("native library
+          # 'cajeta_zlib' (linux-x64) not found; searched: ~/.cajeta/native"),
+          # so run-bridge-test.sh then execs a file that was never produced and
+          # exits 127 — a failure mode unrelated to the nucleo gap above, which
+          # would keep this step red even after nucleo ships. Point it at the
+          # tree assembled earlier, exactly as the packaging step does.
+          CAJETA_NATIVE_PATH: ${{ github.workspace }}/native
         run: ./run-bridge-test.sh
 
       - name: Build the release .cja (bakes native/<platform>/ for all present)
