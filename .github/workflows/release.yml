@@ -144,6 +144,11 @@ jobs:
         # and a GPU-oracle regression should not block publishing the codec —
         # but it is now real signal rather than a permanently-red step.
         continue-on-error: true
+        env:
+          # Same as the bridge test below: without this the oracle exe fails to
+          # LINK ("native library 'cajeta_zlib' (linux-x64) not found"), so the
+          # script execs a binary that was never built and exits 127.
+          CAJETA_NATIVE_PATH: ${{ github.workspace }}/native
         run: ./run-gpu-decode.sh cpu
 
       - name: Run the Arrow bridge test (parquet -> Arrow -> Table<R>)
@@ -174,7 +179,19 @@ jobs:
           CAJETA_NATIVE_PATH: ${{ github.workspace }}/native
         run: |
           set -euo pipefail
-          VERSION="$(cat VERSION)"
+          # cajeta.json is the single source of truth for the version — it is what
+          # the toolchain, the archive identity and dependency resolution all key
+          # off. A VERSION file used to sit alongside it and CI read THAT, so a
+          # bump to one and not the other shipped v0.7.1 as a 0.7.0 artifact and
+          # published 0.7.0 to Olla. Ask the toolchain rather than parsing the
+          # manifest here: it is JSONC (42 comment lines), so jq cannot read it and
+          # naive comment-stripping corrupts the `//` inside https:// URLs.
+          VERSION="$(cajeta info | awk '/^[[:space:]]*version:/{print $2; exit}')"
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not read version from cajeta.json via 'cajeta info'" >&2
+            exit 1
+          fi
+          echo "version from cajeta.json: $VERSION"
           out="$(mktemp -d)"
           cajeta --emit=cja -o "$out/dev.cajeta.codec-${VERSION}.cja" \
             dev.cajeta.codec.protobuf.Protobuf.run src/main/cajeta "$out"
