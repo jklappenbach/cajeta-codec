@@ -37,7 +37,7 @@ public final class GpuColumnarMain {
 
     public static int32 run() {
         int32 count = 1000;
-        int32[] widths = { 1, 7, 8, 13, 16, 17, 24, 31, 32 };
+        int32[] widths = [ 1, 7, 8, 13, 16, 17, 24, 31, 32 ];
         int32 totalBad = 0;
         int32 wi = 0;
         while (wi < 9) {

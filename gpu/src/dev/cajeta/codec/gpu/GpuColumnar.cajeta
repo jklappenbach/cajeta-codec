@@ -1,8 +1,8 @@
 package dev.cajeta.codec.gpu;
 
-import cajeta.gpu.GpuBuffer;
-import cajeta.gpu.GpuStream;
-import cajeta.gpu.GpuThread;
+import cajeta.xpu.KernelBuffer;
+import cajeta.xpu.KernelStream;
+import cajeta.xpu.KernelThread;
 
 /**
  * GPU columnar decode (Phase 9.1) — the gated throughput offload for bulk
@@ -20,9 +20,9 @@ import cajeta.gpu.GpuThread;
 public final class GpuColumnar {
 
     @Kernel
-    public static void bitUnpack(GpuBuffer<uint32> out, GpuBuffer<uint32> packed,
+    public static void bitUnpack(KernelBuffer<uint32> out, KernelBuffer<uint32> packed,
                                  uint32 width, uint32 count) {
-        uint32 i = GpuThread.globalIdX();
+        uint32 i = KernelThread.globalIdX();
         if (i < count) {
             uint32 bitOff = i * width;
             uint32 wi = bitOff >> 5;
@@ -65,10 +65,10 @@ public final class GpuColumnar {
         }
 
         uint32[] hout = heap uint32[count];
-        GpuBuffer<uint32> pb = heap GpuBuffer<uint32>((uint64) nwords);
-        GpuBuffer<uint32> ob = heap GpuBuffer<uint32>((uint64) count);
+        KernelBuffer<uint32> pb = heap KernelBuffer<uint32>((uint64) nwords);
+        KernelBuffer<uint32> ob = heap KernelBuffer<uint32>((uint64) count);
         pb.upload(words);
-        GpuStream s = GpuStream.current();
+        KernelStream s = KernelStream.current();
         uint32 grid = ((uint32) count + (uint32) 63) / (uint32) 64;
         bitUnpack.launch(s, grid: [grid], block: [64])(ob, pb, (uint32) w, (uint32) count);
         s.sync();
