@@ -35,10 +35,11 @@ permissions:
   contents: write   # publish the Release on a tag / production run
 
 env:
-  # Must match a release tag of jklappenbach/cajeta. v0.10.1 is a floor, not a
-  # preference: these sources use bracket array literals `[1, 2, 3]`, and v0.10.0
-  # predates the collection-literals work entirely, so it cannot parse them.
-  CAJETA_VERSION: v0.10.1
+  # Must match a release tag of jklappenbach/cajeta. Floors: v0.10.1 for the
+  # bracket array literals these sources use; v0.12.1 for the tour, which is
+  # authored and verified against the 0.12 line (try/finally, the typed-facade
+  # synthesis across the .cja boundary).
+  CAJETA_VERSION: v0.12.1
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
@@ -126,6 +127,22 @@ jobs:
           # run-tests.sh defaults UNIT_REPO to ../cajeta-unit relative to the repo.
           UNIT_REPO: ${{ github.workspace }}/cajeta-unit-dep
         run: ./run-tests.sh
+
+      - name: Run the codec tour (self-checking demos)
+        # The tour is the library's living documentation and a smoke test in
+        # one: every demo verifies its own output via check(), so a nonzero
+        # exit means a demonstrated contract regressed. run-tour.sh builds
+        # the native zlib backend itself and sets CAJETA_NATIVE_PATH.
+        run: ./samples/tour/run-tour.sh
+
+      - name: Tour coverage gate (every public type toured)
+        # Fails if any public top-level type is not exercised by the tour;
+        # scripts/tour-coverage-ignore.txt exempts genuine internals, each
+        # with a stated reason. CAJETA must be a path (the script -x checks
+        # it), so resolve the installed binary.
+        run: |
+          CAJETA="$(command -v cajeta)" ./scripts/check-library-tour-coverage.sh \
+            src/main/cajeta samples/tour scripts/tour-coverage-ignore.txt
 
       - name: Run the GPU-decode oracle (CPU backend)
         # Blocking as of v0.7.1. It was continue-on-error while blocked on an

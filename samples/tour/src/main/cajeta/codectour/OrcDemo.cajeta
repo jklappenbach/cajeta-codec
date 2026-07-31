@@ -1,0 +1,193 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.orc.OrcWriter;
+import dev.cajeta.codec.orc.OrcColumnReader;
+import dev.cajeta.codec.orc.OrcMetadata;
+import dev.cajeta.codec.orc.OrcColumnStats;
+import dev.cajeta.codec.orc.OrcCompression;
+import dev.cajeta.codec.orc.OrcRleV2;
+import dev.cajeta.codec.orc.OrcParseException;
+
+// dev.cajeta.codec.orc — Apache ORC, the other columnar file format. An ORC
+// file is "ORC" magic, stripes of RLEv2-encoded column streams, a footer,
+// and a postscript whose last byte says how long the postscript is — so
+// readers parse the file back-to-front. The surface:
+//
+//   OrcWriter        v1 writer: one BIGINT column, uncompressed, no stats
+//                    yet — but a complete, real file frame
+//   OrcMetadata      postscript + footer: rows, stripes, types, compression
+//   OrcColumnStats   per-column min/max/count -> predicate pushdown
+//   OrcColumnReader  column reads, positional AND name-based projection
+//   OrcCompression   the per-chunk stream decompressor (NONE/ZLIB/SNAPPY)
+//   OrcRleV2         the integer encoding every ORC long column uses
+//
+// Column ids count from 1 — id 0 is the root struct that holds the schema
+// (its field names drive name-based projection). Compressed files (ZLIB/
+// SNAPPY footers and columns) decode transparently through the same reads;
+// the test suite pins that against real pyarrow files. Malformed input
+// raises OrcParseException.
+//
+// The scenario: request latencies per hour, written by a metrics job and
+// projected by name downstream.
+public class OrcDemo extends DemoClass {
+
+    // support: a real 201-byte ORC file WRITTEN BY PYARROW (ORC writer
+    // 2.2.2), column x = [5, 10, 15, 20] — the "file that arrived from
+    // another engine" case, and the one with real column statistics
+    // (the in-repo v1 writer emits none).
+    static #int8[] pyarrowOrc() {
+        int8[] b = [
+            (int8) 0x4F, (int8) 0x52, (int8) 0x43, (int8) 0x0A, (int8) 0x06, (int8) 0x12, (int8) 0x04, (int8) 0x08, (int8) 0x04, (int8) 0x50, (int8) 0x00, (int8) 0x0A,
+            (int8) 0x12, (int8) 0x0A, (int8) 0x02, (int8) 0x00, (int8) 0x00, (int8) 0x12, (int8) 0x0C, (int8) 0x08, (int8) 0x04, (int8) 0x12, (int8) 0x06, (int8) 0x08,
+            (int8) 0x0A, (int8) 0x10, (int8) 0x28, (int8) 0x18, (int8) 0x64, (int8) 0x50, (int8) 0x00, (int8) 0xC0, (int8) 0x03, (int8) 0x0A, (int8) 0x0A, (int8) 0x0A,
+            (int8) 0x06, (int8) 0x08, (int8) 0x06, (int8) 0x10, (int8) 0x00, (int8) 0x18, (int8) 0x08, (int8) 0x0A, (int8) 0x06, (int8) 0x08, (int8) 0x06, (int8) 0x10,
+            (int8) 0x01, (int8) 0x18, (int8) 0x14, (int8) 0x0A, (int8) 0x06, (int8) 0x08, (int8) 0x01, (int8) 0x10, (int8) 0x01, (int8) 0x18, (int8) 0x04, (int8) 0x12,
+            (int8) 0x04, (int8) 0x08, (int8) 0x00, (int8) 0x10, (int8) 0x00, (int8) 0x12, (int8) 0x04, (int8) 0x08, (int8) 0x02, (int8) 0x10, (int8) 0x00, (int8) 0x1A,
+            (int8) 0x03, (int8) 0x47, (int8) 0x4D, (int8) 0x54, (int8) 0x0A, (int8) 0x14, (int8) 0x0A, (int8) 0x04, (int8) 0x08, (int8) 0x04, (int8) 0x50, (int8) 0x00,
+            (int8) 0x0A, (int8) 0x0C, (int8) 0x08, (int8) 0x04, (int8) 0x12, (int8) 0x06, (int8) 0x08, (int8) 0x0A, (int8) 0x10, (int8) 0x28, (int8) 0x18, (int8) 0x64,
+            (int8) 0x50, (int8) 0x00, (int8) 0x08, (int8) 0x03, (int8) 0x10, (int8) 0x49, (int8) 0x1A, (int8) 0x0A, (int8) 0x08, (int8) 0x03, (int8) 0x10, (int8) 0x1C,
+            (int8) 0x18, (int8) 0x04, (int8) 0x20, (int8) 0x29, (int8) 0x28, (int8) 0x04, (int8) 0x22, (int8) 0x0E, (int8) 0x08, (int8) 0x0C, (int8) 0x12, (int8) 0x01,
+            (int8) 0x01, (int8) 0x1A, (int8) 0x01, (int8) 0x78, (int8) 0x20, (int8) 0x00, (int8) 0x28, (int8) 0x00, (int8) 0x30, (int8) 0x00, (int8) 0x22, (int8) 0x08,
+            (int8) 0x08, (int8) 0x03, (int8) 0x20, (int8) 0x00, (int8) 0x28, (int8) 0x00, (int8) 0x30, (int8) 0x00, (int8) 0x30, (int8) 0x04, (int8) 0x3A, (int8) 0x04,
+            (int8) 0x08, (int8) 0x04, (int8) 0x50, (int8) 0x00, (int8) 0x3A, (int8) 0x0C, (int8) 0x08, (int8) 0x04, (int8) 0x12, (int8) 0x06, (int8) 0x08, (int8) 0x0A,
+            (int8) 0x10, (int8) 0x28, (int8) 0x18, (int8) 0x64, (int8) 0x50, (int8) 0x00, (int8) 0x40, (int8) 0x90, (int8) 0x4E, (int8) 0x48, (int8) 0x01, (int8) 0x62,
+            (int8) 0x05, (int8) 0x32, (int8) 0x2E, (int8) 0x32, (int8) 0x2E, (int8) 0x32, (int8) 0x08, (int8) 0x4C, (int8) 0x10, (int8) 0x00, (int8) 0x18, (int8) 0x80,
+            (int8) 0x80, (int8) 0x04, (int8) 0x22, (int8) 0x02, (int8) 0x00, (int8) 0x0C, (int8) 0x28, (int8) 0x16, (int8) 0x30, (int8) 0x06, (int8) 0x82, (int8) 0xF4,
+            (int8) 0x03, (int8) 0x03, (int8) 0x4F, (int8) 0x52, (int8) 0x43, (int8) 0x17
+        ];
+        return #b;
+    }
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.orc: columnar write/read, stats, projection --");
+
+        // 1. Write a column: six hourly p95 latencies (ms). The writer
+        //    emits the full frame — stripe, footer, postscript.
+        int64[] p95 = heap int64[6];
+        p95[0] = (int64) 12;
+        p95[1] = (int64) 9;
+        p95[2] = (int64) 44;
+        p95[3] = (int64) 31;
+        p95[4] = (int64) 18;
+        p95[5] = (int64) 27;
+        int8[] file = OrcWriter.writeLongColumn(p95, 6);
+        int64 fn = (int64) file.count();
+        System.stdout.println("  6-row BIGINT column -> " + fn + "-byte file");
+
+        // 2. Metadata — parsed back-to-front from the postscript. typeCount
+        //    counts the root struct plus our column; compression 0 = NONE
+        //    (1 = ZLIB and 2 = SNAPPY decode transparently on read).
+        OrcMetadata meta = OrcMetadata.parse(file, fn);
+        System.stdout.println("  footer: " + meta.numberOfRows + " rows, "
+            + meta.stripeCount + " stripe(s), compression kind "
+            + meta.compression);
+        this.check(meta.numberOfRows == (int64) 6 && meta.stripeCount == 1,
+            "metadata reports 6 rows in 1 stripe");
+        this.check(meta.typeCount == 2 && meta.compression == 0,
+            "type tree = root struct + 1 column; compression NONE");
+        this.check(meta.footerLength > (int64) 0,
+            "postscript records the footer length");
+
+        // 3. Stats-driven pushdown — on a file from ANOTHER engine. The
+        //    pyarrow fixture carries real min/max/count for its column
+        //    x = [5, 10, 15, 20]; a query planner skips any stripe whose
+        //    range cannot match the predicate. (The v1 in-repo writer
+        //    emits no stats yet, so its files take the conservative path
+        //    below.)
+        int8[] pa = OrcDemo.pyarrowOrc();
+        int64 pn = (int64) pa.count();
+        OrcMetadata pmeta = OrcMetadata.parse(pa, pn);
+        this.check(pmeta.numberOfRows == (int64) 4 && pmeta.compression == 0,
+            "pyarrow file parses through the same reader (4 rows)");
+        OrcColumnStats stats = OrcColumnStats.forColumn(pa, pn, 1);
+        this.check(stats.hasStats && stats.minValue == (int64) 5
+            && stats.maxValue == (int64) 20 && stats.numValues == (int64) 4,
+            "pyarrow column stats: min 5 / max 20 / count 4");
+        this.check(stats.mightContainRange((int64) 18, (int64) 60)
+            && !stats.mightContainRange((int64) 100, (int64) 200),
+            "overlapping range kept, disjoint range skipped");
+        // Our writer's file: no stats -> mightContainRange keeps all.
+        OrcColumnStats ownStats = OrcColumnStats.forColumn(file, fn, 1);
+        this.check(!ownStats.hasStats
+            && ownStats.mightContainRange((int64) 100, (int64) 200),
+            "no stats -> conservative keep");
+
+        // 4. Read the column. The decode API is a scalar sum (the values
+        //    stream through OrcRleV2 either way): positionally by column
+        //    id, or projected by NAME through the root struct's field
+        //    names — the way downstream jobs should ask.
+        int64 total = OrcColumnReader.int32ColumnSum(file, fn, 1);
+        this.check(total == (int64) 141, "column 1 sums to 141 (12+9+44+31+18+27)");
+        int32 colId = OrcColumnReader.columnIdByName(file, fn, "x");
+        this.check(colId == 1, "the writer's column is named \"x\", id 1");
+        this.check(OrcColumnReader.int32ColumnSumByName(file, fn, "x") == (int64) 141,
+            "name-based projection reads the same column");
+        this.check(OrcColumnReader.columnIdByName(file, fn, "latency") == 0 - 1,
+            "unknown name probes as -1");
+
+        // 5. Asking to READ a missing column is an error, not a probe:
+        //    sum-by-name throws OrcParseException for an unknown name.
+        boolean missingRaised = false;
+        try {
+            int64 nope = OrcColumnReader.int32ColumnSumByName(file, fn, "latency");
+        } catch (OrcParseException me) {
+            missingRaised = true;
+        }
+        this.check(missingRaised, "reading a missing column raises OrcParseException");
+
+        // 6. OrcCompression — the chunk layer under every compressed
+        //    stream. Kind 0 (NONE) passes bytes through: slicing the head
+        //    magic proves the plumbing; kinds 1/2 route the same call
+        //    through DEFLATE/Snappy. Unsupported kinds fail loud.
+        int8[] magic = OrcCompression.decompress(file, (int64) 0, (int64) 3, 0);
+        this.check((int64) magic.count() == (int64) 3
+            && magic[0] == (int8) 0x4F && magic[1] == (int8) 0x52
+            && magic[2] == (int8) 0x43,
+            "kind NONE slices the raw bytes ('O','R','C')");
+        boolean kindRaised = false;
+        try {
+            int8[] nope = OrcCompression.decompress(file, (int64) 0, (int64) 3, 3);
+        } catch (OrcParseException ke) {
+            kindRaised = true;
+        }
+        this.check(kindRaised, "unsupported compression kind (LZO) raises");
+
+        // 7. OrcRleV2 — the integer encoding inside the DATA stream. Encode
+        //    the same latencies standalone, then decode both ways: the
+        //    streaming sum and decodeInto filling a caller-owned buffer.
+        int8[] enc = OrcRleV2.encodeDirect(p95, 6);
+        System.stdout.println("  RLEv2: 6 longs -> " + enc.count() + " bytes");
+        this.check(OrcRleV2.decodeSum(enc, (int64) 0, 6) == (int64) 141,
+            "RLEv2 stream sums back to 141");
+        OrcRleV2 dec = heap OrcRleV2(enc, (int64) 0);
+        int64[] out = heap int64[6];
+        dec.decodeInto(out, 6);
+        boolean rleOk = true;
+        int32 i = 0;
+        while (i < 6) {
+            int64 ov = out[i];
+            if (ov != p95[i]) { rleOk = false; }
+            i = i + 1;
+        }
+        this.check(rleOk, "decodeInto rebuilds all six values");
+
+        // 8. Malformed input fails loud: break the head magic and parse
+        //    raises OrcParseException before trusting anything else.
+        int8[] broken = heap int8[fn];
+        int64 k = (int64) 0;
+        while (k < fn) {
+            broken[k] = file[k];
+            k = k + 1;
+        }
+        broken[0] = (int8) 0x58;
+        boolean raised = false;
+        try {
+            OrcMetadata bad = OrcMetadata.parse(broken, fn);
+        } catch (OrcParseException pe) {
+            raised = true;
+        }
+        this.check(raised, "bad ORC magic raises OrcParseException");
+    }
+}

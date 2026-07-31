@@ -1,0 +1,187 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.columnar.BitPack;
+import dev.cajeta.codec.columnar.Rle;
+import dev.cajeta.codec.columnar.Delta;
+import dev.cajeta.codec.columnar.Dictionary;
+import dev.cajeta.codec.columnar.FrameOfReference;
+import dev.cajeta.codec.columnar.ColumnOrchestrator;
+
+// dev.cajeta.codec.columnar — the encoding toolkit Parquet and ORC pages
+// are built from. Each encoding wins on a different column shape:
+//
+//   BitPack           values fit in w bits -> pack 8 per ceil(w) bytes
+//   Rle               long runs of equal values (status codes, flags)
+//   Delta             sorted/monotonic values (timestamps): store gaps
+//   FrameOfReference  values clustered near a base (prices): store offsets
+//   Dictionary        low-cardinality values (symbols): store indices
+//   ColumnOrchestrator  decode many pages at once, one fiber per column
+//
+// The through-line: pick the encoding whose assumption matches the column,
+// and a page shrinks by the width the assumption removes. Every scenario
+// below encodes a realistic column and round-trips it byte-exact.
+//
+// This is the "how a column page actually works" chapter; ParquetDemo and
+// OrcDemo show the file formats that stack on top.
+public class ColumnarDemo extends DemoClass {
+
+    // support: append `src` into `dst` at byte offset `base` (the flat-page
+    // concatenation the orchestrator scenario needs).
+    static void blit(int8[] dst, int64 base, int8[] src, int64 n) {
+        int64 i = (int64) 0;
+        while (i < n) {
+            int64 at = base + i;
+            dst[at] = src[i];
+            i = i + 1;
+        }
+    }
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.columnar: the page encodings under Parquet/ORC --");
+
+        // 1. BitPack — an hour-of-day column. Hours are 0..23, so minWidth
+        //    finds 5 bits; 8 values pack into 5 bytes instead of 32.
+        int32[] hours = [ 0, 6, 9, 12, 14, 17, 21, 23 ];
+        int32 hw = BitPack.minWidth(hours, 8);
+        int8[] hpage = BitPack.pack(hours, hw, 8);
+        System.stdout.println("  bitpack: 8 hours @ " + hw + " bits = "
+            + hpage.count() + " bytes (raw int32 = 32)");
+        this.check(hw == 5, "minWidth finds 5 bits for values up to 23");
+        this.check(BitPack.packedBytes(hw, 8) == (int64) 5
+            && (int64) hpage.count() == (int64) 5,
+            "packedBytes predicts the page size (expect 5)");
+        int32[] hback = BitPack.unpack(hpage, (int64) 0, hw, 8);
+        boolean hoursOk = true;
+        int32 i = 0;
+        while (i < 8) {
+            int32 hv = hback[i];
+            if (hv != hours[i]) { hoursOk = false; }
+            i = i + 1;
+        }
+        this.check(hoursOk, "bit-packed page round-trips all 8 hours");
+
+        // 2. Rle — an HTTP status column mapped to dictionary-style codes
+        //    (0=200, 1=404, 2=500). Mostly-200 traffic is one long run plus
+        //    a bit-packed tail; RLE stores the run as (count, value).
+        int32[] statuses = [ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 0 ];
+        int8[] rpage = Rle.encode(statuses, 2, 12);
+        System.stdout.println("  rle: 12 statuses -> " + rpage.count() + " bytes");
+        int32[] rback = Rle.decode(rpage, (int64) 0, 2, 12);
+        boolean runsOk = true;
+        i = 0;
+        while (i < 12) {
+            int32 rv = rback[i];
+            if (rv != statuses[i]) { runsOk = false; }
+            i = i + 1;
+        }
+        this.check(runsOk, "RLE page round-trips runs and literals");
+
+        // 3. Delta — an event-timestamp column. Timestamps are monotonic,
+        //    so the deltas [2, 3, 1, 5, 0, 6] are tiny even when the
+        //    absolute values are not; count-1 deltas plus the first value
+        //    reconstruct the column exactly.
+        int32[] ts = [ 171532800, 171532802, 171532805, 171532806,
+                       171532811, 171532811, 171532817 ];
+        int32 first = Delta.firstOf(ts, 7);
+        int32[] deltas = Delta.encode(ts, 7);
+        this.check(first == 171532800 && (int64) deltas.count() == (int64) 6,
+            "delta stores the first value plus count-1 gaps");
+        this.check(deltas[0] == 2 && deltas[4] == 0,
+            "gaps are small (repeat -> 0) where values cluster");
+        int32[] tsBack = Delta.decode(first, deltas, 7);
+        boolean tsOk = true;
+        i = 0;
+        while (i < 7) {
+            int32 tv = tsBack[i];
+            if (tv != ts[i]) { tsOk = false; }
+            i = i + 1;
+        }
+        this.check(tsOk, "prefix-summing the deltas rebuilds the timestamps");
+
+        // 4. FrameOfReference — a price column near a reference. Prices
+        //    1000..1015 become offsets 0..15 from the frame min: 4 bits
+        //    each instead of 32.
+        int32[] prices = [ 1000, 1005, 1003, 1010, 1000, 1015 ];
+        int32 ref = FrameOfReference.referenceOf(prices, 6);
+        int32[] residuals = [ 0, 5, 3, 10, 0, 15 ];
+        int32 pw = BitPack.minWidth(residuals, 6);
+        int8[] ppage = FrameOfReference.encode(prices, 6, ref, pw);
+        System.stdout.println("  frame-of-reference: base " + ref + ", "
+            + pw + "-bit offsets, " + ppage.count() + " bytes");
+        this.check(ref == 1000 && pw == 4,
+            "reference is the min; residuals need 4 bits");
+        int32[] pback = FrameOfReference.decode(ppage, (int64) 0, pw, 6, ref);
+        boolean pricesOk = true;
+        i = 0;
+        while (i < 6) {
+            int32 pv = pback[i];
+            if (pv != prices[i]) { pricesOk = false; }
+            i = i + 1;
+        }
+        this.check(pricesOk, "adding the reference back rebuilds the prices");
+
+        // 5. Dictionary — a low-cardinality venue-id column. Build the
+        //    distinct-value dictionary, replace values with indices, RLE
+        //    the indices into a page, then gather back through the
+        //    dictionary. This is exactly Parquet's RLE_DICTIONARY shape.
+        int32[] venues = [ 4001, 4007, 4001, 4001, 4009, 4007, 4001, 4009 ];
+        int32[] dict = Dictionary.buildDict(venues, 8);
+        int32[] idx = Dictionary.indicesFor(venues, 8, dict, (int32) dict.count());
+        int32 dw = BitPack.minWidth(idx, 8);
+        int8[] dpage = Dictionary.encodePage(idx, 8, dw);
+        System.stdout.println("  dictionary: 8 venue ids, "
+            + dict.count() + " distinct -> " + dpage.count() + "-byte page");
+        this.check((int64) dict.count() == (int64) 3,
+            "dictionary holds the 3 distinct venues");
+        int32[] vback = Dictionary.decode(dpage, (int64) 0, 8, dict);
+        boolean venuesOk = true;
+        i = 0;
+        while (i < 8) {
+            int32 vv = vback[i];
+            if (vv != venues[i]) { venuesOk = false; }
+            i = i + 1;
+        }
+        this.check(venuesOk, "page decode + gather rebuilds the venue column");
+        // gather() alone is the hot read path once indices are in hand.
+        int32[] gathered = Dictionary.gather(idx, 8, dict);
+        int32 g0 = gathered[0];
+        this.check(g0 == 4001, "gather maps index 0 back through the dictionary");
+
+        // 6. ColumnOrchestrator — decode a row group's pages together.
+        //    Three RLE pages concatenated into one flat buffer with a
+        //    per-page (offset, width, count) directory; decodeAll spawns a
+        //    fiber per column, decodeAllSerial is the reference. Same
+        //    directory, same results.
+        int32[] col0 = [ 7, 7, 7, 7 ];
+        int8[] e0 = Rle.encode(col0, 3, 4);
+        int32[] col1 = [ 0, 1, 2, 3, 4, 5, 6, 7 ];
+        int8[] e1 = Rle.encode(col1, 3, 8);
+        int32[] col2 = [ 5, 5, 5 ];
+        int8[] e2 = Rle.encode(col2, 4, 3);
+        int64 n0 = (int64) e0.count();
+        int64 n1 = (int64) e1.count();
+        int64 n2 = (int64) e2.count();
+        int8[] flat = heap int8[n0 + n1 + n2];
+        ColumnarDemo.blit(flat, (int64) 0, e0, n0);
+        ColumnarDemo.blit(flat, n0, e1, n1);
+        ColumnarDemo.blit(flat, n0 + n1, e2, n2);
+        int64[] offs = [ (int64) 0, n0, n0 + n1 ];
+        int32[] ws = [ 3, 3, 4 ];
+        int32[] counts = [ 4, 8, 3 ];
+        int32[][] par = ColumnOrchestrator.decodeAll(flat, offs, ws, counts, 3);
+        int32[][] ser = ColumnOrchestrator.decodeAllSerial(flat, offs, ws, counts, 3);
+        boolean allMatch = true;
+        i = 0;
+        while (i < 8) {
+            int32 a = par[1][i];
+            int32 b = ser[1][i];
+            if (a != b || a != col1[i]) { allMatch = false; }
+            i = i + 1;
+        }
+        int32 p20 = par[2][0];
+        this.check(allMatch, "parallel decode matches serial and the source");
+        this.check(p20 == 5, "every column slot decoded (col 2 starts at 5)");
+    }
+}

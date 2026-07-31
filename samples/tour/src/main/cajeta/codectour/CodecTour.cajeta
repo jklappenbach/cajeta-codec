@@ -5,6 +5,12 @@ package codectour;
 // output via check(); this entry runs them in order and returns nonzero if any
 // check failed, so `run-tour.sh` doubles as a smoke test.
 //
+// The order is the learning path: general-purpose compression (one-shot,
+// then streaming), the block codecs the file formats embed, the record
+// formats (protobuf, ion, avro — each a walk down the staged-access stack:
+// typed facade -> cursor -> index -> wire), the columnar encoding toolkit,
+// and finally the columnar file formats built from all of the above.
+//
 // Add a codec: write a NewDemo extending DemoClass, then one line below.
 public final class CodecTour {
 
@@ -14,11 +20,32 @@ public final class CodecTour {
         CompressDemo compress = heap CompressDemo();
         compress.execute();
 
+        StreamingCompressDemo streaming = heap StreamingCompressDemo();
+        streaming.execute();
+
         SnappyDemo snappy = heap SnappyDemo();
         snappy.execute();
 
         Lz4Demo lz4 = heap Lz4Demo();
         lz4.execute();
+
+        ProtobufDemo protobuf = heap ProtobufDemo();
+        protobuf.execute();
+
+        IonDemo ion = heap IonDemo();
+        ion.execute();
+
+        AvroDemo avro = heap AvroDemo();
+        avro.execute();
+
+        ColumnarDemo columnar = heap ColumnarDemo();
+        columnar.execute();
+
+        ParquetDemo parquet = heap ParquetDemo();
+        parquet.execute();
+
+        OrcDemo orc = heap OrcDemo();
+        orc.execute();
 
         System.stdout.println("");
         System.stdout.println("=== " + DemoClass.checks + " checks, "

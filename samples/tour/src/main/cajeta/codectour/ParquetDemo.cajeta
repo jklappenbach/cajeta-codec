@@ -1,0 +1,155 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.parquet.ParquetWriter;
+import dev.cajeta.codec.parquet.ParquetColumnReader;
+import dev.cajeta.codec.parquet.ParquetColumn;
+import dev.cajeta.codec.parquet.ParquetColumnInfo;
+import dev.cajeta.codec.parquet.ParquetMetadata;
+import dev.cajeta.codec.parquet.ParquetParseException;
+import dev.cajeta.codec.parquet.ThriftCompactReader;
+import dev.cajeta.codec.parquet.ThriftCompactWriter;
+
+// dev.cajeta.codec.parquet — Apache Parquet, the columnar file format.
+// A Parquet file is column pages + a Thrift-compact footer, magic "PAR1"
+// at both ends. The surface, top of the file down:
+//
+//   ParquetWriter        v1 writer: one INT32 column, PLAIN, uncompressed —
+//                        the minimal but real file other engines can read
+//   ParquetMetadata      footer scalars: version, row count, column count
+//   ParquetColumnInfo    per-column footer detail: physical type, codec,
+//                        page offsets, min/max stats -> predicate pushdown
+//   ParquetColumnReader  typed column reads (int32/int64/float/double/
+//                        string), validity masks, aggregate pushdown
+//   ThriftCompact*       the footer's encoding itself
+//
+// The READER is much wider than the writer: files from pyarrow/Spark with
+// INT64/FLOAT/DOUBLE/BYTE_ARRAY columns, dictionary + snappy pages, and
+// nullable columns all decode (the library's test suite pins those against
+// real pyarrow files); this demo exercises the reader on what the in-repo
+// writer can produce. Malformed input raises ParquetParseException.
+//
+// The scenario: a units-sold-per-day column, written and shipped to an
+// analytics job that reads the footer before touching any data.
+public class ParquetDemo extends DemoClass {
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.parquet: columnar file write/read + footer --");
+
+        // 1. Write a column. Five days of unit sales -> a complete Parquet
+        //    file: "PAR1", one PLAIN data page, Thrift footer, "PAR1".
+        int32[] sold = [ 132, 187, 143, 201, 176 ];
+        int8[] file = ParquetWriter.writeInt32Column(sold, 5);
+        int64 fn = (int64) file.count();
+        System.stdout.println("  5-row INT32 column -> " + fn + "-byte file");
+        this.check(fn > (int64) 8, "writer produced a framed file");
+
+        // 2. The footer first — that is the point of the format: an
+        //    analytics job learns the shape without reading data pages.
+        //    footerOffset locates it from the tail; parse decodes it.
+        int64 footAt = ParquetMetadata.footerOffset(file, fn);
+        ParquetMetadata meta = ParquetMetadata.parse(file, fn);
+        System.stdout.println("  footer @" + footAt + ": " + meta.numRows
+            + " rows, " + meta.numColumns + " column(s), version " + meta.version);
+        this.check(footAt > (int64) 4 && footAt < fn,
+            "footer sits between the head and tail magics");
+        this.check(meta.numRows == (int64) 5 && meta.numColumns == 1,
+            "footer reports 5 rows in 1 column");
+
+        // 3. Per-column footer detail. Physical type 1 = INT32, codec 0 =
+        //    UNCOMPRESSED; the data page starts right after the 4-byte head
+        //    magic, and there is no dictionary page (-1). The v1 writer
+        //    emits no min/max statistics, which pins the pushdown contract:
+        //    hasStats false -> mightContainRange must conservatively KEEP.
+        ParquetColumnInfo ci = ParquetColumnInfo.read(file, fn, 0);
+        this.check(ci.type == 1 && ci.codec == 0
+            && ci.numValues == (int64) 5,
+            "column info: INT32, uncompressed, 5 values");
+        this.check(ci.dataPageOffset == (int64) 4
+            && ci.dictPageOffset == (int64) 0 - (int64) 1,
+            "data page at offset 4; no dictionary page (-1)");
+        this.check(!ci.hasStats
+            && ci.mightContainRange((int64) 900, (int64) 999),
+            "no stats -> every range is conservatively kept");
+
+        // 4. Read the column back — the typed reader returns a plain
+        //    int32[]; the generic readColumn returns the ParquetColumn
+        //    carrier (type tag, row count, validity) for engine-style code.
+        int32[] soldBack = ParquetColumnReader.readInt32Column(file, fn, 0);
+        boolean valuesOk = (int64) soldBack.count() == (int64) 5;
+        int32 i = 0;
+        while (i < 5) {
+            int32 sv = soldBack[i];
+            if (sv != sold[i]) { valuesOk = false; }
+            i = i + 1;
+        }
+        this.check(valuesOk, "readInt32Column round-trips all 5 values");
+        ParquetColumn col #= ParquetColumnReader.readColumn(file, fn, 0);
+        this.check(col.colType == 1 && !col.nullable
+            && col.rows == (int64) 5 && !col.isString(),
+            "generic readColumn carries type/nullability/row count");
+        this.check(col.bits[0] == (int64) 132 && col.bits[4] == (int64) 176,
+            "generic column widens INT32 values into the bits plane");
+
+        // 5. Validity: this column is REQUIRED, so every row is present.
+        //    (On a nullable column the same call returns the per-row
+        //    null mask — the reader's test suite pins that against a
+        //    pyarrow file with real nulls.)
+        boolean[] valid = ParquetColumnReader.readValidity(file, fn, 0);
+        boolean allPresent = (int64) valid.count() == (int64) 5;
+        i = 0;
+        while (i < 5) {
+            boolean vb = valid[i];
+            if (!vb) { allPresent = false; }
+            i = i + 1;
+        }
+        this.check(allPresent, "REQUIRED column: validity mask is all true");
+
+        // 6. The footer's own encoding — Thrift compact protocol. Worth
+        //    knowing because every footer field above traveled through it.
+        //    Round-trip a tiny struct: writer emits field headers +
+        //    zigzag varints; reader walks (header, value) to the STOP.
+        ThriftCompactWriter tw = heap ThriftCompactWriter();
+        tw.writeI32Field(1, 5);                     // e.g. num_values
+        tw.writeI64Field(2, (int64) 839);           // e.g. byte size
+        tw.writeBoolField(3, true);
+        tw.stop();
+        int8[] tbytes = tw.result();
+        ThriftCompactReader tr = heap ThriftCompactReader(tbytes, (int64) 0);
+        int32 saved = tr.enterStruct();
+        int32 t1 = tr.readFieldHeader();
+        this.check(t1 == ThriftCompactReader.T_I32 && tr.fieldId() == 1
+            && tr.readI64() == (int64) 5,
+            "thrift field 1 reads back as i32 = 5");
+        int32 t2 = tr.readFieldHeader();
+        this.check(t2 == ThriftCompactReader.T_I64
+            && tr.readI64() == (int64) 839,
+            "thrift field 2 reads back as i64 = 839");
+        int32 t3 = tr.readFieldHeader();
+        this.check(t3 == ThriftCompactReader.T_BOOL_TRUE && tr.boolValue(),
+            "thrift bool travels in the field header itself");
+        int32 tstop = tr.readFieldHeader();
+        this.check(tstop == ThriftCompactReader.T_STOP,
+            "struct ends at STOP");
+        tr.exitStruct(saved);
+
+        // 7. Malformed input fails loud: break the head magic and the
+        //    footer parse raises ParquetParseException (position 0) before
+        //    any data is trusted.
+        int8[] broken = heap int8[(int32) fn];
+        int64 k = (int64) 0;
+        while (k < fn) {
+            broken[k] = file[k];
+            k = k + 1;
+        }
+        broken[0] = (int8) 0x58;                    // "XAR1"
+        boolean raised = false;
+        try {
+            ParquetMetadata bad = ParquetMetadata.parse(broken, fn);
+        } catch (ParquetParseException pe) {
+            raised = true;
+        }
+        this.check(raised, "bad magic raises ParquetParseException");
+    }
+}

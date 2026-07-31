@@ -12,27 +12,43 @@ import dev.cajeta.codec.compress.Snappy;
 //   Snappy.uncompressedLength(src, n)  -> the size decompress will produce
 //
 // Self-describing framing means a Snappy blob carries its own output size, so
-// decode needs nothing external — unlike raw LZ4 (see Lz4Demo).
+// decode needs nothing external — unlike raw LZ4 (see Lz4Demo). The raw block
+// codec does NO integrity checking of its own: it trusts its container, which
+// is exactly how the formats use it (Avro puts a CRC-32 after each snappy
+// block, Parquet/ORC frame pages with sizes) — see AvroDemo's block codecs.
+//
+// The payload is the real customer: a PLAIN-encoded columnar page — 64
+// clustered int32 sensor readings as little-endian bytes, the thing a
+// Parquet data page hands to its compression codec.
 public class SnappyDemo extends DemoClass {
 
     public void execute() {
         System.stdout.println("");
         System.stdout.println("-- dev.cajeta.codec.compress.Snappy: fast block codec --");
 
-        String text =
-            "snappy trades ratio for speed. snappy trades ratio for speed. "
-          + "snappy trades ratio for speed. snappy trades ratio for speed.";
-        int8[] data = text.toBytes();
-        int64 n = (int64) data.count();
+        // A PLAIN int32 column page: 64 readings oscillating around 1010 —
+        // clustered values make the high bytes repeat, which LZ77 folds.
+        int8[] page = heap int8[256];
+        int32 i = 0;
+        while (i < 64) {
+            int32 v = 1010 + ((i * 7) % 13);
+            int32 base = i * 4;
+            page[base] = (int8) (v & 0xFF);
+            page[base + 1] = (int8) ((v >> 8) & 0xFF);
+            page[base + 2] = (int8) ((v >> 16) & 0xFF);
+            page[base + 3] = (int8) ((v >> 24) & 0xFF);
+            i = i + 1;
+        }
+        int64 n = (int64) 256;
 
-        int8[] comp = Snappy.compress(data, n);
-        System.stdout.println("  " + n + " -> " + comp.count() + " bytes");
+        int8[] comp = Snappy.compress(page, n);
+        System.stdout.println("  column page: " + n + " -> " + comp.count() + " bytes");
 
         // The blob is self-describing: its length header predicts the output.
         int64 predicted = Snappy.uncompressedLength(comp, (int64) comp.count());
-        this.check(predicted == n, "uncompressedLength() matches the original size");
+        this.check(predicted == n, "uncompressedLength() matches the page size");
 
         int8[] out = Snappy.decompress(comp, (int64) comp.count());
-        this.check(this.sameBytes(data, out), "snappy round-trips byte-exact");
+        this.check(this.sameBytes(page, out), "snappy round-trips the page byte-exact");
     }
 }

@@ -1,0 +1,177 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.protobuf.Protobuf;
+import dev.cajeta.codec.protobuf.ProtoField;
+import dev.cajeta.codec.protobuf.ProtobufWriter;
+import dev.cajeta.codec.protobuf.ProtobufCursor;
+import dev.cajeta.codec.protobuf.ProtobufIndex;
+import dev.cajeta.codec.protobuf.ProtobufWire;
+import dev.cajeta.codec.protobuf.ProtobufParseException;
+
+// dev.cajeta.codec.protobuf — Protocol Buffers, the library's flagship format,
+// and the first walk through its staged-access convention: the type in your
+// hand names the pipeline stage.
+//
+//   Protobuf.parse<T> / toBytes<T>   typed facade — annotate a class with
+//                                    @ProtoField(N), get whole-message binding
+//   ProtobufCursor                   lazy projection — decode only the fields
+//                                    you touch, skip the rest
+//   ProtobufIndex                    field map — (number, wire type, byte span)
+//                                    per field, values still undecoded
+//   ProtobufWire                     the raw vocabulary — tags, varints
+//
+// Every stage reads the same wire bytes; you pick the shallowest stage that
+// answers your question. Malformed input raises ProtobufParseException
+// (with the byte position) — never a crash.
+//
+// The scenario: an order-entry event, the message a matching engine journals
+// for every accepted order.
+
+// support: the wire message. @ProtoField(N) assigns the protobuf field
+// number; the encoder infers the wire type from the cajeta type (int64/
+// int32/boolean -> VARINT, String/int8[]/message -> LEN). The no-arg ctor
+// sets the defaults a parse keeps when a field is absent on the wire.
+public class OrderEvent {
+    @ProtoField(1) public int64 orderId;
+    @ProtoField(2) public String symbol;
+    @ProtoField(3) public boolean buy;
+    @ProtoField(4) public int32 quantity;
+    @ProtoField(5) public int64 priceCents;
+
+    public OrderEvent() {
+        this.orderId = (int64) 0;
+        this.symbol = null;
+        this.buy = false;
+        this.quantity = 0;
+        this.priceCents = (int64) 0;
+    }
+}
+
+public class ProtobufDemo extends DemoClass {
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.protobuf: typed facade, cursor, index --");
+
+        // 1. The typed round-trip — the entry point almost every user wants.
+        //    toBytes<T> walks the annotated fields; parse<T> binds them back.
+        OrderEvent e = heap OrderEvent();
+        e.orderId = (int64) 88231;
+        e.symbol = "ACME";
+        e.buy = true;
+        e.quantity = 250;
+        e.priceCents = (int64) 1999;
+        int8[] wire = Protobuf.toBytes<OrderEvent>(e);
+        System.stdout.println("  order 88231 -> " + wire.count() + " wire bytes");
+        OrderEvent back = Protobuf.parse<OrderEvent>(wire, (int64) wire.count());
+        this.check(back.orderId == (int64) 88231 && back.symbol.equals("ACME"),
+            "typed round-trip preserves id and symbol");
+        this.check(back.buy && back.quantity == 250
+            && back.priceCents == (int64) 1999,
+            "typed round-trip preserves side, quantity, price");
+
+        // 2. A stream of messages: T[] frames each event with a varint length
+        //    prefix (writeDelimited under the hood) — the journal file shape.
+        OrderEvent[] batch = heap OrderEvent[2];
+        OrderEvent e0 = heap OrderEvent();
+        e0.orderId = (int64) 88232;
+        e0.symbol = "GLOBEX";
+        e0.quantity = 75;
+        batch[0] = e0;
+        OrderEvent e1 = heap OrderEvent();
+        e1.orderId = (int64) 88233;
+        e1.symbol = "INITECH";
+        e1.buy = true;
+        e1.quantity = 30;
+        batch[1] = e1;
+        int8[] journal = Protobuf.toBytes<OrderEvent[]>(batch);
+        OrderEvent[] replay = Protobuf.parse<OrderEvent[]>(
+            journal, (int64) journal.count());
+        this.check((int64) replay.count() == (int64) 2
+            && replay[0].orderId == (int64) 88232
+            && replay[1].symbol.equals("INITECH"),
+            "delimited stream replays both events in order");
+
+        // 3. Wire-format compatibility: bytes built with the manual writer
+        //    parse through the typed facade. This is how you interoperate
+        //    with a peer that has no cajeta classes — and it shows protobuf's
+        //    absent-field contract: fields 3-5 are never written, so the
+        //    parse keeps the constructor defaults (false, 0, 0).
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(1, (int64) 90001);
+        String sym = "HOOLI";
+        int8[] symBytes = sym.toBytes();
+        w.writeLenField(2, symBytes, (int32) symBytes.count());
+        int8[] partial = w.toBytes();
+        OrderEvent sparse = Protobuf.parse<OrderEvent>(
+            partial, (int64) partial.count());
+        this.check(sparse.orderId == (int64) 90001 && sparse.symbol.equals("HOOLI"),
+            "hand-written wire bytes bind through parse<T>");
+        this.check(!sparse.buy && sparse.quantity == 0
+            && sparse.priceCents == (int64) 0,
+            "absent wire fields keep the constructor defaults");
+
+        // 4. ProtobufCursor — lazy projection. A risk checker that only needs
+        //    the quantity decodes ONE field; symbol's bytes are never touched.
+        //    slotOf finds the field by number; has() probes absence.
+        ProtobufCursor cur = heap ProtobufCursor(wire, (int64) wire.count());
+        int32 qtySlot = cur.slotOf(4);
+        System.stdout.println("  cursor: " + cur.fieldCount()
+            + " fields, quantity (field 4) in slot " + qtySlot);
+        this.check(cur.readVarint(qtySlot) == (int64) 250,
+            "cursor projects a single varint field");
+        int32 symSlot = cur.slotOf(2);
+        int8[] symRaw = cur.readBytes(symSlot);
+        int8[] symWant = e.symbol.toBytes();
+        this.check(this.sameBytes(symRaw, symWant),
+            "cursor hands back a LEN field's payload bytes");
+        this.check(!cur.has(9) && cur.slotOf(9) == 0 - 1,
+            "absent field number probes as missing, not as an error");
+
+        // 5. Fixed-width fields: proto fixed32/fixed64 (little-endian) trade
+        //    varint compactness for constant-time size — the shape sensor
+        //    feeds use. Written manually, read back through the cursor.
+        ProtobufWriter fw = heap ProtobufWriter();
+        fw.writeFixed32Field(1, 1013);              // millibars, fixed32
+        fw.writeFixed64Field(2, (int64) 171532800); // epoch seconds, fixed64
+        int8[] fixed = fw.toBytes();
+        ProtobufCursor fcur = heap ProtobufCursor(fixed, (int64) fixed.count());
+        int32 f32Slot = fcur.slotOf(1);
+        int32 f64Slot = fcur.slotOf(2);
+        this.check(fcur.readFixed32(f32Slot) == 1013
+            && fcur.readFixed64(f64Slot) == (int64) 171532800,
+            "fixed32/fixed64 fields round-trip through writer and cursor");
+
+        // 6. ProtobufIndex + ProtobufWire — the bottom of the stack. build()
+        //    maps every field to (number, wire type, value byte span) without
+        //    decoding a single value; ProtobufWire then decodes exactly the
+        //    span you ask for. orderId=88231 is field 1, VARINT.
+        ProtobufIndex idx = ProtobufIndex.build(wire, (int64) wire.count());
+        this.check(idx.fieldCount() == 5,
+            "index maps all five fields of the order event");
+        this.check(idx.fieldNumber(0) == 1
+            && idx.wireType(0) == ProtobufWire.wireVarint()
+            && idx.wireType(1) == ProtobufWire.wireLen(),
+            "index reports field numbers and wire types");
+        this.check(ProtobufWire.decodeVarint(wire, idx.valueStart(0)) == (int64) 88231,
+            "wire-level decode at the index's value span");
+        // The first tag byte itself: 0x08 = field 1, wire type VARINT.
+        int64 tag = ProtobufWire.decodeVarint(wire, (int64) 0);
+        this.check(ProtobufWire.tagFieldNumber(tag) == 1
+            && ProtobufWire.tagWireType(tag) == ProtobufWire.wireVarint(),
+            "a tag splits into field number and wire type");
+
+        // 7. Malformed input fails loud. Wire type 3 (group start) is
+        //    deprecated and unsupported: tag 0x0B raises
+        //    ProtobufParseException carrying the byte position.
+        int8[] junk = [ (int8) 0x0B ];
+        boolean raised = false;
+        try {
+            ProtobufIndex bad = ProtobufIndex.build(junk, (int64) 1);
+        } catch (ProtobufParseException pe) {
+            raised = true;
+        }
+        this.check(raised, "corrupt wire input raises ProtobufParseException");
+    }
+}

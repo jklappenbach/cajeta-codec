@@ -9,27 +9,41 @@ import dev.cajeta.codec.compress.Lz4;
 //   Lz4.compress(src, n)             -> fresh int8[]
 //   Lz4.decompress(src, n, destLen)  -> fresh int8[]
 //
-// Unlike Snappy, the raw LZ4 *block* format stores no uncompressed length, so
-// decompress needs the output size from the caller (the surrounding container —
-// Parquet/ORC page metadata — supplies it). Pass the true size and it round-
-// trips exactly.
+// Unlike Snappy, the raw LZ4 *block* format stores no uncompressed length:
+// the CONTAINER owns that metadata. This demo models the contract the way
+// Parquet/ORC page headers do — store (uncompressedSize, block), decode
+// from the pair. Like Snappy, the raw block does no integrity checking of
+// its own; framing and checksums are the container's job (see SnappyDemo's
+// header and AvroDemo's per-block CRC).
 public class Lz4Demo extends DemoClass {
 
     public void execute() {
         System.stdout.println("");
         System.stdout.println("-- dev.cajeta.codec.compress.Lz4: fastest block codec --");
 
-        String text =
-            "lz4 is all LZ77, no Huffman. lz4 is all LZ77, no Huffman. "
-          + "lz4 is all LZ77, no Huffman. lz4 is all LZ77, no Huffman.";
-        int8[] data = text.toBytes();
-        int64 n = (int64) data.count();
+        // The same shape as SnappyDemo's payload: a PLAIN int32 column page.
+        int8[] page = heap int8[256];
+        int32 i = 0;
+        while (i < 64) {
+            int32 v = 2040 + ((i * 5) % 11);
+            int32 base = i * 4;
+            page[base] = (int8) (v & 0xFF);
+            page[base + 1] = (int8) ((v >> 8) & 0xFF);
+            page[base + 2] = (int8) ((v >> 16) & 0xFF);
+            page[base + 3] = (int8) ((v >> 24) & 0xFF);
+            i = i + 1;
+        }
+        int64 pageLen = (int64) 256;
 
-        int8[] comp = Lz4.compress(data, n);
-        System.stdout.println("  " + n + " -> " + comp.count() + " bytes");
+        // The container's page entry: (uncompressedSize, compressedBlock).
+        // Writing side records BOTH — the block alone is not decodable.
+        int8[] block = Lz4.compress(page, pageLen);
+        System.stdout.println("  page entry: size=" + pageLen + ", block="
+            + block.count() + " bytes");
 
-        // The block carries no length header — decode with the known size.
-        int8[] out = Lz4.decompress(comp, (int64) comp.count(), n);
-        this.check(this.sameBytes(data, out), "lz4 round-trips byte-exact (destLen supplied)");
+        // Reading side: the recorded size supplies destLen exactly.
+        int8[] out = Lz4.decompress(block, (int64) block.count(), pageLen);
+        this.check(this.sameBytes(page, out),
+            "lz4 round-trips the page (container-supplied destLen)");
     }
 }

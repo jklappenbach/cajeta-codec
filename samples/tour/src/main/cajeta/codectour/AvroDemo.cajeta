@@ -1,0 +1,153 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.avro.Avro;
+import dev.cajeta.codec.avro.AvroWriter;
+import dev.cajeta.codec.avro.AvroCursor;
+import dev.cajeta.codec.avro.AvroContainer;
+import dev.cajeta.codec.avro.AvroContainerWriter;
+import dev.cajeta.codec.avro.AvroBinary;
+import dev.cajeta.codec.avro.AvroParseException;
+
+// dev.cajeta.codec.avro — Apache Avro binary. Avro is POSITIONAL: the wire
+// carries no field names or tags at all, just values in schema order — the
+// smallest of the three record formats, at the price of needing the schema
+// to read. The stack:
+//
+//   Avro.parse<T> / toBytes<T>   typed facade — T's field DECLARATION ORDER
+//                                is the schema order; parse<T[]>/toBytes<T[]>
+//                                speak the Object Container File format
+//   AvroWriter / AvroCursor      manual binary encode / decode (zigzag longs,
+//                                length-prefixed strings and bytes)
+//   AvroContainer(Writer)        the container: schema + sync markers +
+//                                compressed blocks — Avro's streaming story
+//   AvroBinary                   the zigzag primitives themselves
+//
+// Corrupt container input raises AvroParseException.
+//
+// The scenario: device telemetry — readings appended to an object-container
+// log, the shape Kafka-to-lake pipelines ship.
+
+// support: the record. POSITIONAL bind — declaration order must match the
+// schema field order (id first, then status); names are documentation here.
+public class DeviceReading {
+    public int64 deviceId;
+    public String status;
+
+    public DeviceReading() {
+        this.deviceId = (int64) 0;
+        this.status = null;
+    }
+}
+
+public class AvroDemo extends DemoClass {
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.avro: typed facade, container streaming --");
+
+        // 1. Typed datum round-trip. A bare datum is JUST the values —
+        //    a long and a string is often 10-15 bytes on the wire.
+        DeviceReading r = heap DeviceReading();
+        r.deviceId = (int64) 40417;
+        r.status = "nominal";
+        int8[] datum = Avro.toBytes<DeviceReading>(r);
+        System.stdout.println("  one reading -> " + datum.count()
+            + " bytes (no names, no tags)");
+        DeviceReading back = Avro.parse<DeviceReading>(datum, (int64) datum.count());
+        this.check(back.deviceId == (int64) 40417 && back.status.equals("nominal"),
+            "typed datum round-trips positionally");
+
+        // 2. The encoding under it: longs are zigzag varints, so small
+        //    negatives stay small. zigzag maps 7 -> 14 and -7 -> 13
+        //    (n -> 2n for n >= 0, -n -> 2n-1).
+        this.check(AvroBinary.zigzagEncode((int64) 7) == (int64) 14
+            && AvroBinary.zigzagEncode((int64) 0 - (int64) 7) == (int64) 13,
+            "zigzag interleaves negatives with positives");
+        this.check(AvroBinary.zigzagDecode((int64) 13) == (int64) 0 - (int64) 7,
+            "zigzag decode inverts the mapping");
+
+        // 3. Manual encode/decode. AvroWriter emits raw Avro binary;
+        //    AvroCursor walks it back — reader and writer must agree on
+        //    the order, exactly like the schema contract.
+        AvroWriter body = heap AvroWriter();
+        body.writeLong((int64) 40418);
+        body.writeString("degraded");
+        body.writeLong((int64) 40419);
+        body.writeString("nominal");
+        int8[] blockData = body.result();
+        AvroCursor c = heap AvroCursor(blockData, (int64) 0);
+        this.check(c.readLong() == (int64) 40418
+            && c.readString().equals("degraded"),
+            "cursor decodes what the writer encoded, in order");
+        this.check(c.readLong() == (int64) 40419
+            && c.readString().equals("nominal")
+            && c.position() == body.size(),
+            "cursor lands exactly at the end of the encoded body");
+
+        // 4. The Object Container File — Avro's streaming format. wrap()
+        //    frames a block body: magic, schema JSON in the metadata map,
+        //    16-byte sync marker, then (count, size, data, sync) blocks.
+        //    Readers iterate nextBlock() and decompress per block; the
+        //    read side handles null, deflate, and snappy block codecs
+        //    (currentData() verifies the snappy CRC), the write side emits
+        //    the always-valid null codec.
+        String schema = "{\"type\":\"record\",\"name\":\"DeviceReading\","
+            + "\"fields\":[{\"name\":\"deviceId\",\"type\":\"long\"},"
+            + "{\"name\":\"status\",\"type\":\"string\"}]}";
+        int8[] file = AvroContainerWriter.wrap(
+            blockData, body.size(), (int64) 2, schema);
+        System.stdout.println("  container: " + blockData.count()
+            + "-byte block -> " + file.count() + "-byte file (schema travels)");
+        AvroContainer ct = heap AvroContainer(file, (int64) file.count());
+        this.check(ct.codec().equals("null"),
+            "container metadata names the block codec");
+        int64 blocks = (int64) 0;
+        int64 records = (int64) 0;
+        while (ct.nextBlock()) {
+            blocks = blocks + (int64) 1;
+            records = records + ct.currentObjectCount();
+            int8[] data = ct.currentData();
+            AvroCursor rc = heap AvroCursor(data, (int64) 0);
+            this.check(rc.readLong() == (int64) 40418,
+                "block data decodes from the container");
+        }
+        this.check(blocks == (int64) 1 && records == (int64) 2,
+            "one block holding two records (expect 1 block, 2 records)");
+
+        // 5. The typed facade speaks the container too: T[] means OCF.
+        //    This is the whole-file path a batch job uses.
+        DeviceReading[] log = heap DeviceReading[2];
+        DeviceReading r0 = heap DeviceReading();
+        r0.deviceId = (int64) 40420;
+        r0.status = "nominal";
+        log[0] = r0;
+        DeviceReading r1 = heap DeviceReading();
+        r1.deviceId = (int64) 40421;
+        r1.status = "offline";
+        log[1] = r1;
+        int8[] ocf = Avro.toBytes<DeviceReading[]>(log);
+        DeviceReading[] replay = Avro.parse<DeviceReading[]>(
+            ocf, (int64) ocf.count());
+        this.check((int64) replay.count() == (int64) 2
+            && replay[1].status.equals("offline"),
+            "T[] round-trips as an Object Container File");
+
+        // 6. Corrupt container input fails loud: the magic must be
+        //    'O' 'b' 'j' 0x01, so a truncated/garbled head raises
+        //    AvroParseException from the container constructor.
+        int8[] junk = heap int8[8];
+        int32 j = 0;
+        while (j < 8) {
+            junk[j] = (int8) (j * 31 + 5);
+            j = j + 1;
+        }
+        boolean raised = false;
+        try {
+            AvroContainer bad = heap AvroContainer(junk, (int64) 8);
+        } catch (AvroParseException ae) {
+            raised = true;
+        }
+        this.check(raised, "bad container magic raises AvroParseException");
+    }
+}

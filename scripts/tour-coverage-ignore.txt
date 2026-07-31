@@ -1,0 +1,15 @@
+# Types exempt from the tour-coverage gate (scripts/check-library-tour-coverage.sh).
+# Each entry must justify itself: only genuine internals belong here — a public
+# type a USER would reach for must be toured instead.
+
+# Internal DEFLATE encoder machinery. Users drive Deflate/Gzip/Zlib (one-shot)
+# or DeflateStream (streaming); these are the pieces those are built from.
+dev.cajeta.codec.compress.BitWriter
+dev.cajeta.codec.compress.DynDeflate
+dev.cajeta.codec.compress.FastHuff
+
+# Internal resumption signal: InflateStream.feed() catches it itself and rolls
+# the trial decode back — by design it never escapes to user code, so no demo
+# can honestly catch one. Real corruption surfaces as DeflateException
+# (toured in StreamingCompressDemo).
+dev.cajeta.codec.compress.InflateNeedMore

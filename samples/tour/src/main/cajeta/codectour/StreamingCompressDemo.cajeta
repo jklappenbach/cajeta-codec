@@ -1,0 +1,183 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.compress.DeflateStream;
+import dev.cajeta.codec.compress.InflateStream;
+import dev.cajeta.codec.compress.Deflate;
+import dev.cajeta.codec.compress.DeflateException;
+import dev.cajeta.codec.compress.NativeZlib;
+import dev.cajeta.codec.compress.Zlib;
+
+// Streaming DEFLATE — dev.cajeta.codec.compress's incremental half. The
+// one-shot codecs (CompressDemo) need the whole payload in hand; these two
+// classes are for data that arrives and departs in pieces:
+//
+//   DeflateStream   write() any number of times; syncFlush() emits a
+//                   byte-aligned segment a peer can decode NOW (the
+//                   WebSocket permessage-deflate / chunked-HTTP shape);
+//                   finish() closes the stream
+//   InflateStream   feed() arbitrary chunks; drain() whatever completed;
+//                   finished() when the final block lands; endInput()
+//                   declares EOF — truncation raises THERE, not mid-feed
+//                   (an incomplete tail is normal while more may come;
+//                   the internal InflateNeedMore signal handles that)
+//   NativeZlib      the linked zlib backend, callable directly: checksums
+//                   and gzip/zlib/raw framing at native speed
+//
+// The killer feature of the streaming pair is CONTEXT TAKEOVER: the LZ77
+// window survives syncFlush, so message 2 back-references message 1 and
+// compresses far smaller — exactly why permessage-deflate exists.
+//
+// The scenario: a telemetry socket sending near-identical JSON snapshots.
+public class StreamingCompressDemo extends DemoClass {
+
+    // support: append `src` into `dst` at `base`.
+    static void blit(int8[] dst, int64 base, int8[] src, int64 n) {
+        int64 i = (int64) 0;
+        while (i < n) {
+            int64 at = base + i;
+            dst[at] = src[i];
+            i = i + 1;
+        }
+    }
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.compress: streaming DEFLATE + native zlib --");
+
+        // Two telemetry snapshots: the second differs from the first by a
+        // few characters — the repetitive-messages case.
+        String snap1 = "{\"host\":\"edge-04\",\"cpu\":41,\"mem\":62,\"disk\":71,"
+            + "\"net_rx\":10442,\"net_tx\":8931,\"status\":\"nominal\"}";
+        String snap2 = "{\"host\":\"edge-04\",\"cpu\":43,\"mem\":62,\"disk\":71,"
+            + "\"net_rx\":10471,\"net_tx\":8977,\"status\":\"nominal\"}";
+        int8[] s1 = snap1.toBytes();
+        int8[] s2 = snap2.toBytes();
+
+        // 1. Per-message segments via syncFlush. Each segment ends with
+        //    the empty stored block 00 00 FF FF — the byte-aligned seam
+        //    that lets the peer decode message-by-message.
+        DeflateStream d = heap DeflateStream();
+        d.write(s1, (int32) s1.count());
+        int8[] w1 = d.syncFlush();
+        d.write(s2, (int32) s2.count());
+        int8[] w2 = d.syncFlush();
+        int32 w1n = (int32) w1.count();
+        System.stdout.println("  snapshot 1: " + s1.count() + " -> " + w1.count()
+            + " bytes; snapshot 2: " + s2.count() + " -> " + w2.count()
+            + " bytes (context takeover)");
+        this.check(w1[w1n - 4] == (int8) 0x00 && w1[w1n - 3] == (int8) 0x00
+            && w1[w1n - 2] == (int8) 0xFF && w1[w1n - 1] == (int8) 0xFF,
+            "syncFlush seals the segment with the 00 00 FF FF seam");
+
+        // 2. Context takeover: snapshot 2's whole text back-references
+        //    snapshot 1 across the flush boundary, so its segment is much
+        //    smaller — the window is shared state, not per-message.
+        this.check((int64) w2.count() < (int64) w1.count(),
+            "second near-identical message compresses smaller");
+
+        // 3. The receiving side: one InflateStream decodes the segments in
+        //    order, draining each message as its segment arrives.
+        InflateStream r = heap InflateStream();
+        r.feed(w1, (int32) w1.count());
+        int8[] g1 = r.drain();
+        this.check(this.sameBytes(g1, s1), "segment 1 drains to snapshot 1");
+        r.feed(w2, (int32) w2.count());
+        int8[] g2 = r.drain();
+        this.check(this.sameBytes(g2, s2), "segment 2 drains to snapshot 2");
+        this.check(!r.finished(),
+            "stream stays open between messages (no final block yet)");
+
+        // 4. WHY the shared window matters: a fresh inflater fed only
+        //    segment 2 lacks the history its back-references point into —
+        //    that raises DeflateException. Takeover trades resync for size.
+        InflateStream fresh = heap InflateStream();
+        boolean lostContext = false;
+        try {
+            fresh.feed(w2, (int32) w2.count());
+            int8[] junk = fresh.drain();
+        } catch (DeflateException ce) {
+            lostContext = true;
+        }
+        this.check(lostContext,
+            "segment 2 alone is undecodable (its context lives in segment 1)");
+
+        // 5. finish() emits the final block; the concatenated segments are
+        //    ONE ordinary DEFLATE stream — the one-shot inflater decodes
+        //    the whole thing. Streaming is a framing pattern, not a dialect.
+        int8[] w3 = d.finish();
+        this.check(d.finished(), "finish() closes the deflater");
+        int64 total = (int64) w1.count() + (int64) w2.count() + (int64) w3.count();
+        int8[] whole = heap int8[total];
+        StreamingCompressDemo.blit(whole, (int64) 0, w1, (int64) w1.count());
+        StreamingCompressDemo.blit(whole, (int64) w1.count(), w2, (int64) w2.count());
+        StreamingCompressDemo.blit(whole,
+            (int64) w1.count() + (int64) w2.count(), w3, (int64) w3.count());
+        int8[] flat = Deflate.inflateGrow(whole, total);
+        int64 wantLen = (int64) s1.count() + (int64) s2.count();
+        this.check((int64) flat.count() == wantLen,
+            "concatenated segments one-shot-inflate to both snapshots");
+
+        // 6. Chunked receive — the HTTP-body loop. Feed the whole stream
+        //    7 bytes at a time; drain after every feed; finished() flips
+        //    when the final block lands. InflateStream commits only whole
+        //    decoded blocks, so no chunk boundary can corrupt output.
+        InflateStream cr = heap InflateStream();
+        int8[] piece = heap int8[7];
+        int64 pos = (int64) 0;
+        int64 got = (int64) 0;
+        while (pos < total) {
+            int32 take = 7;
+            if (pos + (int64) take > total) {
+                take = (int32) (total - pos);
+            }
+            int32 k = 0;
+            while (k < take) {
+                int64 si = pos + (int64) k;
+                piece[k] = whole[si];
+                k = k + 1;
+            }
+            cr.feed(piece, take);
+            int8[] part = cr.drain();
+            got = got + (int64) part.count();
+            pos = pos + (int64) take;
+        }
+        this.check(cr.finished() && got == wantLen,
+            "7-byte chunked feed reassembles every byte (expect "
+            + wantLen + ")");
+
+        // 7. Truncation raises at endInput(), not mid-feed. Half a stream
+        //    is fine while more may come; declaring EOF on it is the error.
+        int8[] blob = Deflate.deflate(s1, (int64) s1.count());
+        int32 half = (int32) ((int64) blob.count() / (int64) 2);
+        InflateStream tr = heap InflateStream();
+        tr.feed(blob, half);
+        int8[] partial = tr.drain();       // whatever committed — fine
+        this.check(!tr.finished(), "half a stream is not finished");
+        boolean truncated = false;
+        try {
+            tr.endInput();
+        } catch (DeflateException te) {
+            truncated = true;
+        }
+        this.check(truncated, "endInput() on a truncated stream raises");
+
+        // 8. NativeZlib direct — the backend the one-shot codecs route
+        //    through, usable itself. CRC-32 pinned against the reference
+        //    value for "hello world"; zlib framing round-trips, and the
+        //    pure-cajeta decoder reads native output (one wire format).
+        String probe = "hello world";
+        int8[] pb = probe.toBytes();
+        this.check(NativeZlib.crc32(pb, (int64) pb.count()) == (int64) 222957957,
+            "native crc32(\"hello world\") == 0x0D4A1185");
+        this.check(NativeZlib.adler32(pb, (int64) pb.count()) != (int64) 0,
+            "native adler32 computed");
+        int8[] nz = NativeZlib.zlibCompress(s1, (int64) s1.count(), 6);
+        int8[] nout = NativeZlib.zlibDecompress(nz, (int64) nz.count(),
+            (int64) s1.count());
+        this.check(this.sameBytes(nout, s1), "native zlib round-trips");
+        int8[] cajOut = Zlib.decompress(nz, (int64) nz.count(), (int64) s1.count());
+        this.check(this.sameBytes(cajOut, s1),
+            "pure-cajeta decoder reads native zlib output (interop)");
+    }
+}

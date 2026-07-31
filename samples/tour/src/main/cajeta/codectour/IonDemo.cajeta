@@ -1,0 +1,163 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.ion.Ion;
+import dev.cajeta.codec.ion.IonWriter;
+import dev.cajeta.codec.ion.IonCursor;
+import dev.cajeta.codec.ion.IonIndex;
+import dev.cajeta.codec.ion.IonSymbolTable;
+import dev.cajeta.codec.ion.IonWire;
+import dev.cajeta.codec.ion.IonParseException;
+
+// dev.cajeta.codec.ion — Amazon Ion (binary), the self-describing cousin of
+// protobuf: field NAMES travel on the wire (as interned symbol IDs), so a
+// reader needs no schema and no annotations. The staged-access stack:
+//
+//   Ion.parse<T> / toBytes<T>   typed facade — binds by field name; a plain
+//                               class with matching field names is enough
+//   IonCursor                   navigation — by-name lookup, typed readers,
+//                               stepIn/stepOut for nested structs
+//   IonIndex                    field map per struct (name, type code, span)
+//   IonSymbolTable              the interning tables (system + local)
+//   IonWire                     type codes, VarUInt lengths, the BVM
+//
+// An Ion stream is: BVM (E0 01 00 EA), an optional local symbol table for
+// names beyond the nine system symbols, then user values. Malformed input
+// raises IonParseException with the byte position.
+//
+// The scenario: a fleet health sample — the record a monitoring agent posts
+// per host per minute.
+
+// support: the typed bind target. No annotations — Ion binds by NAME, so
+// the field names ARE the wire contract (declaration order is free).
+public class HealthSample {
+    public int64 ts;
+    public String host;
+    public boolean healthy;
+    public int32 latencyMs;
+
+    public HealthSample() {
+        this.ts = (int64) 0;
+        this.host = null;
+        this.healthy = false;
+        this.latencyMs = 0;
+    }
+}
+
+public class IonDemo extends DemoClass {
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.ion: typed facade, writer, cursor, symbols --");
+
+        // 1. Typed round-trip. toBytes<T> interns the field names into a
+        //    local symbol table and writes one struct; parse<T> binds back
+        //    by name. Note the negative int: Ion has distinct pos/neg int
+        //    type codes, chosen per value.
+        HealthSample s = heap HealthSample();
+        s.ts = (int64) 171532800;
+        s.host = "edge-04";
+        s.healthy = true;
+        s.latencyMs = 0 - 12;     // clock skew: negative is representable
+        int8[] wire = Ion.toBytes<HealthSample>(s);
+        System.stdout.println("  sample for edge-04 -> " + wire.count() + " wire bytes");
+        HealthSample back = Ion.parse<HealthSample>(wire, (int64) wire.count());
+        this.check(back.ts == (int64) 171532800 && back.host.equals("edge-04"),
+            "typed round-trip binds by field name");
+        this.check(back.healthy && back.latencyMs == 0 - 12,
+            "boolean and negative int survive (pos/neg int type codes)");
+
+        // 2. The wire starts with the Binary Version Marker; IonWire reads
+        //    the raw vocabulary. The struct type code is 13.
+        this.check(IonWire.isBvm(wire, (int64) 0),
+            "stream opens with the BVM E0 01 00 EA");
+        this.check(IonWire.tcStruct() == 13 && IonWire.tcString() == 8,
+            "IonWire names the type codes");
+
+        // 3. Manual IonWriter — the same record, written by hand. The
+        //    protocol: intern the names FIRST (so the local symbol table
+        //    knows them), then BVM, then the table, then the struct. Field
+        //    names outside the nine system symbols get local SIDs from 10.
+        IonWriter w = heap IonWriter();
+        w.intern("ts");
+        w.intern("host");
+        w.intern("healthy");
+        w.intern("latencyMs");
+        w.writeBvm();
+        w.writeLocalSymbolTable();
+        w.beginContainer();
+        w.writeFieldSid(w.intern("ts"));
+        w.writeIntValue((int64) 171532860);
+        w.writeFieldSid(w.intern("host"));
+        String host = "edge-07";
+        int8[] hostBytes = host.toBytes();
+        w.writeStringValue(hostBytes, (int32) hostBytes.count());
+        w.writeFieldSid(w.intern("healthy"));
+        w.writeBoolValue(false);
+        w.writeFieldSid(w.intern("latencyMs"));
+        w.writeIntValue((int64) 340);
+        w.endContainer(13);                 // 13 = struct
+        int8[] manual = w.toBytes();
+
+        // 4. IonCursor navigates the hand-written struct by name — and the
+        //    typed facade parses it too (same wire format, no schema).
+        IonCursor cur = heap IonCursor(manual, (int64) manual.count());
+        int32 hostSlot = cur.slotOf("host");
+        int32 latSlot = cur.slotOf("latencyMs");
+        this.check(cur.readString(hostSlot).equals("edge-07")
+            && cur.readInt(latSlot) == (int64) 340,
+            "cursor reads fields by name from hand-written Ion");
+        this.check(!cur.has("missing") && cur.slotOf("missing") == 0 - 1,
+            "absent field name probes as missing");
+        int32 healthSlot = cur.slotOf("healthy");
+        this.check(!cur.readBool(healthSlot) && !cur.isNull(healthSlot),
+            "false is a real value, not null (isNull distinguishes)");
+        HealthSample degraded = Ion.parse<HealthSample>(
+            manual, (int64) manual.count());
+        this.check(degraded.host.equals("edge-07") && degraded.latencyMs == 340,
+            "typed facade parses the hand-written bytes (one wire format)");
+
+        // 5. IonSymbolTable — the interning machinery itself. The system
+        //    table predefines SIDs 1-9 ("name" is 4); parsing our stream
+        //    recovers the local names we interned, local SIDs from 10.
+        IonSymbolTable sys = IonSymbolTable.system();
+        this.check(sys.resolve((int64) 4).equals("name"),
+            "system symbol 4 is \"name\"");
+        IonSymbolTable tbl = IonSymbolTable.parse(manual, (int64) manual.count());
+        System.stdout.println("  local symbols: " + tbl.localSymbolCount()
+            + " (SIDs 10.." + (9 + tbl.localSymbolCount()) + ")");
+        this.check(tbl.localSymbolCount() == 4
+            && tbl.resolve((int64) 10).equals("ts"),
+            "local table interned our four field names from SID 10");
+        this.check(tbl.resolve((int64) 99) == null,
+            "an unknown SID resolves to null, not an error");
+
+        // 6. IonIndex — the per-struct field map: name, type code, and the
+        //    value's byte span, nothing decoded yet. ts=171532860 is a
+        //    positive int (type code 2).
+        IonIndex idx = IonIndex.build(manual, (int64) manual.count());
+        this.check(idx.fieldCount() == 4 && idx.fieldName(0).equals("ts"),
+            "index maps the struct's fields in order");
+        this.check(idx.typeCode(0) == IonWire.tcPosInt()
+            && idx.typeCode(1) == IonWire.tcString(),
+            "index reports per-field type codes");
+        this.check(idx.indexOfName("healthy") == 2
+            && idx.indexOfName("nope") == 0 - 1,
+            "index finds fields by name");
+
+        // 7. Malformed input fails loud: Ion decimals (type code 5) are not
+        //    supported in v1, so a struct carrying one raises
+        //    IonParseException instead of mis-reading it.
+        int8[] junk = [
+            (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
+            (int8) 0xD2, (int8) 0x84, (int8) 0x50
+        ];
+        boolean raised = false;
+        try {
+            IonIndex bad = IonIndex.build(junk, (int64) junk.count());
+        } catch (IonParseException ie) {
+            raised = true;
+        }
+        this.check(raised, "unsupported type code raises IonParseException");
+    }
+}
