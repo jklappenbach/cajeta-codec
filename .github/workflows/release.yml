@@ -39,7 +39,7 @@ env:
   # bracket array literals these sources use; v0.12.1 for the tour, which is
   # authored and verified against the 0.12 line (try/finally, the typed-facade
   # synthesis across the .cja boundary).
-  CAJETA_VERSION: v0.12.1
+  CAJETA_VERSION: v0.15.0
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
