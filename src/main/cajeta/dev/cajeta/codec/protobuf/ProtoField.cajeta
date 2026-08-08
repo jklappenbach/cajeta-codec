@@ -19,8 +19,36 @@ package dev.cajeta.codec.protobuf;
  *
  * The **wire type** is inferred from the field's Cajeta type by the synthesizer:
  * `int*`/`uint*`/`bool`/enum → VARINT; `String`/`int8[]`/nested message → LEN
- * (length-delimited); `float32` → I32, `float64` → I64. Advanced encodings
- * (zigzag `sint`, `fixed`-width ints, packed repeated) are opt-in via future
- * arguments on this annotation. A field without `@ProtoField` is not bound.
+ * (length-delimited); `float32` → I32, `float64` → I64.
+ * A field without `@ProtoField` is not bound.
+ *
+ * ## The `encoding` option
+ *
+ * Integer fields default to plain VARINT. `encoding` selects one of protobuf's
+ * alternatives:
+ *
+ * - `"zigzag"` — `sint32` / `sint64`. Folds the sign into bit 0, so small
+ *   negatives stay short: −1 costs one payload byte instead of ten. Still wire
+ *   type VARINT; only the value mapping changes.
+ * - `"fixed"` — `fixed32` / `sfixed32` (wire type I32) for a 32-bit field,
+ *   `fixed64` / `sfixed64` (wire type I64) for a 64-bit one. Constant size
+ *   rather than value-dependent.
+ *
+ * ```cajeta
+ * public class Reading {
+ *     @ProtoField(1)                              public int64 id;
+ *     @ProtoField(value = 2, encoding = "zigzag") public int64 delta;
+ *     @ProtoField(value = 3, encoding = "fixed")  public int32 epochSecs;
+ * }
+ * ```
+ *
+ * **Declare the option in the all-named form.** Cajeta's annotation grammar
+ * (`CajetaParser.g4:481`) accepts either a single unnamed value or a list of
+ * `key = value` pairs, never a mix — `@ProtoField(2, encoding = "zigzag")` does
+ * not parse. `@ProtoField(1)` stays shorthand for `@ProtoField(value = 1)`, so
+ * a field that declares no option is unaffected.
+ *
+ * An option the field's type cannot carry — zigzag on a `String`, say — fails
+ * compilation naming the class, field, and conflict, rather than being ignored.
  */
 public annotation ProtoField { }

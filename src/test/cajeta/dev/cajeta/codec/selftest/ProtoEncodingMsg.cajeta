@@ -1,0 +1,34 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.codec.protobuf.ProtoField;
+
+/**
+ * Unit 3 test fixture — one field per `@ProtoField` encoding option.
+ *
+ * The option is declared in the all-named form. Cajeta's annotation grammar
+ * (`CajetaParser.g4:481`) accepts *either* one unnamed value *or* a list of
+ * `key = value` pairs, never a mix, so `@ProtoField(2, encoding = "zigzag")`
+ * would not parse. `@ProtoField(1)` remains shorthand for
+ * `@ProtoField(value = 1)`, so messages that declare no option are untouched.
+ *
+ *   1: plain  int64  VARINT, no option — the default, unchanged
+ *   2: zz     int64  zigzag → sint64
+ *   3: zz32   int32  zigzag → sint32
+ *   4: f32    int32  fixed  → fixed32 (wire type I32)
+ *   5: f64    int64  fixed  → fixed64 (wire type I64)
+ */
+public class ProtoEncodingMsg {
+    @ProtoField(1) public int64 plain;
+    @ProtoField(value = 2, encoding = "zigzag") public int64 zz;
+    @ProtoField(value = 3, encoding = "zigzag") public int32 zz32;
+    @ProtoField(value = 4, encoding = "fixed") public int32 f32;
+    @ProtoField(value = 5, encoding = "fixed") public int64 f64;
+
+    public ProtoEncodingMsg() {
+        this.plain = (int64) 0;
+        this.zz = (int64) 0;
+        this.zz32 = 0;
+        this.f32 = 0;
+        this.f64 = (int64) 0;
+    }
+}

@@ -54,6 +54,17 @@ public final class ProtobufCursor {
         return ProtobufWire.decodeVarint(this.b, this.idx.valueStart(slot));
     }
 
+    /**
+     * Decode the VARINT at `slot` as a zigzag-mapped signed value — protobuf
+     * `sint32` / `sint64`. Zigzag is a value mapping over wire type VARINT, so
+     * nothing on the wire distinguishes it: read the field the way its declared
+     * type says, not the way the tag looks.
+     */
+    public int64 readZigzag(int32 slot) {
+        return ProtobufWire.zigzagDecode(
+            ProtobufWire.decodeVarint(this.b, this.idx.valueStart(slot)));
+    }
+
     /** Copy the LEN payload bytes of the field at `slot` (caller owns them). */
     public #int8[] readBytes(int32 slot) {
         int8[] bb = this.b;

@@ -61,6 +61,41 @@ missing synthesizer surfaces as a throw rather than a zeroed result.
 | `String`, `int8[]` | LEN (2) |
 | a nested message class | LEN (2), decoded by recursion |
 
+### Choosing an integer encoding
+
+Integers default to plain VARINT. That is the wrong choice for values that are
+often negative: protobuf sign-extends a negative to the full ten bytes, so `-1`
+costs as much as a number in the quintillions. The `encoding` option picks an
+alternative:
+
+| `encoding` | Protobuf type | Wire type | Use when |
+|---|---|---|---|
+| *(absent)* | `int32` / `int64` | VARINT | values are usually small and non-negative |
+| `"zigzag"` | `sint32` / `sint64` | VARINT | values are often negative — `-1` costs one byte |
+| `"fixed"` | `fixed32` / `fixed64` | I32 / I64 | values are large or uniformly distributed |
+
+```cajeta
+public class Reading {
+    @ProtoField(1)                              public int64 id;
+    @ProtoField(value = 2, encoding = "zigzag") public int64 delta;
+    @ProtoField(value = 3, encoding = "fixed")  public int32 epochSecs;
+}
+```
+
+**Declare the option in the all-named form.** Cajeta's annotation grammar takes
+either one unnamed value or a list of `key = value` pairs, never a mix, so
+`@ProtoField(2, encoding = "zigzag")` does not parse. `@ProtoField(1)` remains
+shorthand for `@ProtoField(value = 1)`, so fields that declare no option are
+untouched — and encode byte-for-byte as they did before the option existed.
+
+An option the field's type cannot carry — zigzag on a `String` — fails
+compilation naming the class, field, and conflict. It is never ignored, because
+a silently wrong encoding surfaces as garbage at the far end of the wire.
+
+Zigzag rides on wire type VARINT, so nothing on the wire marks it. Both peers
+must agree on the field's declared type, exactly as they must for `sint64` in a
+`.proto` file.
+
 ### Streams of messages
 
 `T[]` reads and writes the de-facto **delimited** framing — each message

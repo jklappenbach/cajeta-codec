@@ -57,10 +57,20 @@ repo they land in.
   access surface and absent from the repo, but it is a cross-format tier
   concern — the same hole exists for Ion and Avro — and belongs to a framework
   unit, not a protobuf one. Recorded here so it is not lost.
-- **1.5.3** Auditing Ion, Avro, Parquet, and ORC for the same truncation class of
-  defect. `IonWire` / `IonIndex` share the shape and probably share the bug, but
-  widening this spec to four more formats would bury the protobuf work. A
-  follow-on spec should sweep them.
+- **1.5.3** Auditing Ion, Avro, Parquet, and ORC for the defect classes found
+  here. Widening this spec to four more formats would bury the protobuf work, so
+  a follow-on spec should sweep them. What is already known, from grepping the
+  shift sites while fixing §4:
+  - `IonWriter.cajeta:104` does `t = t >> 7` in its varint loop with **no**
+    sign mask — the same non-terminating encode protobuf had, reachable if `t`
+    can go negative.
+  - `AvroBinary.zigzagDecode:43` and `ThriftCompactReader.cajeta:104` both do
+    `(raw >> 1)` arithmetically, so they mis-decode any zigzag value with bit 63
+    set, exactly as protobuf's did.
+  - `AvroWriter.cajeta:48` and `ThriftCompactWriter.cajeta:42` are **not**
+    affected: they mask with `& 0x01FFFFFFFFFFFFFF` after the shift, which is a
+    correct workaround for an arithmetic `>>`.
+  - Truncation hardening (§2) has not been checked for any of them.
 - **1.5.4** Group wire types (3, 4). Deprecated in the format itself; fail-loud
   rejection is the correct and current behavior.
 - **1.5.5** Changing any existing public signature. Every change is additive or

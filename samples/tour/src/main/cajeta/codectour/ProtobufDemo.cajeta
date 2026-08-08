@@ -48,6 +48,21 @@ public class OrderEvent {
     }
 }
 
+// support: a message whose fields exercise the `encoding` option. deltaC swings
+// negative, so it is sint32 (zigzag); observedAt is a full-range epoch value
+// with no small-number bias, so fixed64 costs less than a varint would.
+public class TempDelta {
+    @ProtoField(1) public int64 sensorId;
+    @ProtoField(value = 2, encoding = "zigzag") public int32 deltaC;
+    @ProtoField(value = 3, encoding = "fixed") public int64 observedAt;
+
+    public TempDelta() {
+        this.sensorId = (int64) 0;
+        this.deltaC = 0;
+        this.observedAt = (int64) 0;
+    }
+}
+
 public class ProtobufDemo extends DemoClass {
 
     public void execute() {
@@ -204,5 +219,49 @@ public class ProtobufDemo extends DemoClass {
             caught = true;
         }
         this.check(caught, "a LEN field longer than the message is rejected");
+
+        // 9. Integer encodings. Plain VARINT sign-extends a negative to the
+        //    full ten bytes, so a field that swings negative — a temperature
+        //    delta, a price change — pays for it on every message. `encoding`
+        //    picks protobuf's alternative: "zigzag" (sint32/sint64) folds the
+        //    sign into bit 0, "fixed" (fixed32/fixed64) trades varint
+        //    compactness for constant size.
+        //
+        //    The option is declared all-named — `@ProtoField(value = 2,
+        //    encoding = "zigzag")` — because the annotation grammar takes
+        //    either one unnamed value or a list of pairs, never a mix.
+        TempDelta t = heap TempDelta();
+        t.sensorId = (int64) 9;
+        t.deltaC = 0 - 3;
+        t.observedAt = (int64) 171532800;
+        int8[] tw = Protobuf.toBytes<TempDelta>(t);
+        TempDelta tb = Protobuf.parse<TempDelta>(tw, (int64) tw.count());
+        this.check(tb.sensorId == (int64) 9 && tb.deltaC == 0 - 3
+            && tb.observedAt == (int64) 171532800,
+            "zigzag and fixed fields round-trip through the typed facade");
+
+        // The payoff, measured: -3 as zigzag is one payload byte; as a plain
+        // varint it is ten, because the sign extends all the way up.
+        ProtobufWriter zz = heap ProtobufWriter();
+        zz.writeZigzagField(1, (int64) 0 - (int64) 3);
+        ProtobufWriter pv = heap ProtobufWriter();
+        pv.writeVarintField(1, (int64) 0 - (int64) 3);
+        System.stdout.println("  -3 as sint64 = " + zz.size()
+            + " bytes, as int64 = " + pv.size() + " bytes");
+        this.check(zz.size() == 2 && pv.size() == 11,
+            "zigzag encodes a small negative in one payload byte, varint in ten");
+
+        // Fixed-width fields carry wire type I32/I64 rather than VARINT, which
+        // the index reports without decoding anything.
+        ProtobufIndex tidx = ProtobufIndex.build(tw, (int64) tw.count());
+        int32 fi = 0;
+        boolean fixedIsI64 = false;
+        while (fi < tidx.fieldCount()) {
+            if (tidx.fieldNumber(fi) == 3) {
+                fixedIsI64 = tidx.wireType(fi) == ProtobufWire.wireI64();
+            }
+            fi = fi + 1;
+        }
+        this.check(fixedIsI64, "an encoding=\"fixed\" int64 field rides wire type I64");
     }
 }

@@ -103,6 +103,32 @@ public final class ProtobufWire {
         throw heap ProtobufParseException("truncated protobuf varint", pos);
     }
 
+    /**
+     * Zigzag-map a signed value for `sint32` / `sint64`: `(v << 1) ^ (v >> 63)`.
+     * Plain VARINT sign-extends a negative to the full ten bytes; zigzag folds
+     * the sign into bit 0 instead, so −1 encodes as 1 and costs one byte.
+     *
+     * The `>> 63` is arithmetic on purpose — it yields all-ones for a negative
+     * and zero for a non-negative, which is the mask the fold needs.
+     */
+    public static int64 zigzagEncode(int64 v) {
+        return (v << 1) ^ (v >> 63);
+    }
+
+    /**
+     * Undo the zigzag map: even → `n/2`, odd → `-(n+1)/2`.
+     *
+     * The right shift is `>>>`, the logical one. Cajeta's `>>` is arithmetic on
+     * every type — casting to `uint64` does not make it logical, because
+     * signedness lives on the operator rather than the value. An arithmetic
+     * shift here gives the wrong answer for any value whose zigzag form has bit
+     * 63 set, i.e. every `sint64` below −2^62: `int64` min encodes to
+     * `0xFFFFFFFFFFFFFFFF`, and `>>` would carry the sign straight back in.
+     */
+    public static int64 zigzagDecode(int64 raw) {
+        return (raw >>> 1) ^ ((int64) 0 - (raw & (int64) 1));
+    }
+
     /** Field number carried by a decoded tag varint (`tag >> 3`). */
     public static int32 tagFieldNumber(int64 tag) {
         return (int32) (tag >> 3);

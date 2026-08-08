@@ -140,37 +140,70 @@ the SIMD path can be checked against them, and 5 needs 3's encoding options.
         index section now states the sizing rule and cites the measurement. Tour
         exercises `capacity()` — 116 checks, 0 failures; coverage gate 52/52.
 
-## 3. Encoding options on `@ProtoField`  (spec 4.1–4.6)  — both repos
+## 3. Encoding options on `@ProtoField`  (spec 4.1–4.6)  — both repos  ✅ DONE
 
-- [ ] **3.1 TDD**
-  - [ ] 3.1.1 `defaultEncodingUnchanged` — a message with no options declared
-        produces byte-identical wire output to today's.
-  - [ ] 3.1.2 `zigzagRoundTripsNegatives` — a zigzag `int32`/`int64` round-trips
-        −1, −2, and a large negative through the typed facade.
-  - [ ] 3.1.3 `zigzagIsCompactForSmallNegatives` — −1 encodes in one payload byte,
-        against ten for plain VARINT.
-  - [ ] 3.1.4 `fixedWidthUsesI32AndI64` — a fixed-width field emits wire type 5 or
-        1, verified through `ProtobufIndex`.
-  - [ ] 3.1.5 `fixedWidthRoundTrips` — values survive the typed round-trip.
-  - [ ] 3.1.6 Conflicting option on an incompatible type fails compilation
-        (verified by an expected-failure build, not a runtime assertion).
-- [ ] **3.2 Coding**
-  - [ ] 3.2.1 Extend the `ProtoField` annotation with the encoding option;
-        default preserves current behavior. (this repo)
-  - [ ] 3.2.2 `ProtobufWire` / `ProtobufWriter`: zigzag encode and decode helpers.
-        (this repo)
-  - [ ] 3.2.3 `ProtobufCursor`: zigzag varint read. (this repo)
-  - [ ] 3.2.4 Synthesizer reads the option and selects the encoding on both the
-        parse and encode arms. (toolchain)
-  - [ ] 3.2.5 Synthesizer rejects an option incompatible with the field's type,
-        naming class, field, and conflict. (toolchain)
-- [ ] **3.3 Acceptance**
-  - [ ] 3.3.1 Full suite green, toolchain rebuilt and this repo's tests run
-        against it.
-  - [ ] 3.3.2 Existing messages are byte-identical on the wire — verified, not
-        assumed.
-  - [ ] 3.3.3 Tour covers the new annotation surface; the zigzag/fixed-width
-        bullet is removed from the docs.
+- [x] **3.1 TDD** — new `ProtobufEncodingTest` (12 tests) + `ProtoEncodingMsg`
+  - [x] 3.1.1 `defaultEncodingUnchanged` — byte-for-byte comparison of
+        `toBytes<ProtoScalarMsg>` against the same message written by hand with
+        the plain writer calls.
+  - [x] 3.1.2 `zigzagRoundTripsNegatives`, `zigzagRoundTripsLargeNegative`, and
+        `zigzagRoundTripsAcrossRange` (both signed extremes).
+  - [x] 3.1.3 `zigzagIsCompactForSmallNegatives` — −1 is 2 bytes zigzag, 11 plain.
+  - [x] 3.1.4 `fixedWidthUsesI32AndI64` — wire type and value width read off the
+        index.
+  - [x] 3.1.5 `fixedWidthRoundTrips`, plus `allEncodingsRoundTripTogether` (4.6)
+        and `absentOptionedFieldsKeepDefaults`.
+  - [x] 3.1.6 Verified by expected-failure build: zigzag on a `String` field
+        emits `CAJETA_ERROR_PROTO_ENCODING` at the field's line/column naming
+        class, field, type, and reason — and produces no binary.
+  - [x] 3.1.7 **Added** `negativePlainVarintTerminatesAndRoundTrips` and
+        `negativeTypedFieldRoundTrips` — regressions for 3.2.6 below.
+- [x] **3.2 Coding**
+  - [x] 3.2.1 `ProtoField` gained `encoding`, declared **all-named**:
+        `@ProtoField(value = 2, encoding = "zigzag")`. Cajeta's annotation
+        grammar (`CajetaParser.g4:481`) is `( elementValuePairs | elementValue )`
+        — either one unnamed value or a list of pairs, never a mix — so
+        `@ProtoField(2, encoding = ...)` does not parse. `@ProtoField(1)` stays
+        shorthand for `value = 1`, so the default path is untouched. (this repo)
+  - [x] 3.2.2 `ProtobufWire.zigzagEncode` / `zigzagDecode`;
+        `ProtobufWriter.writeZigzagField`. (this repo)
+  - [x] 3.2.3 `ProtobufCursor.readZigzag`. (this repo)
+  - [x] 3.2.4 Synthesizer: `Encoding` option read per field, `Decode` extended
+        with `ZigzagVarint` / `Fixed32Int` / `Fixed64Int`, emitted on both arms.
+        The parse arm now shares `collectBinds` with the encode arm — they had
+        duplicate bind loops that would have drifted the moment one gained the
+        option. (toolchain)
+  - [x] 3.2.5 `applyEncoding` rejects an option the field's type cannot carry, and
+        an unknown option value, via `reportOrThrow` with the field's declared
+        line/column. (toolchain)
+  - [x] 3.2.6 **Defect found and fixed, not in the original plan.**
+        `ProtobufWriter.writeVarint` shifted with `>>`, which cajeta emits as
+        `AShr` for *every* type — the `uint64` cast does not make it logical,
+        because signedness lives on the operator (`>>>` → `LShr`), not the
+        value. For any negative input the sign bit refilled from the left and
+        the encode loop **never terminated**. Shipped, and reachable from any
+        signed `@ProtoField`; nothing caught it because no test had ever written
+        a negative varint. Found when the suite hung at 100% CPU. Same fix
+        applied to `zigzagDecode`, which needed the logical shift for `sint64`
+        below −2^62. (this repo)
+- [x] **3.3 Acceptance**
+  - [x] 3.3.1 Full suite green against the rebuilt toolchain (0.17.4 from
+        `~/code/cpp/cajeta`) — **243 passed, 0 failed, 1 skipped** (231 + 12).
+  - [x] 3.3.2 Existing messages byte-identical — 3.1.1 compares bytes, it does
+        not assume.
+  - [x] 3.3.3 Tour gained an `encoding` section printing the measured payoff
+        (`-3 as sint64 = 2 bytes, as int64 = 11 bytes`) — 119 checks, 0 failures;
+        coverage gate 52/52. Zigzag/fixed-width bullet removed from the docs and
+        an encoding-choice table added.
+
+### Note — a cajeta shift rule worth carrying forward
+
+`>>` is arithmetic on **every** cajeta type; `>>>` is the only logical shift.
+Casting to `uint64` changes nothing, because the operation carries the
+signedness rather than the operand. Two consequences seen here: a varint encode
+loop that never terminates, and a zigzag decode that mis-reads its top-bit
+cases. `AvroWriter` and `ThriftCompactWriter` already work around this by
+masking after the shift; `IonWriter` does not. Recorded in spec §1.5.3.
 
 ## 4. Float fields, and fail-loud on unbindable types  (spec 5.1–5.6, 1.6.2)  — both repos
 
