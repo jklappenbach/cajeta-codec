@@ -150,6 +150,11 @@ public class ProtobufDemo extends DemoClass {
         ProtobufIndex idx = ProtobufIndex.build(wire, (int64) wire.count());
         this.check(idx.fieldCount() == 5,
             "index maps all five fields of the order event");
+        // The index sizes itself to the field count, not the message length —
+        // so projecting two fields out of a megabyte-payload message costs an
+        // index measured in fields, not in megabytes.
+        this.check(idx.capacity() >= idx.fieldCount(),
+            "index capacity covers the fields it holds");
         this.check(idx.fieldNumber(0) == 1
             && idx.wireType(0) == ProtobufWire.wireVarint()
             && idx.wireType(1) == ProtobufWire.wireLen(),

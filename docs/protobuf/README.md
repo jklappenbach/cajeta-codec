@@ -102,6 +102,10 @@ int64 v = ProtobufWire.decodeVarint(wire, idx.valueStart(0));
 Value bounds by wire type: VARINT → the varint bytes; I64 → 8 bytes; I32 → 4
 bytes; LEN → the payload *after* its length prefix.
 
+The index allocates by **field count, not message length** — `capacity()`
+reports its slots. Two fields wrapping a 4 KB payload cost 192 bytes of index,
+not 96 KB, so projecting a couple of fields out of a large message stays cheap.
+
 ## Errors
 
 Malformed input raises `ProtobufParseException`, carrying the byte `position`
@@ -133,6 +137,4 @@ These are known gaps, tracked in
   opt-in on `@ProtoField`; integers always use plain VARINT.
 - **The structural scan is scalar.** The SIMD varint/tag boundary scan the
   framework spec calls for is not implemented.
-- **The index allocates eagerly** — one slot per input byte, roughly 24× the
-  message size — so very large messages cost more index than they should.
 - **`.proto` schema import** is a separate tooling track and does not exist.

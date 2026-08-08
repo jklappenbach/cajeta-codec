@@ -103,27 +103,42 @@ the SIMD path can be checked against them, and 5 needs 3's encoding options.
   - [x] 1.3.5 Truncation bullet removed from `docs/protobuf/README.md`; the
         Errors section now states the full rejection set.
 
-## 2. Field-proportional index allocation  (spec 3.1–3.4)  — this repo
+## 2. Field-proportional index allocation  (spec 3.1–3.4)  — this repo  ✅ DONE
 
-- [ ] **2.1 TDD**
-  - [ ] 2.1.1 `indexMatchesLegacyBoundsAcrossCorpus` — for a set of hand-built
-        messages, field numbers, wire types, and value bounds are unchanged from
-        the current implementation.
-  - [ ] 2.1.2 `indexGrowsBeyondInitialCapacity` — a message with more fields than
-        the initial allocation indexes correctly and completely.
-  - [ ] 2.1.3 `largeMessageIndexIsProportionalToFieldCount` — a message with few
-        fields but a large payload allocates an index sized by field count.
-- [ ] **2.2 Coding**
-  - [ ] 2.2.1 Replace the `n + 1` eager allocation with a growable strategy
-        (start small, double on demand, copy forward) or a counting pre-pass —
-        pick by measurement in 2.3.2.
-  - [ ] 2.2.2 Keep `ProtobufIndex`'s public accessors and their semantics exactly
-        as they are.
-- [ ] **2.3 Acceptance**
-  - [ ] 2.3.1 Full suite green.
-  - [ ] 2.3.2 Measured: a message with a large LEN payload and few fields no
-        longer allocates ~24× its own size in index. Record before/after.
-  - [ ] 2.3.3 The eager-allocation bullet is removed from the docs.
+- [x] **2.1 TDD** — 5 tests added to `ProtobufIndexTest`
+  - [x] 2.1.1 `indexMatchesLegacyBoundsAcrossCorpus` — a five-field message
+        covering all four wire types; field numbers, wire types, and value bounds
+        all unchanged, including LEN payload sitting after its length prefix and
+        each field starting where the previous ended.
+  - [x] 2.1.2 `indexGrowsBeyondInitialCapacity` — 300 fields (well past the
+        initial 8) index completely; first, middle, and last intact after the
+        growth, and values still decode at the recorded bounds.
+  - [x] 2.1.3 `largeMessageIndexIsProportionalToFieldCount` — two fields wrapping
+        a 1000-byte payload keep the index at its initial allocation.
+  - [x] 2.1.4 `capacityCoversFieldCount` and `emptyMessageIndexesToNoFields` —
+        the invariant and the degenerate case.
+- [x] **2.2 Coding**
+  - [x] 2.2.1 Growable, not a counting pre-pass: a counting pass would double the
+        structural scan, which is the very work unit 6 sets out to vectorize.
+        `ProtobufIndex` grows its **own fields** through `ensureCapacity` /
+        `append` (initial 8, doubling) — the `AvroWriter` / `ProtobufWriter`
+        pattern. Growth is on fields rather than `build`'s locals deliberately:
+        every `#=` in this repo is on a field, and a plain store of a fresh array
+        into a local leaves it dangling at scope exit.
+  - [x] 2.2.2 All existing accessors and the 5-arg constructor unchanged.
+  - [x] 2.2.3 **Added public API** (not in the original plan): `capacity()`.
+        Spec 3.2 states allocation as a requirement, and a requirement with no
+        observable cannot be tested — this is that observable, documented as
+        diagnostic.
+- [x] **2.3 Acceptance**
+  - [x] 2.3.1 Full suite green — **231 passed, 0 failed, 1 skipped** (226 + 5).
+  - [x] 2.3.2 Measured, four parallel arrays at 24 B/slot:
+        - 2 fields wrapping a 4 KB payload: **96,144 B → 192 B** (501×). This is
+          the case the cursor exists for.
+        - 200 small fields: 11,352 B → 6,144 B.
+  - [x] 2.3.3 Eager-allocation bullet removed from `docs/protobuf/README.md`; the
+        index section now states the sizing rule and cites the measurement. Tour
+        exercises `capacity()` — 116 checks, 0 failures; coverage gate 52/52.
 
 ## 3. Encoding options on `@ProtoField`  (spec 4.1–4.6)  — both repos
 
