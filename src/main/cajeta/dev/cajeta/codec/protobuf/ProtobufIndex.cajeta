@@ -10,8 +10,15 @@ package dev.cajeta.codec.protobuf;
  *
  * Value bounds by wire type: VARINT → the varint bytes; I64 → 8 bytes; I32 →
  * 4 bytes; LEN → the payload AFTER its length prefix. The next field always
- * begins at the previous field's `valueEnd`. Deprecated group wire types (3/4)
- * and unknown wire types (6/7) **fail loud** (`ProtobufParseException`).
+ * begins at the previous field's `valueEnd`.
+ *
+ * **Every accepted record fits entirely within `[0, n)`.** A record is rejected
+ * with `ProtobufParseException`, positioned at the offending byte, when it is
+ * truncated (a varint, I32, I64, or LEN payload that would need bytes past `n`),
+ * when its varint is overlong, when its field number is 0, when `n` itself
+ * exceeds the buffer, or when its wire type is a deprecated group (3/4) or
+ * unknown (6/7). A caller can therefore read any indexed span without a further
+ * bound check of its own.
  *
  * Scalar-correct first (this); the SIMD varint/tag boundary scan layers on top
  * once the oracle is locked.
@@ -37,6 +44,17 @@ public final class ProtobufIndex {
      * a group (3/4) or unknown (6/7) wire type.
      */
     public static #ProtobufIndex build(int8[] b, int64 n) {
+        if (n < (int64) 0) {
+            throw heap ProtobufParseException(
+                "negative protobuf message length", (int64) 0);
+        }
+        // Trusting a declared length longer than the buffer would put every
+        // later bound check on a number the buffer cannot honour.
+        if (n > (int64) b.count()) {
+            throw heap ProtobufParseException(
+                "declared protobuf length exceeds the buffer",
+                (int64) b.count());
+        }
         int64 cap = n + 1;
         int32[] fnums = heap int32[cap];
         int32[] wts = heap int32[cap];
@@ -45,24 +63,50 @@ public final class ProtobufIndex {
         int32 c = 0;
         int64 pos = 0;
         while (pos < n) {
-            int64 tag = ProtobufWire.decodeVarint(b, pos);
-            int64 tagLen = ProtobufWire.varintLen(b, pos);
+            // Every varint read below is bounded by `n`, so a truncated record
+            // raises here instead of scanning into whatever follows.
+            int64 tag = ProtobufWire.decodeVarint(b, pos, n);
+            int64 tagLen = ProtobufWire.varintLen(b, pos, n);
             int32 fnum = ProtobufWire.tagFieldNumber(tag);
             int32 wt = ProtobufWire.tagWireType(tag);
+            // Field number 0 is not legal protobuf; in practice it means the
+            // reader has lost sync with the record boundaries.
+            if (fnum <= 0) {
+                throw heap ProtobufParseException(
+                    "protobuf field number 0 is not legal", pos);
+            }
             int64 p = pos + tagLen;
             int64 valStart = p;
             int64 valEnd = p;
             if (wt == 0) {
-                valEnd = p + ProtobufWire.varintLen(b, p);
+                valEnd = p + ProtobufWire.varintLen(b, p, n);
             } else if (wt == 1) {
                 valEnd = p + (int64) 8;
+                if (valEnd > n) {
+                    throw heap ProtobufParseException(
+                        "truncated protobuf I64 field", pos);
+                }
             } else if (wt == 2) {
-                int64 len = ProtobufWire.decodeVarint(b, p);
-                int64 lenLen = ProtobufWire.varintLen(b, p);
+                int64 len = ProtobufWire.decodeVarint(b, p, n);
+                int64 lenLen = ProtobufWire.varintLen(b, p, n);
+                // A length varint with the top bit set decodes negative; adding
+                // it would move valEnd backwards past valStart.
+                if (len < (int64) 0) {
+                    throw heap ProtobufParseException(
+                        "negative protobuf length prefix", pos);
+                }
                 valStart = p + lenLen;
                 valEnd = valStart + len;
+                if (valEnd > n) {
+                    throw heap ProtobufParseException(
+                        "protobuf LEN payload runs past the message", pos);
+                }
             } else if (wt == 5) {
                 valEnd = p + (int64) 4;
+                if (valEnd > n) {
+                    throw heap ProtobufParseException(
+                        "truncated protobuf I32 field", pos);
+                }
             } else {
                 throw heap ProtobufParseException(
                     "unsupported protobuf wire type (group/unknown)", pos);

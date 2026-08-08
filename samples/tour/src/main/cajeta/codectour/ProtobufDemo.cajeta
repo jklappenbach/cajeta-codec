@@ -173,5 +173,31 @@ public class ProtobufDemo extends DemoClass {
             raised = true;
         }
         this.check(raised, "corrupt wire input raises ProtobufParseException");
+
+        // 8. Truncation is the malformed input you actually meet — a message
+        //    cut short by a closed socket or a partial write. Every read is
+        //    bounded by the length you pass, so a varint left mid-encoding
+        //    raises at its own start offset instead of running off the buffer.
+        //    Field 1's value varint begins at offset 1 and never terminates.
+        int8[] cut = [ (int8) 0x08, (int8) 0x96 ];
+        int64 where = (int64) 0 - (int64) 1;
+        try {
+            ProtobufIndex bad = ProtobufIndex.build(cut, (int64) 2);
+        } catch (ProtobufParseException pe) {
+            where = pe.position;
+        }
+        this.check(where == (int64) 1,
+            "a truncated varint raises at the offset it started");
+
+        // A length prefix promising more than the message carries is rejected
+        // too — the index never hands out bounds it cannot honour.
+        int8[] overrun = [ (int8) 0x12, (int8) 0x64, (int8) 0x68 ];
+        boolean caught = false;
+        try {
+            ProtobufIndex bad = ProtobufIndex.build(overrun, (int64) 3);
+        } catch (ProtobufParseException pe) {
+            caught = true;
+        }
+        this.check(caught, "a LEN field longer than the message is rejected");
     }
 }
