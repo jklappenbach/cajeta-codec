@@ -55,11 +55,14 @@ public class TempDelta {
     @ProtoField(1) public int64 sensorId;
     @ProtoField(value = 2, encoding = "zigzag") public int32 deltaC;
     @ProtoField(value = 3, encoding = "fixed") public int64 observedAt;
+    // protobuf `double` — wire type I64 carrying raw IEEE-754 bits.
+    @ProtoField(4) public float64 celsius;
 
     public TempDelta() {
         this.sensorId = (int64) 0;
         this.deltaC = 0;
         this.observedAt = (int64) 0;
+        this.celsius = (float64) 0.0;
     }
 }
 
@@ -234,11 +237,32 @@ public class ProtobufDemo extends DemoClass {
         t.sensorId = (int64) 9;
         t.deltaC = 0 - 3;
         t.observedAt = (int64) 171532800;
+        t.celsius = (float64) 21.5;
         int8[] tw = Protobuf.toBytes<TempDelta>(t);
         TempDelta tb = Protobuf.parse<TempDelta>(tw, (int64) tw.count());
         this.check(tb.sensorId == (int64) 9 && tb.deltaC == 0 - 3
             && tb.observedAt == (int64) 171532800,
             "zigzag and fixed fields round-trip through the typed facade");
+
+        // 10. Floating point. A float64 field is protobuf `double` — wire type
+        //     I64 holding the raw IEEE-754 bits, not a numeric conversion, so
+        //     the exact value comes back. (21.5 is exactly representable, hence
+        //     the direct comparison; in general compare bits, since -0.0 == 0.0
+        //     and NaN != NaN.) A field type protobuf cannot carry is a compile
+        //     error naming the field — never a value quietly missing.
+        this.check(tb.celsius == (float64) 21.5,
+            "a float64 field round-trips as protobuf double");
+        boolean celsiusIsI64 = false;
+        int32 ci = 0;
+        ProtobufIndex cidx = ProtobufIndex.build(tw, (int64) tw.count());
+        while (ci < cidx.fieldCount()) {
+            if (cidx.fieldNumber(ci) == 4) {
+                celsiusIsI64 = cidx.wireType(ci) == ProtobufWire.wireI64()
+                    && cidx.valueEnd(ci) - cidx.valueStart(ci) == (int64) 8;
+            }
+            ci = ci + 1;
+        }
+        this.check(celsiusIsI64, "a double occupies eight bytes at wire type I64");
 
         // The payoff, measured: -3 as zigzag is one payload byte; as a plain
         // varint it is ten, because the sign extends all the way up.

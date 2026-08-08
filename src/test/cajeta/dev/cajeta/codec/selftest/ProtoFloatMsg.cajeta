@@ -1,0 +1,26 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.codec.protobuf.ProtoField;
+
+/**
+ * Unit 4 test fixture — floating-point fields.
+ *
+ * Protobuf carries `double` as wire type I64 and `float` as I32, both holding
+ * raw IEEE-754 bits little-endian. Before this unit the synthesizer classified
+ * both as unsupported and dropped them in silence, in both directions.
+ *
+ *   1: id     int64    VARINT
+ *   2: price  float64  I64 (protobuf `double`)
+ *   3: ratio  float32  I32 (protobuf `float`)
+ */
+public class ProtoFloatMsg {
+    @ProtoField(1) public int64 id;
+    @ProtoField(2) public float64 price;
+    @ProtoField(3) public float32 ratio;
+
+    public ProtoFloatMsg() {
+        this.id = (int64) 0;
+        this.price = (float64) 0.0;
+        this.ratio = (float32) 0.0;
+    }
+}

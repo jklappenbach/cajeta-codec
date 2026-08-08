@@ -58,8 +58,15 @@ missing synthesizer surfaces as a throw rather than a zeroed result.
 |---|---|
 | `int8`/`int16`/`int32`/`int64`, `uint*` | VARINT (0) |
 | `boolean` | VARINT (0) |
+| `float32` (protobuf `float`) | I32 (5), raw IEEE-754 bits |
+| `float64` (protobuf `double`) | I64 (1), raw IEEE-754 bits |
 | `String`, `int8[]` | LEN (2) |
 | a nested message class | LEN (2), decoded by recursion |
+
+Floats carry their **bit pattern**, not a numeric conversion, so `-0.0` keeps
+its sign and NaN keeps its payload across a round-trip. A field type with no
+protobuf mapping is a compile error naming the class, field, and type — never a
+field quietly missing from the wire.
 
 ### Choosing an integer encoding
 
@@ -161,15 +168,11 @@ These are known gaps, tracked in
 [`specs/protobuf-spec.md`](../../specs/protobuf-spec.md) and
 [`agents/protobuf-plan.md`](../../agents/protobuf-plan.md):
 
-- **`float32` / `float64` fields are silently dropped** by the typed facade —
-  they neither encode nor decode, and no diagnostic is issued. Carry floats as
-  their IEEE-754 bits in an integer field for now, or write them through
-  `ProtobufWriter.writeFixed32Field` / `writeFixed64Field` directly.
-- **Repeated fields inside a message are not bound** by the typed facade (only
-  `int8[]`, which is `bytes`). Walk them through the cursor's successive slots.
+- **Repeated fields inside a message are not bound** by the typed facade. The
+  only array type it carries is `int8[]`, which means `bytes`; any other array
+  field is a **compile error**, not a silent omission. Walk repeated fields
+  through the cursor's successive slots meanwhile.
 - **Packed repeated encoding** is neither produced nor consumed.
-- **`sint32`/`sint64` zigzag** and **`fixed`-width integer** encodings have no
-  opt-in on `@ProtoField`; integers always use plain VARINT.
 - **The structural scan is scalar.** The SIMD varint/tag boundary scan the
   framework spec calls for is not implemented.
 - **`.proto` schema import** is a separate tooling track and does not exist.

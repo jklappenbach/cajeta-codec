@@ -205,37 +205,53 @@ loop that never terminates, and a zigzag decode that mis-reads its top-bit
 cases. `AvroWriter` and `ThriftCompactWriter` already work around this by
 masking after the shift; `IonWriter` does not. Recorded in spec §1.5.3.
 
-## 4. Float fields, and fail-loud on unbindable types  (spec 5.1–5.6, 1.6.2)  — both repos
+## 4. Float fields, and fail-loud on unbindable types  (spec 5.1–5.6, 1.6.2)  — both repos  ✅ DONE
 
-- [ ] **4.1 TDD**
-  - [ ] 4.1.1 `float64RoundTrips` — a `float64 @ProtoField` survives
-        `toBytes<T>` → `parse<T>`. Regression for the confirmed silent drop.
-  - [ ] 4.1.2 `float32RoundTrips` — same at single precision, wire type I32.
-  - [ ] 4.1.3 `floatWireTypeIsFixed` — verified through `ProtobufIndex`: wire
-        type 1 for `float64`, 5 for `float32`.
-  - [ ] 4.1.4 `floatSpecialValuesSurvive` — negative zero, +∞, −∞, and NaN keep
-        their bit patterns.
-  - [ ] 4.1.5 `absentFloatKeepsConstructorDefault`.
-  - [ ] 4.1.6 An unbindable field type fails compilation naming class, field, and
-        type — expected-failure build.
-- [ ] **4.2 Coding**
-  - [ ] 4.2.1 Establish the float-bits seam the synthesizer comment says is
-        missing: `float64` ↔ `int64` and `float32` ↔ `int32` reinterpretation.
-        Confirm whether the toolchain already offers one before adding it.
-  - [ ] 4.2.2 Synthesizer: classify `float32` → I32 and `float64` → I64 rather
-        than `Unsupported`. (toolchain)
-  - [ ] 4.2.3 Synthesizer: replace both `if (d == Unsupported) continue;` sites
-        (`:94`, `:224`) with a diagnostic. This is the actual fix for the silent
-        drop — float support alone would leave the next unbindable type silent.
-        (toolchain)
-  - [ ] 4.2.4 `ProtobufWriter` / `ProtobufCursor` float field helpers if the
-        bit-level path needs them. (this repo)
-- [ ] **4.3 Acceptance**
-  - [ ] 4.3.1 Full suite green against the rebuilt toolchain.
-  - [ ] 4.3.2 The probe that encoded a two-field float message to 2 bytes now
-        encodes both fields.
-  - [ ] 4.3.3 No existing message changes on the wire.
-  - [ ] 4.3.4 Tour covers a float field; the float bullet leaves the docs.
+- [x] **4.1 TDD** — new `ProtobufFloatTest` (9 tests) + `ProtoFloatMsg`
+  - [x] 4.1.1 `float64RoundTrips` — regression for the confirmed silent drop.
+  - [x] 4.1.2 `float32RoundTrips` at single precision.
+  - [x] 4.1.3 `floatWireTypeIsFixed` — wire type and value width read off the
+        index: I64/8 bytes for `float64`, I32/4 for `float32`.
+  - [x] 4.1.4 `negativeZeroSurvives`, `infinitiesSurvive`, `nanSurvives` — all
+        assert on **bits**, since `-0.0 == 0.0` and `NaN != NaN` make value
+        comparison blind to exactly what is being tested.
+  - [x] 4.1.5 `absentFloatKeepsConstructorDefault`.
+  - [x] 4.1.6 Verified by expected-failure build: a `boolean[]` field emits
+        `CAJETA_ERROR_PROTO_FIELD_TYPE` at the field's line/column, listing the
+        supported types, and produces no binary.
+  - [x] 4.1.7 **Added** `floatBitsSeamRoundTrips` (the seam itself, asserting
+        `toBits(19.5) != 19` — the exact distinction the old conversion missed)
+        and `floatsCoexistWithOtherFields`.
+- [x] **4.2 Coding**
+  - [x] 4.2.1 **No seam existed** — confirmed, not assumed: `Float64.asInt64()`
+        is `(int64) this.value`, a numeric *conversion*, and the only bitwise
+        path (`__cajeta_hash_float64`) canonicalizes `-0.0` and mixes a seed, so
+        it is lossy by design. The codec could not supply one either: its native
+        lib is optional and protobuf must work without it. Added to the
+        **stdlib** instead, which is where the synthesizer's TODO pointed:
+        `Float64.toBits`/`fromBits` and `Float32.toBits`/`fromBits`, backed by
+        four `memcpy` natives in `runtime/native/cajeta_rt_lang.c`. Total in both
+        directions — no bit pattern can trap, and `-0.0`/NaN payloads pass
+        through untouched. This also unblocks Avro's parked floats
+        (`P-AVRO-FLOAT`) and Ion's. (toolchain)
+  - [x] 4.2.2 Synthesizer: `Float32Bits` / `Float64Bits` decode kinds, emitted on
+        both arms. (toolchain)
+  - [x] 4.2.3 Both `if (d == Unsupported) continue;` sites replaced by one
+        `reportOrThrow` in the now-shared `collectBinds`. Unifying the two loops
+        in unit 3 meant this fix landed once instead of twice. (toolchain)
+  - [x] 4.2.4 Not needed — `writeFixed32Field`/`writeFixed64Field` and
+        `readFixed32`/`readFixed64` already carried the fixed-width path; floats
+        are those plus the bit reinterpretation.
+- [x] **4.3 Acceptance**
+  - [x] 4.3.1 Full suite green — **252 passed, 0 failed, 1 skipped** (243 + 9).
+  - [x] 4.3.2 The probe that encoded a two-field float message to 2 bytes now
+        reports `encoded 11 bytes` and `price PRESERVED = 19.5`.
+  - [x] 4.3.3 No existing message changes on the wire — `defaultEncodingUnchanged`
+        (byte comparison, unit 3) still passes.
+  - [x] 4.3.4 Tour gained a `float64` field asserting both the round-trip and the
+        eight-byte I64 encoding — 121 checks, 0 failures; coverage gate 52/52.
+        Float bullet removed from the docs and floats added to the wire-type
+        table.
 
 ## 5. Repeated and packed fields  (spec 6.1–6.8, UC-PB-3)  — both repos
 
