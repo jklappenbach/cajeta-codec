@@ -201,6 +201,34 @@ These are known gaps, tracked in
 [`specs/protobuf-spec.md`](../../specs/protobuf-spec.md) and
 [`agents/protobuf-plan.md`](../../agents/protobuf-plan.md):
 
-- **The structural scan is scalar.** The SIMD varint/tag boundary scan the
-  framework spec calls for is not implemented.
+- **The field walk is scalar, and stays that way.** See below — this is a
+  property of the format, not a missing optimization.
 - **`.proto` schema import** is a separate tooling track and does not exist.
+
+## Why the field walk is not vectorized
+
+JSON and CSV vectorize their structural scans because their structural bytes are
+context-free: `{`, `,` and `"` are identifiable by value alone, so comparing 16
+bytes at once tells you something true. Protobuf is tag-length-value. Whether
+byte *k* begins a tag depends on having decoded every field before it, and no
+byte value marks a boundary — `0x08` is as likely to be payload as a tag. The
+walk is a genuine serial dependency chain, which is why simdjson exists and
+nothing equivalent does for protobuf. Speculating and validating buys nothing,
+because the validation *is* the walk.
+
+What does vectorize is a **packed repeated payload** — a context-free run of
+varints whose element boundaries are the bytes with the continuation bit clear.
+Counting them is a compare-and-popcount over 16 bytes at a time instead of a
+walk per element, which is what `ProtobufCursor` does. Measured on this machine
+(`bench/`, `--opt=O3`, count only — decoding values remains a serial pass):
+
+| payload | elements | scalar | vectorized |
+|---|---|---|---|
+| 64 KiB, 1-byte varints | 65536 | 44 MB/s | **3126 MB/s** |
+| 192 KiB, 3-byte varints | 65536 | 102 MB/s | **2251 MB/s** |
+| 320 KiB, 5-byte varints | 65536 | 128 MB/s | **2501 MB/s** |
+| 16 B, 1-byte varints | 16 | 39 MB/s | **160 MB/s** |
+
+Part of that ratio is that the scalar path paid a non-inlined call per varint,
+which the block loop amortizes over 16 bytes — so read it as the improvement to
+this code path rather than as a pure instruction-level speedup.

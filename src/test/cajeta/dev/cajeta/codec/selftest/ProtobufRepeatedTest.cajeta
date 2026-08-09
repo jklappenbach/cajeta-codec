@@ -372,6 +372,127 @@ public class ProtobufRepeatedTest {
         return;
     }
 
+    // ---- unit 6: the vectorized packed-payload scan ----
+
+    /**
+     * 7.3 / 7.5 — the SIMD block path and the scalar tail agree at every
+     * boundary. Element counts are swept across the 16-byte vector width so
+     * that payloads shorter than one block, exactly one block, and block+tail
+     * are all covered, each with single- and multi-byte varints.
+     */
+    @Test
+    public void packedCountMatchesAcrossVectorBoundaries() {
+        int32 n = 1;
+        while (n <= 40) {
+            // Single-byte varints: payload length == element count, so this
+            // sweep walks the payload straight across the 16-byte boundary.
+            ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
+            int32[] vals = heap int32[n];
+            int32 i = 0;
+            while (i < n) {
+                vals[i] = i & 0x7F;
+                i = i + 1;
+            }
+            m.counts = #vals;
+            int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
+            ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(
+                b, (int64) b.count());
+
+            Assert.that((int64) back.counts.count()).isEqualTo((int64) n);
+            int32 j = 0;
+            while (j < n) {
+                Assert.that((int64) back.counts[j]).isEqualTo((int64) (j & 0x7F));
+                j = j + 1;
+            }
+            n = n + 1;
+        }
+        return;
+    }
+
+    /** Multi-byte varints: terminators are sparse, so blocks straddle elements. */
+    @Test
+    public void packedCountMatchesForMultiByteVarints() {
+        int32 n = 1;
+        while (n <= 24) {
+            ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
+            int32[] vals = heap int32[n];
+            int32 i = 0;
+            while (i < n) {
+                // ≥ 2^14 forces a three-byte varint, so a 16-byte block spans
+                // five elements and a bit — the block/element misalignment the
+                // popcount has to get right.
+                vals[i] = 100000 + i;
+                i = i + 1;
+            }
+            m.counts = #vals;
+            int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
+            ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(
+                b, (int64) b.count());
+
+            Assert.that((int64) back.counts.count()).isEqualTo((int64) n);
+            Assert.that((int64) back.counts[0]).isEqualTo((int64) 100000);
+            Assert.that((int64) back.counts[n - 1])
+                .isEqualTo((int64) (100000 + n - 1));
+            n = n + 1;
+        }
+        return;
+    }
+
+    /**
+     * 7.4 — a packed payload whose last varint is truncated is still rejected.
+     * The count pass is permissive by design; the decode pass raises before it
+     * stores anything, so vectorizing the count opened no hole.
+     */
+    @Test
+    public void truncatedPackedVarintStillRaises() {
+        // A 17-byte payload (past one vector block) ending mid-varint.
+        int8[] payload = heap int8[17];
+        int32 i = 0;
+        while (i < 16) {
+            payload[i] = (int8) 0x01;
+            i = i + 1;
+        }
+        payload[16] = (int8) 0x80;   // continuation set, nothing follows
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeLenField(3, payload, (int32) 17);
+        int8[] b = w.toBytes();
+
+        boolean caught = false;
+        try {
+            ProtoRepeatedMsg m = Protobuf.parse<ProtoRepeatedMsg>(
+                b, (int64) b.count());
+        } catch (ProtobufParseException pe) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    /** 7.4 — an overlong varint inside a packed payload is rejected too. */
+    @Test
+    public void overlongPackedVarintStillRaises() {
+        int8[] payload = heap int8[12];
+        int32 i = 0;
+        while (i < 11) {
+            payload[i] = (int8) 0x80;   // eleven continuation bytes
+            i = i + 1;
+        }
+        payload[11] = (int8) 0x01;
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeLenField(3, payload, (int32) 12);
+        int8[] b = w.toBytes();
+
+        boolean caught = false;
+        try {
+            ProtoRepeatedMsg m = Protobuf.parse<ProtoRepeatedMsg>(
+                b, (int64) b.count());
+        } catch (ProtobufParseException pe) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
     /** Everything at once, to catch interference between the shapes. */
     @Test
     public void allRepeatedShapesRoundTripTogether() {

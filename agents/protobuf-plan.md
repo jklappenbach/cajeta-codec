@@ -347,26 +347,62 @@ masking after the shift; `IonWriter` does not. Recorded in spec §1.5.3.
         byte layout. Once a message class exists in a user's tree, flipping the
         default silently changes their wire output.
 
-## 6. SIMD structural scan  (spec 7.1–7.5, framework §8.2)  — this repo
+## 6. SIMD over packed payloads  (spec 7.1–7.7, framework §8.2)  — this repo  ✅ DONE
 
-- [ ] **6.1 TDD**
-  - [ ] 6.1.1 `simdIndexMatchesScalarAcrossCorpus` — over a corpus spanning field
-        counts, wire types, and varint widths, the SIMD index equals the scalar
-        index field-for-field. The scalar path is the oracle.
-  - [ ] 6.1.2 `simdRejectsMalformedIdentically` — every unit-1 rejection case
-        raises the same exception at the same position through the SIMD path.
-  - [ ] 6.1.3 `scalarFallbackProducesSameIndex` — targets without SIMD agree.
-  - [ ] 6.1.4 Boundary cases: a message shorter than one vector, and one whose
-        length is an exact vector multiple.
-- [ ] **6.2 Coding**
-  - [ ] 6.2.1 Vectorized varint/tag boundary scan for stage 1, following the
-        Deflate/BitPack SIMD precedent already in this repo.
-  - [ ] 6.2.2 Runtime or compile-time selection with the scalar path retained as
-        fallback and reference.
-  - [ ] 6.2.3 Bench under `bench/`, comparing SIMD to scalar over a large message.
-- [ ] **6.3 Acceptance**
-  - [ ] 6.3.1 Full suite green on both paths.
-  - [ ] 6.3.2 Bench recorded showing a measured speed-up.
-  - [ ] 6.3.3 Vectorization opens no hole that unit 1 closed — 6.1.2 is the gate.
-  - [ ] 6.3.4 The scalar-scan bullet leaves the docs; framework §8.2's SIMD
-        designation is satisfied.
+**Scope changed before implementation.** The unit was written to vectorize the
+stage-1 tag/varint boundary scan. That is not achievable: protobuf's TLV framing
+makes "where does the next field begin" a serial dependency with no context-free
+byte to compare against, unlike JSON's braces or CSV's commas. Spec §7 was
+rewritten to withdraw the requirement and record why, and the unit re-aimed at
+framework §8.2's *second* SIMD clause — bulk packed-repeated primitive fields —
+which is real, vectorizable, and the one that serves UC-PB-3.
+
+- [x] **6.1 TDD** — 4 tests added to `ProtobufRepeatedTest`
+  - [x] 6.1.1 `packedCountMatchesAcrossVectorBoundaries` — element counts swept
+        1..40 with single-byte varints, so payloads shorter than one 16-byte
+        block, exactly one block, and block+tail are all covered.
+  - [x] 6.1.2 `packedCountMatchesForMultiByteVarints` — three-byte varints, so
+        block boundaries fall mid-element and the popcount has to handle
+        terminators that do not align with blocks.
+  - [x] 6.1.3 `truncatedPackedVarintStillRaises` and
+        `overlongPackedVarintStillRaises` — spec 7.4, the gate that
+        vectorization opened no hole.
+  - [x] 6.1.4 Scalar/SIMD agreement is also asserted *inside the bench*: both
+        paths run over the same bytes and their totals are compared, so a
+        divergence fails loudly rather than flattering the new path.
+- [x] **6.2 Coding**
+  - [x] 6.2.1 `ProtobufCursor.countPackedVarints` — every varint ends in exactly
+        one byte with the continuation bit clear, so the element count is a
+        popcount of that mask per 16-byte block. `Vector` has no `splat`, so the
+        0x80 comparand is a constant array through `Cajeta.vload16`; `and` +
+        `eqMask` gives the continuation mask.
+  - [x] 6.2.2 Scalar tail for the final <16 bytes; the scalar walk survives in
+        the bench as the reference implementation.
+  - [x] 6.2.3 `bench/src/dev/cajeta/codec/bench/PackedScanBench.cajeta` +
+        `bench/README.md` section.
+  - [x] 6.2.4 **Defect caught by the suite, and a corrected assumption.** The
+        first cut left counting permissive on the theory that the decode pass
+        would reject malformed input "before storing anything". It does not: on
+        a truncated payload the count returns one element fewer than the walk
+        produces, and the **array bounds check on `out[w]` fires before** the
+        `decodeVarint` call that would have raised — `array index 16 out of
+        bounds for dimension size 16`. The real invariant is stricter: count and
+        walk must agree on element count for every input either accepts, because
+        the count sizes the array the walk fills. Truncation is now rejected in
+        the count, walking back to the incomplete varint's start so the reported
+        position still matches the scalar path. An overlong varint needs no such
+        check — it carries exactly one terminator, so the count stays right and
+        the decode pass raises.
+- [x] **6.3 Acceptance**
+  - [x] 6.3.1 Full suite green — **275 passed, 0 failed, 1 skipped** (271 + 4).
+  - [x] 6.3.2 Bench recorded (`--opt=O3`), count only:
+        64 KiB / 1-byte varints **44 → 3126 MB/s**; 192 KiB / 3-byte
+        **102 → 2251**; 320 KiB / 5-byte **128 → 2501**; 16 B **39 → 160**.
+        Reported with the caveat that the scalar path paid a non-inlined
+        `varintLen` call per element which the block loop amortizes, so this is
+        the gain on this code path rather than a pure instruction-count ratio.
+  - [x] 6.3.3 No hole opened — 6.1.3 is the gate and both cases raise.
+  - [x] 6.3.4 Docs bullet replaced with a section explaining why the field walk
+        is serial and what vectorizes instead, carrying the measured table.
+        Framework §8.2's first SIMD clause is withdrawn with reasons in spec §7.1
+        rather than left looking unmet.

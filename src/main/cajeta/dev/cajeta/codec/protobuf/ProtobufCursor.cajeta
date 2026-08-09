@@ -116,6 +116,77 @@ public final class ProtobufCursor {
         return -1;
     }
 
+    /**
+     * Varints in the packed payload `[s, e)`, counted 16 bytes at a time.
+     *
+     * Every varint ends with exactly one byte whose continuation bit is clear,
+     * so the element count is the number of such bytes — a popcount per block
+     * rather than a walk per varint. This is the one part of protobuf that
+     * vectorizes: a packed payload is a context-free run, unlike the tag walk,
+     * where whether a byte begins a field depends on everything before it.
+     *
+     * `Vector` has no `splat`, so the 0x80 comparand is a constant array loaded
+     * through `vload16`; `eqMask` after an `and` gives the continuation mask.
+     *
+     * A truncated tail is rejected **here**, not left to the decode pass. It
+     * contributes no terminator, so counting would return one element fewer
+     * than the walk goes on to produce, and the walk would run off the end of
+     * the array it just sized — the array bounds check fires before the decode
+     * call that would have raised. Count and walk have to agree on element
+     * count for every input either of them accepts.
+     *
+     * An overlong varint needs no check here: it carries exactly one terminator
+     * like any other, so the count stays right and the decode pass raises on it.
+     */
+    int32 countPackedVarints(int64 s, int64 e) {
+        if (e > s) {
+            int8 last = this.b[e - (int64) 1];
+            if ((((int32) last) & 0x80) != 0) {
+                // Walk back to the start of the incomplete varint so the
+                // position matches what the scalar path would have reported.
+                int64 st = e - (int64) 1;
+                int64 floor = e - ProtobufWire.maxVarintBytes();
+                if (floor < s) { floor = s; }
+                boolean scanning = true;
+                while (scanning && st > floor) {
+                    int8 prev = this.b[st - (int64) 1];
+                    if ((((int32) prev) & 0x80) == 0) {
+                        scanning = false;
+                    } else {
+                        st = st - (int64) 1;
+                    }
+                }
+                throw heap ProtobufParseException(
+                    "truncated protobuf varint", st);
+            }
+        }
+        int8[] hi = heap int8[16];
+        int32 k = 0;
+        while (k < 16) {
+            hi[k] = (int8) 0x80;
+            k = k + 1;
+        }
+        Vector<int8,16> hiV = Cajeta.vload16(hi, (int64) 0);
+
+        int32 n = 0;
+        int64 p = s;
+        while (p + (int64) 16 <= e) {
+            Vector<int8,16> v = Cajeta.vload16(this.b, p);
+            Vector<int8,16> m = v & hiV;
+            int32 cont = m.eqMask((int8) 0x80) & 0xFFFF;
+            int32 term = (~cont) & 0xFFFF;
+            n = n + (int32) Cajeta.popcount64((int64) term);
+            p = p + (int64) 16;
+        }
+        // Tail: fewer than 16 bytes left, same rule one byte at a time.
+        while (p < e) {
+            int8 c = this.b[p];
+            if ((((int32) c) & 0x80) == 0) { n = n + 1; }
+            p = p + 1;
+        }
+        return n;
+    }
+
     /** How many varint elements a repeated VARINT field yields, both forms. */
     public int32 repeatedVarintCount(int32 fnum) {
         int32 n = 0;
@@ -124,12 +195,8 @@ public final class ProtobufCursor {
         while (i < c) {
             if (this.idx.fieldNumber(i) == fnum) {
                 if (this.idx.wireType(i) == 2) {
-                    int64 p = this.idx.valueStart(i);
-                    int64 e = this.idx.valueEnd(i);
-                    while (p < e) {
-                        p = p + ProtobufWire.varintLen(this.b, p, e);
-                        n = n + 1;
-                    }
+                    n = n + this.countPackedVarints(
+                        this.idx.valueStart(i), this.idx.valueEnd(i));
                 } else {
                     n = n + 1;
                 }
