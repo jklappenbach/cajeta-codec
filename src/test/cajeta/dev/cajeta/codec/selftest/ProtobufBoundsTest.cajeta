@@ -1,9 +1,11 @@
 package dev.cajeta.codec.selftest;
 
 import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.protobuf.Protobuf;
 import dev.cajeta.codec.protobuf.ProtobufCursor;
 import dev.cajeta.codec.protobuf.ProtobufIndex;
 import dev.cajeta.codec.protobuf.ProtobufParseException;
+import dev.cajeta.codec.protobuf.ProtobufWriter;
 
 /**
  * Unit 1 — bounds-safe, fail-loud parsing (spec 2.1–2.9). Every malformed or
@@ -217,6 +219,61 @@ public class ProtobufBoundsTest {
         int8 p1 = payload[1];
         Assert.that((int64) (((int32) p0) & 0xFF)).isEqualTo((int64) 0x68);
         Assert.that((int64) (((int32) p1) & 0xFF)).isEqualTo((int64) 0x69);
+        return;
+    }
+
+    /**
+     * Spec 2.10 — a truncated length-delimited **stream** is rejected.
+     *
+     * The single-message index was hardened in unit 1, but `parse<T[]>` frames
+     * its own records in synthesized code, which read frame lengths unbounded
+     * and then allocated from a length already past the end. A journal cut
+     * short by a closed socket walked off the buffer. Found while writing the
+     * repeated-field emit, which sits in the same file.
+     */
+    @Test
+    public void truncatedDelimitedStreamRaises() {
+        ProtobufWriter inner = heap ProtobufWriter();
+        inner.writeVarintField(1, (int64) 10);
+        inner.writeVarintField(4, (int64) 1);
+        int8[] frame = inner.toBytes();
+
+        ProtobufWriter s = heap ProtobufWriter();
+        s.writeDelimited(frame, (int32) frame.count());
+        s.writeDelimited(frame, (int32) frame.count());
+        int8[] full = s.toBytes();
+
+        // Lop off the tail of the second frame — its header still promises
+        // more bytes than the buffer now holds.
+        int32 cutLen = (int32) full.count() - 2;
+        int8[] cut = ProtobufBoundsTest.prefix(full, cutLen);
+
+        boolean caught = false;
+        try {
+            ProtoScalarMsg[] msgs = Protobuf.parse<ProtoScalarMsg[]>(
+                cut, (int64) cutLen);
+        } catch (ProtobufParseException pe) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+
+    /** The intact stream still parses — the check rejects only real overruns. */
+    @Test
+    public void intactDelimitedStreamStillParses() {
+        ProtobufWriter inner = heap ProtobufWriter();
+        inner.writeVarintField(1, (int64) 10);
+        int8[] frame = inner.toBytes();
+        ProtobufWriter s = heap ProtobufWriter();
+        s.writeDelimited(frame, (int32) frame.count());
+        s.writeDelimited(frame, (int32) frame.count());
+        int8[] full = s.toBytes();
+
+        ProtoScalarMsg[] msgs = Protobuf.parse<ProtoScalarMsg[]>(
+            full, (int64) full.count());
+        Assert.that((int64) msgs.count()).isEqualTo((int64) 2);
+        Assert.that(msgs[0].id).isEqualTo((int64) 10);
         return;
     }
 

@@ -1,0 +1,43 @@
+package dev.cajeta.codec.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.protobuf.ProtoField;
+
+/**
+ * Unit 5 test fixture — one field per repeated shape.
+ *
+ * `packed = true` asks for protobuf's packed encoding: one LEN record holding
+ * the concatenated values, instead of one tagged record per value. It applies
+ * only to repeated numeric fields. Reading accepts **either** form regardless
+ * of what is declared, because a conforming peer may send either.
+ *
+ *   1: id      int64            scalar, for company
+ *   2: scores  int64[]          repeated VARINT, unpacked
+ *   3: counts  int32[]          repeated VARINT, packed
+ *   4: deltas  int64[]          repeated zigzag, packed
+ *   5: stamps  int32[]          repeated fixed32, packed
+ *   6: tags    String[]         repeated LEN — one record per element
+ *   7: items   ProtoInnerMsg[]  repeated nested message
+ *   8: blob    int8[]           still `bytes`, NOT a repeated int8
+ */
+public class ProtoRepeatedMsg {
+    @ProtoField(1) public int64 id;
+    @ProtoField(2) public int64[] scores;
+    @ProtoField(value = 3, packed = true) public int32[] counts;
+    @ProtoField(value = 4, encoding = "zigzag", packed = true) public int64[] deltas;
+    @ProtoField(value = 5, encoding = "fixed", packed = true) public int32[] stamps;
+    @ProtoField(6) public String[] tags;
+    @ProtoField(7) public ProtoInnerMsg[] items;
+    @ProtoField(8) public int8[] blob;
+
+    public ProtoRepeatedMsg() {
+        this.id = (int64) 0;
+        this.scores = null;
+        this.counts = null;
+        this.deltas = null;
+        this.stamps = null;
+        this.tags = null;
+        this.items = null;
+        this.blob = null;
+    }
+}

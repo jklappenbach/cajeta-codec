@@ -103,6 +103,37 @@ Zigzag rides on wire type VARINT, so nothing on the wire marks it. Both peers
 must agree on the field's declared type, exactly as they must for `sint64` in a
 `.proto` file.
 
+### Repeated fields
+
+An array field is a repeated field. `int8[]` is the one exception — it means
+protobuf `bytes`, a single LEN record, not a repeated `int8`.
+
+```cajeta
+@ProtoField(2)                        public int64[] scores;
+@ProtoField(value = 3, packed = true) public int32[] counts;
+@ProtoField(6)                        public String[] tags;
+@ProtoField(7)                        public Reading[] items;
+```
+
+`packed = true` writes one LEN record holding the values concatenated with no
+tags, instead of one tagged record per value — roughly a byte per element rather
+than two, for a run of small numbers. It applies only to repeated numeric
+fields and composes with `encoding`, so packed zigzag and packed fixed-width
+both work. Asking for it on a non-repeated or non-numeric field is a compile
+error.
+
+**Reading accepts either wire form**, whatever the field declares, and copes
+with a message that mixes them — values concatenate in wire order. `packed`
+only chooses what this side writes.
+
+> `packed` is opt-in here, where **proto3 makes it the default** for repeated
+> numeric fields. Both forms are valid and every conforming reader takes either,
+> so the cost is bytes rather than interoperability — but a field left unpacked
+> by omission is larger on the wire than the same field declared in a `.proto`.
+
+A repeated field is never null after a parse. Protobuf cannot distinguish an
+absent repeated field from an empty one, so absent decodes to an empty array.
+
 ### Streams of messages
 
 `T[]` reads and writes the de-facto **delimited** framing — each message
@@ -168,11 +199,6 @@ These are known gaps, tracked in
 [`specs/protobuf-spec.md`](../../specs/protobuf-spec.md) and
 [`agents/protobuf-plan.md`](../../agents/protobuf-plan.md):
 
-- **Repeated fields inside a message are not bound** by the typed facade. The
-  only array type it carries is `int8[]`, which means `bytes`; any other array
-  field is a **compile error**, not a silent omission. Walk repeated fields
-  through the cursor's successive slots meanwhile.
-- **Packed repeated encoding** is neither produced nor consumed.
 - **The structural scan is scalar.** The SIMD varint/tag boundary scan the
   framework spec calls for is not implemented.
 - **`.proto` schema import** is a separate tooling track and does not exist.

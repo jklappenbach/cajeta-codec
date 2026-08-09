@@ -50,5 +50,36 @@ package dev.cajeta.codec.protobuf;
  *
  * An option the field's type cannot carry — zigzag on a `String`, say — fails
  * compilation naming the class, field, and conflict, rather than being ignored.
+ *
+ * ## Repeated fields and the `packed` option
+ *
+ * An array field is a repeated field. `int8[]` is the one exception: it means
+ * protobuf `bytes`, a single LEN record, not a repeated `int8`.
+ *
+ * ```cajeta
+ * @ProtoField(2)                            public int64[] scores;
+ * @ProtoField(value = 3, packed = true)     public int32[] counts;
+ * @ProtoField(6)                            public String[] tags;
+ * @ProtoField(7)                            public Reading[] items;
+ * ```
+ *
+ * `packed = true` writes one LEN record holding the values concatenated with no
+ * tags, instead of one tagged record per value — roughly a byte per element
+ * instead of two, for a run of small numbers. It applies only to repeated
+ * numeric fields, and composes with `encoding`.
+ *
+ * **Reading accepts either form**, whatever the field declares, because a
+ * conforming peer may send either and may even mix them within one message.
+ * `packed` therefore only chooses what *this* side writes.
+ *
+ * Note that `packed` is **opt-in here, where proto3 makes it the default** for
+ * repeated numeric fields. Both forms are valid protobuf and every conforming
+ * reader takes either, so this costs bytes rather than interoperability — but a
+ * field left unpacked by omission will be larger on the wire than the same
+ * field declared in a `.proto`.
+ *
+ * A repeated field is never null after a parse: absent on the wire means an
+ * empty array, which is protobuf's contract — there is no way to distinguish
+ * "absent" from "empty" for a repeated field.
  */
 public annotation ProtoField { }

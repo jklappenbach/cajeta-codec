@@ -253,37 +253,65 @@ masking after the shift; `IonWriter` does not. Recorded in spec §1.5.3.
         Float bullet removed from the docs and floats added to the wire-type
         table.
 
-## 5. Repeated and packed fields  (spec 6.1–6.8, UC-PB-3)  — both repos
+## 5. Repeated and packed fields  (spec 6.1–6.8, UC-PB-3)  — both repos  ✅ DONE
 
-- [ ] **5.1 TDD**
-  - [ ] 5.1.1 `repeatedScalarBindsInWireOrder` — successive occurrences of one
-        field number bind into an array in order.
-  - [ ] 5.1.2 `repeatedMessageBinds` — repeated nested messages bind to an array.
-  - [ ] 5.1.3 `absentRepeatedIsEmptyNotNull`.
-  - [ ] 5.1.4 `packedWriteProducesSingleLenRecord` — verified through the index:
-        one record, wire type 2.
-  - [ ] 5.1.5 `packedReadDecodesAllElements`.
-  - [ ] 5.1.6 `unpackedWireFormDecodesIdentically` — the same field sent unpacked
-        yields the same array. Conformance: readers must accept both.
-  - [ ] 5.1.7 `packedPayloadNotDivisibleRaises` — a fixed-width packed payload
-        that does not divide evenly is rejected.
-  - [ ] 5.1.8 `packedRespectsElementEncoding` — packed zigzag and packed
-        fixed-width elements round-trip under unit 3's options.
-- [ ] **5.2 Coding**
-  - [ ] 5.2.1 `ProtoField` packed option. (this repo)
-  - [ ] 5.2.2 `ProtobufWriter`: packed repeated field emit. (this repo)
-  - [ ] 5.2.3 `ProtobufCursor`: walk repeated slots, and decode a packed payload
-        into elements. (this repo)
-  - [ ] 5.2.4 Synthesizer: classify array-typed fields (other than `int8[]`, which
-        stays `bytes`) as repeated, and emit both arms. (toolchain)
-  - [ ] 5.2.5 Synthesizer: honor the packed option on write; accept either form on
-        read. (toolchain)
-- [ ] **5.3 Acceptance**
-  - [ ] 5.3.1 Full suite green.
-  - [ ] 5.3.2 UC-PB-3 satisfied — packed repeated numeric fields decode.
-  - [ ] 5.3.3 `int8[]` still means `bytes`, not a repeated `int8` — verified.
-  - [ ] 5.3.4 Tour covers a repeated and a packed field; both bullets leave the
-        docs.
+- [x] **5.1 TDD** — new `ProtobufRepeatedTest` (16 tests) + `ProtoRepeatedMsg`
+  - [x] 5.1.1 `repeatedScalarBindsInWireOrder`, plus
+        `unpackedRepeatedWritesOneRecordPerElement` checking the wire shape.
+  - [x] 5.1.2 `repeatedMessageBinds`, and `repeatedStringBinds` for LEN elements.
+  - [x] 5.1.3 `absentRepeatedIsEmptyNotNull` across all four repeated shapes.
+  - [x] 5.1.4 `packedWriteProducesSingleLenRecord` — one record, wire type 2,
+        payload width checked off the index.
+  - [x] 5.1.5 `packedReadDecodesAllElements`, including multi-byte varints.
+  - [x] 5.1.6 `unpackedWireFormDecodesIdentically` **and** the mirror,
+        `packedWireFormDecodesForUnpackedDeclaration` — conformance runs both
+        ways. Plus `mixedPackedAndUnpackedConcatenate`, since one message may
+        legitimately carry both forms of the same field number.
+  - [x] 5.1.7 `packedPayloadNotDivisibleRaises` through the typed facade and
+        `cursorRejectsRaggedPackedFixed32` straight off the cursor.
+  - [x] 5.1.8 `packedZigzagRoundTrips` (asserting the payload really is one byte
+        per element) and `packedFixed32RoundTrips` (four bytes per element).
+  - [x] 5.1.9 **Added** `bytesFieldIsStillBytes` (5.3.3 as a test, not an
+        inspection) and `allRepeatedShapesRoundTripTogether`.
+  - [x] 5.1.10 **Added** `truncatedDelimitedStreamRaises` and
+        `intactDelimitedStreamStillParses` in `ProtobufBoundsTest` — see 5.2.6.
+- [x] **5.2 Coding**
+  - [x] 5.2.1 `ProtoField` gained `packed`. (this repo)
+  - [x] 5.2.2 `ProtobufWriter`: `writePackedVarintField`, `writePackedZigzagField`,
+        `writePackedFixed32Field`, `writePackedFixed64Field`. Each encodes into a
+        scratch writer first, since the length prefix is unknown until the
+        payload exists. (this repo)
+  - [x] 5.2.3 `ProtobufCursor`: `readRepeatedVarint` / `Zigzag` / `Fixed32` /
+        `Fixed64`, plus `repeatedCount` and `slotOfNth` for LEN elements. The
+        readers accept **either** wire form and concatenate across records, so a
+        mixed message decodes correctly. `countFixedElements` enforces the
+        whole-element rule. (this repo)
+  - [x] 5.2.4 Synthesizer: `Bind` gained `repeated` / `packed`, `classify` split
+        so a repeated field's **element** reuses the scalar classifier — a
+        repeated int64 therefore encodes each element exactly as a scalar int64
+        does, by construction rather than by a parallel code path. `int8[]`
+        stays `bytes`. (toolchain)
+  - [x] 5.2.5 `emitRepeatedParse` / `emitRepeatedEncode` cover all seven element
+        kinds × packed/unpacked. Repeated decode is emitted **outside** the slot
+        guard, because absent must yield empty rather than skip. (toolchain)
+  - [x] 5.2.6 **Defect found and fixed, not in the original plan.** The
+        synthesized `parse<T[]>` stream body read its frame lengths with the
+        unbounded `decodeVarint(bytes, p)` and never checked that a frame fit,
+        then allocated `heap int8[fln]` from a length it had already overrun. A
+        journal truncated by a closed socket walked past the buffer. Unit 1
+        hardened `ProtobufIndex`, but this framing lives in the synthesizer, so
+        it was untouched. Now bounded by `length` with an explicit fit check.
+        Recorded as spec 2.10. (toolchain)
+- [x] **5.3 Acceptance**
+  - [x] 5.3.1 Full suite green — **268 passed, 0 failed, 1 skipped** (252 + 16),
+        before the two stream-truncation tests were added.
+  - [x] 5.3.2 UC-PB-3 satisfied — packed repeated numeric fields decode, in both
+        wire forms and under every element encoding.
+  - [x] 5.3.3 `int8[]` still means `bytes` — one LEN record of three bytes, not
+        three records, asserted off the index.
+  - [x] 5.3.4 Tour gained a repeated/packed section printing the record-count
+        contrast. Both bullets removed from the docs, replaced by a repeated
+        section that flags the proto3 packed-by-default divergence.
 
 ## 6. SIMD structural scan  (spec 7.1–7.5, framework §8.2)  — this repo
 

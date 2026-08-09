@@ -80,6 +80,207 @@ public final class ProtobufCursor {
         return #out;
     }
 
+    // ---- repeated fields ----
+    //
+    // A repeated field may arrive in either of two forms, and a conforming
+    // reader accepts both no matter which the schema declares: **unpacked** —
+    // one tagged record per value — or **packed** — a single LEN record whose
+    // payload is the values concatenated with no tags. The readers below walk
+    // every slot carrying the field number and expand whichever form each one
+    // is, concatenating in wire order. A message may legitimately mix the two.
+
+    /** Number of slots carrying field number `fnum` (one per wire record). */
+    public int32 repeatedCount(int32 fnum) {
+        int32 n = 0;
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) { n = n + 1; }
+            i = i + 1;
+        }
+        return n;
+    }
+
+    /** Index slot of the `k`-th record carrying `fnum`, or -1 if there is none. */
+    public int32 slotOfNth(int32 fnum, int32 k) {
+        int32 seen = 0;
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) {
+                if (seen == k) { return i; }
+                seen = seen + 1;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    /** How many varint elements a repeated VARINT field yields, both forms. */
+    public int32 repeatedVarintCount(int32 fnum) {
+        int32 n = 0;
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) {
+                if (this.idx.wireType(i) == 2) {
+                    int64 p = this.idx.valueStart(i);
+                    int64 e = this.idx.valueEnd(i);
+                    while (p < e) {
+                        p = p + ProtobufWire.varintLen(this.b, p, e);
+                        n = n + 1;
+                    }
+                } else {
+                    n = n + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return n;
+    }
+
+    /** Every value of a repeated VARINT field, in wire order (either form). */
+    public #int64[] readRepeatedVarint(int32 fnum) {
+        int32 n = this.repeatedVarintCount(fnum);
+        int64[] out = heap int64[n];
+        int32 w = 0;
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) {
+                if (this.idx.wireType(i) == 2) {
+                    int64 p = this.idx.valueStart(i);
+                    int64 e = this.idx.valueEnd(i);
+                    while (p < e) {
+                        out[w] = ProtobufWire.decodeVarint(this.b, p, e);
+                        p = p + ProtobufWire.varintLen(this.b, p, e);
+                        w = w + 1;
+                    }
+                } else {
+                    out[w] = ProtobufWire.decodeVarint(
+                        this.b, this.idx.valueStart(i));
+                    w = w + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    /** Every value of a repeated zigzag (`sint32`/`sint64`) field. */
+    public #int64[] readRepeatedZigzag(int32 fnum) {
+        int64[] raw = this.readRepeatedVarint(fnum);
+        int32 n = (int32) raw.count();
+        int64[] out = heap int64[n];
+        int32 i = 0;
+        while (i < n) {
+            int64 r = raw[i];
+            out[i] = ProtobufWire.zigzagDecode(r);
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    /**
+     * Every value of a repeated I32 field. A packed payload must be a whole
+     * number of 4-byte elements — a ragged tail means the writer and reader
+     * disagree about the element width, so it is rejected rather than silently
+     * dropping the remainder.
+     */
+    public #int32[] readRepeatedFixed32(int32 fnum) {
+        int32 n = this.countFixedElements(fnum, 4);
+        int32[] out = heap int32[n];
+        int32 w = 0;
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) {
+                int64 p = this.idx.valueStart(i);
+                int64 e = this.idx.valueEnd(i);
+                while (p < e) {
+                    out[w] = this.fixed32At(p);
+                    p = p + (int64) 4;
+                    w = w + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    /** Every value of a repeated I64 field; same whole-element rule at 8 bytes. */
+    public #int64[] readRepeatedFixed64(int32 fnum) {
+        int32 n = this.countFixedElements(fnum, 8);
+        int64[] out = heap int64[n];
+        int32 w = 0;
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) {
+                int64 p = this.idx.valueStart(i);
+                int64 e = this.idx.valueEnd(i);
+                while (p < e) {
+                    out[w] = this.fixed64At(p);
+                    p = p + (int64) 8;
+                    w = w + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    // Element count for a repeated fixed-width field, rejecting a payload that
+    // is not a whole multiple of the element width. An unpacked record is
+    // exactly one element wide and so divides trivially.
+    int32 countFixedElements(int32 fnum, int64 width) {
+        int32 n = 0;
+        int32 c = this.idx.fieldCount();
+        int32 i = 0;
+        while (i < c) {
+            if (this.idx.fieldNumber(i) == fnum) {
+                int64 span = this.idx.valueEnd(i) - this.idx.valueStart(i);
+                if (span % width != (int64) 0) {
+                    throw heap ProtobufParseException(
+                        "packed protobuf payload is not a whole number of "
+                        + "fixed-width elements", this.idx.valueStart(i));
+                }
+                n = n + (int32) (span / width);
+            }
+            i = i + 1;
+        }
+        return n;
+    }
+
+    // Little-endian fixed32 at an absolute offset.
+    int32 fixed32At(int64 pos) {
+        int8[] bb = this.b;
+        int64 p = pos;
+        int32 b0 = ((int32) bb[p]) & 0xFF;
+        p = p + 1;
+        int32 b1 = ((int32) bb[p]) & 0xFF;
+        p = p + 1;
+        int32 b2 = ((int32) bb[p]) & 0xFF;
+        p = p + 1;
+        int32 b3 = ((int32) bb[p]) & 0xFF;
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    // Little-endian fixed64 at an absolute offset.
+    int64 fixed64At(int64 pos) {
+        int8[] bb = this.b;
+        int64 p = pos;
+        int64 v = (int64) 0;
+        int32 i = 0;
+        while (i < 8) {
+            int64 byteVal = (int64) (((int32) bb[p]) & 0xFF);
+            v = v | (byteVal << (i * 8));
+            p = p + 1;
+            i = i + 1;
+        }
+        return v;
+    }
+
     /** Decode the I32 (fixed32) value of the field at `slot`, little-endian. */
     public int32 readFixed32(int32 slot) {
         int8[] bb = this.b;

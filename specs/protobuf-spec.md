@@ -113,6 +113,13 @@ array access outside the buffer.
   the cursor was built over.
 - **2.9** When the index rejects input, the exception's `position` identifies the
   byte where the defect was found, so a caller can log or seek to it.
+- **2.10** When a length-delimited **stream** (`parse<T[]>`) is truncated — a
+  frame header claiming more bytes than remain — it is rejected at the frame's
+  start offset. Found during §6: the synthesized stream body read its frame
+  lengths unbounded and then allocated from a length it had already overrun, so
+  a journal cut short by a closed socket walked past the buffer. Same defect
+  class as §2.1, in the synthesizer rather than the index, which is why §2's
+  index hardening did not cover it.
 
 ## 3. Index footprint
 
