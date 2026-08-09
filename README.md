@@ -9,7 +9,7 @@ linking):
 
 | Package | Format | Status |
 |---|---|---|
-| `dev.cajeta.codec.protobuf` | Protocol Buffers | reader + writer + typed facade; [gaps tracked](specs/protobuf-spec.md) |
+| `dev.cajeta.codec.protobuf` | Protocol Buffers | reader + writer + typed facade; [gaps tracked](specs/archive/protobuf-spec.md) |
 | `dev.cajeta.codec.ion`      | Amazon Ion       | reader + writer + typed facade |
 | `dev.cajeta.codec.avro`     | Apache Avro      | reader + writer + typed facade, OCF containers |
 | `dev.cajeta.codec.parquet`  | Apache Parquet   | reader + writer, dictionary/nullable/multi-row-group |
@@ -18,7 +18,7 @@ linking):
 Every format above ships both directions with `@Test` coverage in the suite.
 "Status" here means *implemented and tested*, not *complete against the format
 spec* — protobuf is the only one audited gap-by-gap so far
-([spec](specs/protobuf-spec.md), [plan](agents/protobuf-plan.md)).
+([spec](specs/archive/protobuf-spec.md), [plan](agents/archive/protobuf-plan.md)).
 
 Plus the columnar tier (`XFile` / `ColumnVector<T>`) and the compression codecs
 (`Compressor` / `Decompressor`). The DEFLATE / gzip / zlib family has a native
@@ -36,8 +36,12 @@ Plus the columnar tier (`XFile` / `ColumnVector<T>`) and the compression codecs
   throughput; the pure-cajeta encoder/decoder remains as the transparent
   fallback, so the guarantee holds functionally with or without the native lib.
 - **Read *and* write in v1** — writers ship with readers.
-- **SIMD the structural scan** (varint/tag index) and the columnar integer
-  encodings; never SIMD the LZ match-copy chain.
+- **SIMD the structural scan where the structure is context-free** — JSON's
+  braces, CSV's delimiters, packed protobuf payloads, the columnar integer
+  encodings. Never the LZ match-copy chain, and never a tag-length-value walk:
+  protobuf's field scan is a serial dependency with no byte value marking a
+  boundary, so there is nothing for a block compare to find (see
+  [`docs/protobuf/`](docs/protobuf/)).
 - **The staged-access convention** — the type in your hand names the pipeline
   stage; its methods are the only legal next steps.
 

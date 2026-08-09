@@ -198,8 +198,8 @@ array guard.
 ## Current limitations
 
 These are known gaps, tracked in
-[`specs/protobuf-spec.md`](../../specs/protobuf-spec.md) and
-[`agents/protobuf-plan.md`](../../agents/protobuf-plan.md):
+[`specs/archive/protobuf-spec.md`](../../specs/archive/protobuf-spec.md) and
+[`agents/archive/protobuf-plan.md`](../../agents/archive/protobuf-plan.md):
 
 - **The field walk is scalar, and stays that way.** See below — this is a
   property of the format, not a missing optimization.
