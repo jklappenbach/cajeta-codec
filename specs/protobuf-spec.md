@@ -208,22 +208,46 @@ encodings on read, since a conforming reader must accept either.
 - **6.8** When a repeated field of a fixed-width or zigzag encoding is packed,
   the element encoding declared in §4 governs each element.
 
-## 7. SIMD structural scan
+## 7. SIMD over packed payloads
 
-7.1 **Requirements.** The stage-1 scan — locating tag and varint boundaries —
-uses SIMD where the target supports it, and is validated against the scalar
-implementation as the oracle. The scalar path remains, both as fallback and as
-the correctness reference.
+7.1 **Why not the field scan.** This section originally required SIMD on the
+stage-1 tag/varint boundary scan, following framework spec §8.2. **That is not
+achievable for protobuf's field walk, and the requirement is withdrawn.** JSON
+and CSV vectorize because their structural bytes are context-free — `{`, `,`,
+`"` are identifiable by value alone, so a comparison against 16 bytes at once is
+meaningful. Protobuf is tag-length-value: whether byte *k* begins a tag depends
+on having decoded every field before it, and no byte value marks a boundary
+(`0x08` is as likely to be payload as a tag). The walk is a genuine serial
+dependency chain, which is why simdjson exists and no "simdproto" does.
+Speculating and validating buys nothing, because validation *is* the serial walk.
 
-- **7.2** When a message is indexed on a SIMD-capable target, the index produced
-  is byte-for-byte identical to the scalar index for the same input.
-- **7.3** When a message is indexed on a target without SIMD support, the scalar
-  path produces the same result.
-- **7.4** When malformed input is scanned, the SIMD path rejects it identically
-  to the scalar path — same exception, same position. Vectorization must not open
-  a hole that §2 closed.
-- **7.5** When the scan is benchmarked over a large message, the SIMD path is
-  measurably faster than the scalar path, and the comparison is recorded.
+7.2 **What is vectorizable.** A **packed repeated payload** is context-free: a
+run of varints with no interleaved framing, whose element boundaries are given
+by the continuation bit of each byte. That is framework §8.2's second SIMD
+clause — "bulk packed-repeated primitive fields" — and it is what serves UC-PB-3.
+The scalar path remains as both fallback and correctness oracle.
+
+- **7.3** When a packed varint payload is scanned on a SIMD-capable target, the
+  element count and the decoded values are identical to the scalar path's, for
+  every input the scalar path accepts.
+- **7.4** When a packed payload is malformed — a truncated trailing varint, a
+  ragged fixed-width tail — the SIMD path rejects it identically to the scalar
+  path: same exception, same position. Vectorization must not open a hole §2 or
+  §6.7 closed.
+- **7.5** When a payload is shorter than one vector, or an exact multiple of the
+  vector width, it decodes correctly — the tail path and the block path agree at
+  their boundary.
+- **7.6** When packed-payload decoding is benchmarked over a large repeated
+  field, the SIMD path is compared against the scalar path and the result is
+  recorded, whichever way it falls. A vectorization that does not pay is
+  reported as such rather than kept for appearance.
+- **7.7** When the available vector surface lacks an operation the algorithm
+  wants, the gap is recorded rather than worked around silently. As of this
+  writing `Vector<T,N>` implements `eqMask`, `dot`, `length`, `normalize`,
+  `compressStore`, and mask `all`/`any`/`select`; the `splat`, `mask()`
+  (movemask), `tableLookup`, and `i8x16`-style aliases described in
+  `docs/specification/math/Simd.md` and its tour are **not** implemented. A
+  constant array loaded through `Cajeta.vload16` substitutes for `splat`.
 
 ## 8. Documentation and tour
 

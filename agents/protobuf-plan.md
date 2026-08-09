@@ -223,17 +223,17 @@ masking after the shift; `IonWriter` does not. Recorded in spec §1.5.3.
         `toBits(19.5) != 19` — the exact distinction the old conversion missed)
         and `floatsCoexistWithOtherFields`.
 - [x] **4.2 Coding**
-  - [x] 4.2.1 **No seam existed** — confirmed, not assumed: `Float64.asInt64()`
-        is `(int64) this.value`, a numeric *conversion*, and the only bitwise
-        path (`__cajeta_hash_float64`) canonicalizes `-0.0` and mixes a seed, so
-        it is lossy by design. The codec could not supply one either: its native
-        lib is optional and protobuf must work without it. Added to the
-        **stdlib** instead, which is where the synthesizer's TODO pointed:
-        `Float64.toBits`/`fromBits` and `Float32.toBits`/`fromBits`, backed by
-        four `memcpy` natives in `runtime/native/cajeta_rt_lang.c`. Total in both
-        directions — no bit pattern can trap, and `-0.0`/NaN payloads pass
-        through untouched. This also unblocks Avro's parked floats
-        (`P-AVRO-FLOAT`) and Ion's. (toolchain)
+  - [x] 4.2.1 ~~**No seam existed** — confirmed, not assumed.~~ **This claim was
+        wrong.** `Cajeta.f64ToBits` / `bitsToF64` / `f32ToBits` / `bitsToF32`
+        already existed as compiler intrinsics. The search that produced the
+        claim covered the stdlib wrapper classes (`Float64.asInt64` is a numeric
+        conversion; `__cajeta_hash_float64` is lossy by design) and the runtime
+        C, but never the `Cajeta.*` intrinsic namespace — so "confirmed, not
+        assumed" was asserted on an incomplete search. Found in unit 6 while
+        enumerating `Cajeta.*` for SIMD intrinsics.
+        **Corrected in 4.4:** the duplicate wrappers and their four `@Native` C
+        functions are removed and the synthesizer emits the intrinsics, which
+        lower to a bitcast rather than a call. (toolchain)
   - [x] 4.2.2 Synthesizer: `Float32Bits` / `Float64Bits` decode kinds, emitted on
         both arms. (toolchain)
   - [x] 4.2.3 Both `if (d == Unsupported) continue;` sites replaced by one
@@ -252,6 +252,22 @@ masking after the shift; `IonWriter` does not. Recorded in spec §1.5.3.
         eight-byte I64 encoding — 121 checks, 0 failures; coverage gate 52/52.
         Float bullet removed from the docs and floats added to the wire-type
         table.
+
+### 4.4 Correction — use the existing intrinsics, drop the duplicate seam
+
+- [x] 4.4.1 `ProtobufSynthesizer` emits `Cajeta.f64ToBits` / `bitsToF64` /
+      `f32ToBits` / `bitsToF32` instead of the `Float*.toBits` wrappers.
+- [x] 4.4.2 `Float64.toBits`/`fromBits`, `Float32.toBits`/`fromBits`, and the
+      four `__cajeta_f*_bits` functions in `runtime/native/cajeta_rt_lang.c` are
+      removed. They were a second way to do something the language already did,
+      and the worse way: an intrinsic lowers to a bitcast, a `@Native` binding
+      lowers to a call.
+- [x] 4.4.3 `ProtobufFloatTest` pins the intrinsics directly, with a note on the
+      file recording why the wrappers existed and went.
+- [x] 4.4.4 Lesson for the remaining work: "no facility exists" is only true
+      after searching the **intrinsic** namespace as well as the stdlib classes.
+      `Cajeta.*` holds `ctz64`, `popcount64`, `vload16`, the float-bits pair, and
+      more — none of it discoverable from the `runtime/src` tree.
 
 ## 5. Repeated and packed fields  (spec 6.1–6.8, UC-PB-3)  — both repos  ✅ DONE
 
