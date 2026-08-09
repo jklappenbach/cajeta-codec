@@ -9,11 +9,16 @@ linking):
 
 | Package | Format | Status |
 |---|---|---|
-| `dev.cajeta.codec.protobuf` | Protocol Buffers | Phase 2 — in progress |
-| `dev.cajeta.codec.ion`      | Amazon Ion       | Phase 3 — planned |
-| `dev.cajeta.codec.avro`     | Apache Avro      | Phase 5 — planned |
-| `dev.cajeta.codec.parquet`  | Apache Parquet   | Phase 6 — planned |
-| `dev.cajeta.codec.orc`      | Apache ORC       | Phase 7 — planned |
+| `dev.cajeta.codec.protobuf` | Protocol Buffers | reader + writer + typed facade; [gaps tracked](specs/archive/protobuf-spec.md) |
+| `dev.cajeta.codec.ion`      | Amazon Ion       | reader + writer + typed facade |
+| `dev.cajeta.codec.avro`     | Apache Avro      | reader + writer + typed facade, OCF containers |
+| `dev.cajeta.codec.parquet`  | Apache Parquet   | reader + writer, dictionary/nullable/multi-row-group |
+| `dev.cajeta.codec.orc`      | Apache ORC       | reader + writer, RLE v2, column stats |
+
+Every format above ships both directions with `@Test` coverage in the suite.
+"Status" here means *implemented and tested*, not *complete against the format
+spec* — protobuf is the only one audited gap-by-gap so far
+([spec](specs/archive/protobuf-spec.md), [plan](agents/archive/protobuf-plan.md)).
 
 Plus the columnar tier (`XFile` / `ColumnVector<T>`) and the compression codecs
 (`Compressor` / `Decompressor`). The DEFLATE / gzip / zlib family has a native
@@ -31,8 +36,12 @@ Plus the columnar tier (`XFile` / `ColumnVector<T>`) and the compression codecs
   throughput; the pure-cajeta encoder/decoder remains as the transparent
   fallback, so the guarantee holds functionally with or without the native lib.
 - **Read *and* write in v1** — writers ship with readers.
-- **SIMD the structural scan** (varint/tag index) and the columnar integer
-  encodings; never SIMD the LZ match-copy chain.
+- **SIMD the structural scan where the structure is context-free** — JSON's
+  braces, CSV's delimiters, packed protobuf payloads, the columnar integer
+  encodings. Never the LZ match-copy chain, and never a tag-length-value walk:
+  protobuf's field scan is a serial dependency with no byte value marking a
+  boundary, so there is nothing for a block compare to find (see
+  [`docs/protobuf/`](docs/protobuf/)).
 - **The staged-access convention** — the type in your hand names the pipeline
   stage; its methods are the only legal next steps.
 
@@ -42,10 +51,19 @@ Plus the columnar tier (`XFile` / `ColumnVector<T>`) and the compression codecs
 cajeta.json                      # library manifest (no entry-method → emits .cja)
 src/main/cajeta/dev/cajeta/codec # library sources, by format subpackage
 src/test/cajeta/dev/cajeta/codec # cajeta-unit @Test suites
-docs/                            # framework + per-format specs
-plan/                            # pointer to the private plans (cajeta-agents)
+docs/                            # user-facing format documentation
+specs/                           # engineering work specs + INDEX (active work)
+agents/                          # work plans + this clone's focus stack
+samples/tour/                    # the runnable, self-checking library tour
+native/                          # vendored zlib + shim, per-target static libs
 run-tests.sh                     # build lib + cajeta-unit, link, run the suite
 ```
+
+Work in flight is tracked as a **spec** (`specs/<name>-spec.md`, the *why* and
+*what*) plus a **plan** (`agents/<name>-plan.md`, the TDD work breakdown whose
+checkboxes are the source of truth for progress). `specs/INDEX.md` lists only
+active work; both documents move to `archive/` when the plan closes. See
+[`td-project-workflow.md`](td-project-workflow.md).
 
 ## Build & test
 
@@ -60,8 +78,12 @@ fix (cajeta ≥ 0.7.1-dev) is required.
 
 ## Framework reference
 
-The codec framework spec lives at `docs/` here and in the toolchain at
-`docs/specification/codec/Codecs.md`. The core tier interfaces
+The codec framework spec lives in the toolchain at
+`docs/specification/codec/Codecs.md`; this library implements its Part B (§1.4).
+The typed facades (`Protobuf.parse<T>` and its Ion/Avro twins) are synthesized
+per-`T` by the toolchain's `src/cajeta/codec/*Synthesizer.cpp` — the bodies in
+this repo are failsafes that throw if the synthesizer does not engage, so work
+on the typed surface spans both repos. The core tier interfaces
 (`cajeta.wire.{Encoder, SchemaEncoder, StreamingEncoder, Compressor,
 Decompressor}`) and the JSON/CSV reference implementations are in the core
 stdlib.

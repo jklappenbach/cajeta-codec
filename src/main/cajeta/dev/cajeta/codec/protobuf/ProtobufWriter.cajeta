@@ -46,13 +46,23 @@ public final class ProtobufWriter {
         this.len = this.len + 1;
     }
 
-    /** Emit a base-128 varint (minimal, low 7-bit group first). */
+    /**
+     * Emit a base-128 varint (minimal, low 7-bit group first).
+     *
+     * The shift is `>>>`, not `>>`. Cajeta's `>>` is arithmetic on every type —
+     * the `uint64` cast does not change that, since signedness lives on the
+     * operator and not on the value (`BinaryOpExpression.cpp` emits `AShr` for
+     * `>>` unconditionally, `LShr` only for `>>>`). With `>>` this loop never
+     * terminates for a negative `v`: the sign bit refills from the left and `x`
+     * never reaches zero. Protobuf encodes a negative int32/int64 as a ten-byte
+     * varint, so that path is reachable from any signed field.
+     */
     public void writeVarint(int64 v) {
         uint64 x = (uint64) v;
         boolean go = true;
         while (go) {
             int32 b7 = (int32) (x & (uint64) 0x7F);
-            x = x >> 7;
+            x = x >>> 7;
             if (x != (uint64) 0) {
                 this.putByte((int8) (b7 | 0x80));
             } else {
@@ -71,6 +81,16 @@ public final class ProtobufWriter {
     public void writeVarintField(int32 fieldNumber, int64 v) {
         this.writeTag(fieldNumber, 0);
         this.writeVarint(v);
+    }
+
+    /**
+     * VARINT field carrying a zigzag-mapped signed value — protobuf `sint32` /
+     * `sint64`. Same wire type as a plain VARINT field; only the value mapping
+     * differs, so a peer must agree on the field's declared type to read it back.
+     */
+    public void writeZigzagField(int32 fieldNumber, int64 v) {
+        this.writeTag(fieldNumber, 0);
+        this.writeVarint(ProtobufWire.zigzagEncode(v));
     }
 
     /**
@@ -123,6 +143,81 @@ public final class ProtobufWriter {
             x = x >> 8;
             i = i + 1;
         }
+    }
+
+    // ---- packed repeated fields ----
+    //
+    // One LEN record whose payload is the values concatenated with no tags, in
+    // place of one tagged record per value. For a run of small numbers that is
+    // roughly one byte each instead of two. Only repeated numeric fields may be
+    // packed; a peer reading them must accept the unpacked form too, and vice
+    // versa.
+    //
+    // The length prefix is only known after encoding the payload, so each of
+    // these encodes into a scratch writer first and then frames the result.
+
+    /** Packed repeated VARINT field: one LEN record of concatenated varints. */
+    public void writePackedVarintField(int32 fieldNumber, int64[] values, int32 count) {
+        ProtobufWriter payload = heap ProtobufWriter();
+        int64[] v = values;
+        int32 i = 0;
+        while (i < count) {
+            int64 e = v[i];
+            payload.writeVarint(e);
+            i = i + 1;
+        }
+        int8[] bytes = payload.toBytes();
+        this.writeLenField(fieldNumber, bytes, (int32) bytes.count());
+    }
+
+    /** Packed repeated zigzag (`sint32`/`sint64`) field. */
+    public void writePackedZigzagField(int32 fieldNumber, int64[] values, int32 count) {
+        ProtobufWriter payload = heap ProtobufWriter();
+        int64[] v = values;
+        int32 i = 0;
+        while (i < count) {
+            int64 e = v[i];
+            payload.writeVarint(ProtobufWire.zigzagEncode(e));
+            i = i + 1;
+        }
+        int8[] bytes = payload.toBytes();
+        this.writeLenField(fieldNumber, bytes, (int32) bytes.count());
+    }
+
+    /** Packed repeated I32 field: four little-endian bytes per element. */
+    public void writePackedFixed32Field(int32 fieldNumber, int32[] values, int32 count) {
+        ProtobufWriter payload = heap ProtobufWriter();
+        int32[] v = values;
+        int32 i = 0;
+        while (i < count) {
+            int32 e = v[i];
+            payload.putByte((int8) (e & 0xFF));
+            payload.putByte((int8) ((e >> 8) & 0xFF));
+            payload.putByte((int8) ((e >> 16) & 0xFF));
+            payload.putByte((int8) ((e >> 24) & 0xFF));
+            i = i + 1;
+        }
+        int8[] bytes = payload.toBytes();
+        this.writeLenField(fieldNumber, bytes, (int32) bytes.count());
+    }
+
+    /** Packed repeated I64 field: eight little-endian bytes per element. */
+    public void writePackedFixed64Field(int32 fieldNumber, int64[] values, int32 count) {
+        ProtobufWriter payload = heap ProtobufWriter();
+        int64[] v = values;
+        int32 i = 0;
+        while (i < count) {
+            int64 x = v[i];
+            int32 k = 0;
+            while (k < 8) {
+                payload.putByte((int8) (x & (int64) 0xFF));
+                x = x >>> 8;
+                k = k + 1;
+            }
+            i = i + 1;
+        }
+        int8[] bytes = payload.toBytes();
+        this.writeLenField(fieldNumber, bytes, (int32) bytes.count());
     }
 
     /** Bytes written so far. */

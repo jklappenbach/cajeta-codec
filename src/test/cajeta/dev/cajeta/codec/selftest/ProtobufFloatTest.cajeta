@@ -1,0 +1,188 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.protobuf.Protobuf;
+import dev.cajeta.codec.protobuf.ProtobufIndex;
+import dev.cajeta.codec.protobuf.ProtobufWriter;
+
+/**
+ * Unit 4 — floating-point fields through the typed facade (spec 5.1–5.6).
+ *
+ * Assertions on special values compare **bits**, not values: `-0.0 == 0.0` and
+ * `NaN != NaN` under numeric comparison, so only the bit pattern shows whether
+ * the round-trip was faithful.
+ */
+public class ProtobufFloatTest {
+
+    public ProtobufFloatTest() {
+        return;
+    }
+
+    static float64 posInf() { return (float64) 1.0 / (float64) 0.0; }
+    static float64 negInf() { return ((float64) 0.0 - (float64) 1.0) / (float64) 0.0; }
+    static float64 nan()    { return (float64) 0.0 / (float64) 0.0; }
+    static float64 negZero() { return (float64) 0.0 * ((float64) 0.0 - (float64) 1.0); }
+
+    /** 4.1.1 — a float64 field survives encode → decode. */
+    @Test
+    public void float64RoundTrips() {
+        ProtoFloatMsg m = heap ProtoFloatMsg();
+        m.id = (int64) 7;
+        m.price = (float64) 19.5;
+        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+
+        Assert.that(back.id).isEqualTo((int64) 7);
+        Assert.that(Cajeta.f64ToBits(back.price))
+            .isEqualTo(Cajeta.f64ToBits((float64) 19.5));
+        return;
+    }
+
+    /** 4.1.2 — a float32 field survives at single precision. */
+    @Test
+    public void float32RoundTrips() {
+        ProtoFloatMsg m = heap ProtoFloatMsg();
+        m.ratio = (float32) 0.5;
+        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+
+        Assert.that((int64) Cajeta.f32ToBits(back.ratio))
+            .isEqualTo((int64) Cajeta.f32ToBits((float32) 0.5));
+        return;
+    }
+
+    /**
+     * 4.1.3 — float64 rides wire type I64 (8 bytes), float32 rides I32 (4).
+     * Read off the index, so this checks the wire and not just the round-trip.
+     */
+    @Test
+    public void floatWireTypeIsFixed() {
+        ProtoFloatMsg m = heap ProtoFloatMsg();
+        m.price = (float64) 1.25;
+        m.ratio = (float32) 2.5;
+        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+
+        boolean saw64 = false;
+        boolean saw32 = false;
+        int32 i = 0;
+        while (i < idx.fieldCount()) {
+            if (idx.fieldNumber(i) == 2) {
+                saw64 = idx.wireType(i) == 1;
+                Assert.that(idx.valueEnd(i) - idx.valueStart(i))
+                    .isEqualTo((int64) 8);
+            }
+            if (idx.fieldNumber(i) == 3) {
+                saw32 = idx.wireType(i) == 5;
+                Assert.that(idx.valueEnd(i) - idx.valueStart(i))
+                    .isEqualTo((int64) 4);
+            }
+            i = i + 1;
+        }
+        Assert.isTrue(saw64);
+        Assert.isTrue(saw32);
+        return;
+    }
+
+    /** 4.1.4a — negative zero keeps its sign bit, which `== 0.0` cannot see. */
+    @Test
+    public void negativeZeroSurvives() {
+        ProtoFloatMsg m = heap ProtoFloatMsg();
+        m.price = ProtobufFloatTest.negZero();
+        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+
+        // Bit-exact: -0.0 is 0x8000000000000000, +0.0 is 0.
+        Assert.that(Cajeta.f64ToBits(back.price))
+            .isEqualTo(Cajeta.f64ToBits(ProtobufFloatTest.negZero()));
+        Assert.isTrue(Cajeta.f64ToBits(back.price) != (int64) 0);
+        return;
+    }
+
+    /** 4.1.4b — both infinities survive. */
+    @Test
+    public void infinitiesSurvive() {
+        ProtoFloatMsg p = heap ProtoFloatMsg();
+        p.price = ProtobufFloatTest.posInf();
+        int8[] pb = Protobuf.toBytes<ProtoFloatMsg>(p);
+        ProtoFloatMsg pBack = Protobuf.parse<ProtoFloatMsg>(pb, (int64) pb.count());
+        Assert.that(Cajeta.f64ToBits(pBack.price))
+            .isEqualTo(Cajeta.f64ToBits(ProtobufFloatTest.posInf()));
+
+        ProtoFloatMsg n = heap ProtoFloatMsg();
+        n.price = ProtobufFloatTest.negInf();
+        int8[] nb = Protobuf.toBytes<ProtoFloatMsg>(n);
+        ProtoFloatMsg nBack = Protobuf.parse<ProtoFloatMsg>(nb, (int64) nb.count());
+        Assert.that(Cajeta.f64ToBits(nBack.price))
+            .isEqualTo(Cajeta.f64ToBits(ProtobufFloatTest.negInf()));
+        return;
+    }
+
+    /** 4.1.4c — NaN survives; `!= itself` is the only numeric tell. */
+    @Test
+    public void nanSurvives() {
+        ProtoFloatMsg m = heap ProtoFloatMsg();
+        m.price = ProtobufFloatTest.nan();
+        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+
+        Assert.isTrue(back.price != back.price);
+        Assert.that(Cajeta.f64ToBits(back.price))
+            .isEqualTo(Cajeta.f64ToBits(ProtobufFloatTest.nan()));
+        return;
+    }
+
+    /** 4.1.5 — an absent float field keeps the constructor default. */
+    @Test
+    public void absentFloatKeepsConstructorDefault() {
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(1, (int64) 3);
+        int8[] b = w.toBytes();
+        ProtoFloatMsg m = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+
+        Assert.that(m.id).isEqualTo((int64) 3);
+        Assert.that(Cajeta.f64ToBits(m.price)).isEqualTo((int64) 0);
+        Assert.that((int64) Cajeta.f32ToBits(m.ratio)).isEqualTo((int64) 0);
+        return;
+    }
+
+    /**
+     * The seam itself: `Cajeta.f64ToBits` / `bitsToF64`, compiler intrinsics
+     * that lower to a bitcast. These already existed — an earlier pass here
+     * added duplicate `Float64.toBits` wrappers over `@Native` C after
+     * searching only the stdlib classes and missing the `Cajeta.*` namespace.
+     * The wrappers are gone; this pins the intrinsics instead.
+     */
+    @Test
+    public void floatBitsSeamRoundTrips() {
+        float64 v = (float64) 19.5;
+        Assert.that(Cajeta.f64ToBits(Cajeta.bitsToF64(Cajeta.f64ToBits(v))))
+            .isEqualTo(Cajeta.f64ToBits(v));
+        // A double's bits are NOT its numeric value — the distinction the
+        // old `(int64) value` conversion got wrong.
+        Assert.isTrue(Cajeta.f64ToBits(v) != (int64) 19);
+
+        float32 f = (float32) 0.5;
+        Assert.that((int64) Cajeta.f32ToBits(Cajeta.bitsToF32(Cajeta.f32ToBits(f))))
+            .isEqualTo((int64) Cajeta.f32ToBits(f));
+        return;
+    }
+
+    /** A message mixing floats with every other kind still round-trips whole. */
+    @Test
+    public void floatsCoexistWithOtherFields() {
+        ProtoFloatMsg m = heap ProtoFloatMsg();
+        m.id = (int64) 0 - (int64) 5;
+        m.price = (float64) 1234.5;
+        m.ratio = (float32) 0 - (float32) 0.25;
+        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+
+        Assert.that(back.id).isEqualTo((int64) 0 - (int64) 5);
+        Assert.that(Cajeta.f64ToBits(back.price))
+            .isEqualTo(Cajeta.f64ToBits((float64) 1234.5));
+        Assert.that((int64) Cajeta.f32ToBits(back.ratio))
+            .isEqualTo((int64) Cajeta.f32ToBits((float32) 0 - (float32) 0.25));
+        return;
+    }
+}

@@ -1,0 +1,115 @@
+package dev.cajeta.codec.bench;
+
+import cajeta.time.Clock;
+import dev.cajeta.codec.protobuf.ProtobufCursor;
+import dev.cajeta.codec.protobuf.ProtobufWire;
+import dev.cajeta.codec.protobuf.ProtobufWriter;
+
+/**
+ * Packed repeated-varint scan: the vectorized element count against the scalar
+ * walk it replaced (spec 7.6, framework §8.2 "bulk packed-repeated primitive
+ * fields").
+ *
+ * This is the only part of protobuf's structural work that vectorizes. The
+ * field walk cannot: protobuf is tag-length-value, so whether a byte begins a
+ * tag depends on having decoded everything before it, and no byte value marks a
+ * boundary. A packed payload is different — a context-free run of varints whose
+ * element boundaries are the bytes with the continuation bit clear, which a
+ * compare-and-popcount finds 16 at a time.
+ *
+ * The scalar reference below is the loop `ProtobufCursor.countPackedVarints`
+ * replaced, kept here so the comparison is against real prior code rather than
+ * a strawman. Build `--opt=O3`; at `-O0` neither path is representative.
+ */
+public final class PackedScanBench {
+
+    static int64 nowMs() { return Clock.now().toEpochMilli(); }
+
+    /** The pre-SIMD count: walk varint by varint. */
+    static int32 scalarCount(int8[] b, int64 s, int64 e) {
+        int32 n = 0;
+        int64 p = s;
+        while (p < e) {
+            p = p + ProtobufWire.varintLen(b, p, e);
+            n = n + 1;
+        }
+        return n;
+    }
+
+    /** A packed payload of `n` varints, each `width` bytes when encoded. */
+    static #int8[] packedPayload(int32 n, int32 width) {
+        ProtobufWriter w = heap ProtobufWriter();
+        int64 v = (int64) 1;
+        int32 shift = (width - 1) * 7;
+        int32 s = 0;
+        while (s < shift) {
+            v = v * (int64) 2;
+            s = s + 1;
+        }
+        int32 i = 0;
+        while (i < n) {
+            w.writeVarint(v + (int64) (i & 0x3F));
+            i = i + 1;
+        }
+        return w.toBytes();
+    }
+
+    static void run(int32 n, int32 width, int32 reps) {
+        int8[] payload = PackedScanBench.packedPayload(n, width);
+        int64 len = (int64) payload.count();
+
+        // Frame it as a real LEN field so the cursor path is the measured one.
+        ProtobufWriter fw = heap ProtobufWriter();
+        fw.writeLenField(1, payload, (int32) len);
+        int8[] msg = fw.toBytes();
+        ProtobufCursor cur = heap ProtobufCursor(msg, (int64) msg.count());
+
+        // Scalar reference over the same payload bytes.
+        int64 t0 = PackedScanBench.nowMs();
+        int32 sink = 0;
+        int32 r = 0;
+        while (r < reps) {
+            sink = sink + PackedScanBench.scalarCount(payload, (int64) 0, len);
+            r = r + 1;
+        }
+        int64 scalarMs = PackedScanBench.nowMs() - t0;
+
+        // Vectorized path, through the cursor's public entry point.
+        int64 t1 = PackedScanBench.nowMs();
+        int32 sink2 = 0;
+        r = 0;
+        while (r < reps) {
+            sink2 = sink2 + cur.repeatedVarintCount(1);
+            r = r + 1;
+        }
+        int64 simdMs = PackedScanBench.nowMs() - t1;
+
+        // Same answer, or the comparison is meaningless.
+        if (sink != sink2) {
+            System.stdout.println("  MISMATCH scalar={} simd={}", sink, sink2);
+        }
+
+        int64 bytes = len * (int64) reps;
+        int64 sMbs = (int64) 0;
+        int64 vMbs = (int64) 0;
+        if (scalarMs > (int64) 0) { sMbs = bytes / scalarMs / (int64) 1048; }
+        if (simdMs > (int64) 0) { vMbs = bytes / simdMs / (int64) 1048; }
+        System.stdout.println(
+            "  n={} width={}  payload={}B   scalar {} ms ({} MB/s)   simd {} ms ({} MB/s)",
+            n, width, len, scalarMs, sMbs, simdMs, vMbs);
+    }
+
+    public static int32 main() {
+        System.stdout.println("packed repeated-varint scan — scalar vs SIMD count");
+        System.stdout.println("(count only; decoding values is a separate serial pass)");
+        PackedScanBench.run(16, 1, 200000);
+        PackedScanBench.run(1024, 1, 4000);
+        PackedScanBench.run(65536, 1, 100);
+        PackedScanBench.run(1024, 3, 4000);
+        PackedScanBench.run(65536, 3, 60);
+        PackedScanBench.run(65536, 5, 40);
+        return 0;
+    }
+
+    public static int32 run() { return PackedScanBench.main(); }
+}

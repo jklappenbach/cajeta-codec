@@ -1,0 +1,278 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.protobuf.Protobuf;
+import dev.cajeta.codec.protobuf.ProtobufCursor;
+import dev.cajeta.codec.protobuf.ProtobufIndex;
+import dev.cajeta.codec.protobuf.ProtobufWire;
+import dev.cajeta.codec.protobuf.ProtobufWriter;
+
+/**
+ * Unit 3 — `@ProtoField` encoding options (spec 4.1–4.6). Zigzag (`sint32` /
+ * `sint64`) and fixed-width (`fixed32` / `fixed64`) selected per field, with the
+ * absent option preserving today's plain-VARINT behavior exactly.
+ */
+public class ProtobufEncodingTest {
+
+    public ProtobufEncodingTest() {
+        return;
+    }
+
+    // int64 min / max without relying on literal range at the boundary.
+    // Max is `-1 >>> 1`, not `min - 1`: the latter is signed overflow, which
+    // `--profile=test`'s UB traps catch with SIGILL rather than wrapping.
+    static int64 int64Min() { return (int64) 1 << 63; }
+    static int64 int64Max() { return ((int64) 0 - (int64) 1) >>> 1; }
+
+    // ---- wire-level zigzag (library only) ----
+
+    /** 3.1.2a — the mapping itself, including both signed extremes. */
+    @Test
+    public void zigzagRoundTripsAcrossRange() {
+        int64 zero = (int64) 0;
+        Assert.that(ProtobufWire.zigzagEncode(zero)).isEqualTo((int64) 0);
+        Assert.that(ProtobufWire.zigzagEncode((int64) 0 - (int64) 1))
+            .isEqualTo((int64) 1);
+        Assert.that(ProtobufWire.zigzagEncode((int64) 1)).isEqualTo((int64) 2);
+        Assert.that(ProtobufWire.zigzagEncode((int64) 0 - (int64) 2))
+            .isEqualTo((int64) 3);
+
+        // Round-trip a spread of values, including the extremes where an
+        // arithmetic (rather than logical) shift in decode would go wrong.
+        Assert.that(ProtobufWire.zigzagDecode(
+            ProtobufWire.zigzagEncode(ProtobufEncodingTest.int64Min())))
+            .isEqualTo(ProtobufEncodingTest.int64Min());
+        Assert.that(ProtobufWire.zigzagDecode(
+            ProtobufWire.zigzagEncode(ProtobufEncodingTest.int64Max())))
+            .isEqualTo(ProtobufEncodingTest.int64Max());
+        Assert.that(ProtobufWire.zigzagDecode(
+            ProtobufWire.zigzagEncode((int64) 0 - (int64) 1000000000000)))
+            .isEqualTo((int64) 0 - (int64) 1000000000000);
+        return;
+    }
+
+    /**
+     * Regression: a negative plain VARINT terminates and round-trips.
+     *
+     * `ProtobufWriter.writeVarint` shifted with `>>` — arithmetic on every
+     * cajeta type — so for a negative value the sign bit refilled from the left
+     * and the encode loop spun forever. Nothing caught it because no test had
+     * ever written a negative varint, yet any signed `@ProtoField` reaches it.
+     */
+    @Test
+    public void negativePlainVarintTerminatesAndRoundTrips() {
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(1, (int64) 0 - (int64) 1);
+        w.writeVarintField(2, ProtobufEncodingTest.int64Min());
+        w.writeVarintField(3, (int64) 0 - (int64) 300);
+        int8[] b = w.toBytes();
+
+        // Protobuf encodes a negative as the full ten payload bytes.
+        ProtobufCursor cur = heap ProtobufCursor(b, (int64) b.count());
+        Assert.that(cur.readVarint(cur.slotOf(1)))
+            .isEqualTo((int64) 0 - (int64) 1);
+        Assert.that(cur.readVarint(cur.slotOf(2)))
+            .isEqualTo(ProtobufEncodingTest.int64Min());
+        Assert.that(cur.readVarint(cur.slotOf(3)))
+            .isEqualTo((int64) 0 - (int64) 300);
+        return;
+    }
+
+    /** A negative int64 survives the typed facade, not just the raw writer. */
+    @Test
+    public void negativeTypedFieldRoundTrips() {
+        ProtoScalarMsg m = heap ProtoScalarMsg();
+        m.id = (int64) 0 - (int64) 42;
+        m.count = 0 - 7;
+        int8[] b = Protobuf.toBytes<ProtoScalarMsg>(m);
+        ProtoScalarMsg back = Protobuf.parse<ProtoScalarMsg>(
+            b, (int64) b.count());
+        Assert.that(back.id).isEqualTo((int64) 0 - (int64) 42);
+        Assert.that((int64) back.count).isEqualTo((int64) 0 - (int64) 7);
+        return;
+    }
+
+    /** 3.1.3 — the point of zigzag: −1 costs one payload byte, not ten. */
+    @Test
+    public void zigzagIsCompactForSmallNegatives() {
+        ProtobufWriter zw = heap ProtobufWriter();
+        zw.writeZigzagField(1, (int64) 0 - (int64) 1);
+        int8[] z = zw.toBytes();
+
+        ProtobufWriter pw = heap ProtobufWriter();
+        pw.writeVarintField(1, (int64) 0 - (int64) 1);
+        int8[] p = pw.toBytes();
+
+        // tag + one payload byte, against tag + ten.
+        Assert.that((int64) z.count()).isEqualTo((int64) 2);
+        Assert.that((int64) p.count()).isEqualTo((int64) 11);
+        return;
+    }
+
+    /** A zigzag field written and read back through the cursor. */
+    @Test
+    public void writerZigzagRoundTripsThroughCursor() {
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeZigzagField(1, (int64) 0 - (int64) 75);
+        w.writeZigzagField(2, (int64) 4096);
+        int8[] b = w.toBytes();
+
+        ProtobufCursor cur = heap ProtobufCursor(b, (int64) b.count());
+        Assert.that(cur.readZigzag(cur.slotOf(1)))
+            .isEqualTo((int64) 0 - (int64) 75);
+        Assert.that(cur.readZigzag(cur.slotOf(2))).isEqualTo((int64) 4096);
+        // Zigzag rides on wire type VARINT — it is a value mapping, not a
+        // separate wire type.
+        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        Assert.that((int64) idx.wireType(0)).isEqualTo((int64) 0);
+        return;
+    }
+
+    // ---- typed facade (needs the synthesizer) ----
+
+    /**
+     * 3.1.1 — a message declaring no encoding option is byte-identical to what
+     * it produced before the option existed. `ProtoScalarMsg` uses the bare
+     * `@ProtoField(N)` form throughout.
+     */
+    @Test
+    public void defaultEncodingUnchanged() {
+        ProtoScalarMsg m = heap ProtoScalarMsg();
+        m.id = (int64) 150;
+        m.name = "hi";
+        m.active = true;
+        m.count = 42;
+        int8[] pay = [(int8) 0x07, (int8) 0x09];
+        m.payload = pay;
+        int8[] got = Protobuf.toBytes<ProtoScalarMsg>(m);
+
+        // The same message written by hand with the plain writer calls.
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(1, (int64) 150);
+        int8[] nb = "hi".toBytes();
+        w.writeLenField(2, nb, (int32) nb.count());
+        w.writeVarintField(3, (int64) 1);
+        w.writeVarintField(4, (int64) 42);
+        w.writeLenField(5, pay, (int32) 2);
+        int8[] want = w.toBytes();
+
+        Assert.that((int64) got.count()).isEqualTo((int64) want.count());
+        int32 i = 0;
+        while (i < (int32) want.count()) {
+            int8 g = got[i];
+            int8 e = want[i];
+            Assert.that((int64) (((int32) g) & 0xFF))
+                .isEqualTo((int64) (((int32) e) & 0xFF));
+            i = i + 1;
+        }
+        return;
+    }
+
+    /** 3.1.2b — zigzag fields round-trip negatives through the typed facade. */
+    @Test
+    public void zigzagRoundTripsNegatives() {
+        ProtoEncodingMsg m = heap ProtoEncodingMsg();
+        m.plain = (int64) 7;
+        m.zz = (int64) 0 - (int64) 1;
+        m.zz32 = 0 - 2;
+        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+            b, (int64) b.count());
+
+        Assert.that(back.plain).isEqualTo((int64) 7);
+        Assert.that(back.zz).isEqualTo((int64) 0 - (int64) 1);
+        Assert.that((int64) back.zz32).isEqualTo((int64) 0 - (int64) 2);
+        return;
+    }
+
+    /** 3.1.2c — a large negative survives, where plain varint would too but fat. */
+    @Test
+    public void zigzagRoundTripsLargeNegative() {
+        ProtoEncodingMsg m = heap ProtoEncodingMsg();
+        m.zz = (int64) 0 - (int64) 1000000000000;
+        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+            b, (int64) b.count());
+        Assert.that(back.zz).isEqualTo((int64) 0 - (int64) 1000000000000);
+        return;
+    }
+
+    /** 3.1.4 — fixed-width fields select wire type I32 / I64, seen on the index. */
+    @Test
+    public void fixedWidthUsesI32AndI64() {
+        ProtoEncodingMsg m = heap ProtoEncodingMsg();
+        m.f32 = 1013;
+        m.f64 = (int64) 171532800;
+        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+
+        int32 i = 0;
+        boolean saw32 = false;
+        boolean saw64 = false;
+        while (i < idx.fieldCount()) {
+            if (idx.fieldNumber(i) == 4) {
+                saw32 = idx.wireType(i) == 5;
+                Assert.that(idx.valueEnd(i) - idx.valueStart(i))
+                    .isEqualTo((int64) 4);
+            }
+            if (idx.fieldNumber(i) == 5) {
+                saw64 = idx.wireType(i) == 1;
+                Assert.that(idx.valueEnd(i) - idx.valueStart(i))
+                    .isEqualTo((int64) 8);
+            }
+            i = i + 1;
+        }
+        Assert.isTrue(saw32);
+        Assert.isTrue(saw64);
+        return;
+    }
+
+    /** 3.1.5 — fixed-width values survive the typed round-trip. */
+    @Test
+    public void fixedWidthRoundTrips() {
+        ProtoEncodingMsg m = heap ProtoEncodingMsg();
+        m.f32 = 1013;
+        m.f64 = (int64) 171532800;
+        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+            b, (int64) b.count());
+        Assert.that((int64) back.f32).isEqualTo((int64) 1013);
+        Assert.that(back.f64).isEqualTo((int64) 171532800);
+        return;
+    }
+
+    /** 4.6 — every option governs decode and encode alike, in one message. */
+    @Test
+    public void allEncodingsRoundTripTogether() {
+        ProtoEncodingMsg m = heap ProtoEncodingMsg();
+        m.plain = (int64) 300;
+        m.zz = (int64) 0 - (int64) 64;
+        m.zz32 = 0 - 3;
+        m.f32 = 7;
+        m.f64 = (int64) 9;
+        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+            b, (int64) b.count());
+
+        Assert.that(back.plain).isEqualTo((int64) 300);
+        Assert.that(back.zz).isEqualTo((int64) 0 - (int64) 64);
+        Assert.that((int64) back.zz32).isEqualTo((int64) 0 - (int64) 3);
+        Assert.that((int64) back.f32).isEqualTo((int64) 7);
+        Assert.that(back.f64).isEqualTo((int64) 9);
+        return;
+    }
+
+    /** Absent optioned fields keep the constructor defaults, as any field does. */
+    @Test
+    public void absentOptionedFieldsKeepDefaults() {
+        ProtobufWriter w = heap ProtobufWriter();
+        w.writeVarintField(1, (int64) 5);
+        int8[] b = w.toBytes();
+        ProtoEncodingMsg m = Protobuf.parse<ProtoEncodingMsg>(
+            b, (int64) b.count());
+        Assert.that(m.plain).isEqualTo((int64) 5);
+        Assert.that(m.zz).isEqualTo((int64) 0);
+        Assert.that((int64) m.f32).isEqualTo((int64) 0);
+        return;
+    }
+}
