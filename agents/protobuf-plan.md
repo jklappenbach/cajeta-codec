@@ -311,7 +311,25 @@ masking after the shift; `IonWriter` does not. Recorded in spec §1.5.3.
         three records, asserted off the index.
   - [x] 5.3.4 Tour gained a repeated/packed section printing the record-count
         contrast. Both bullets removed from the docs, replaced by a repeated
-        section that flags the proto3 packed-by-default divergence.
+        section covering the packing rules.
+- [x] **5.4 Follow-up — packed is the default** (spec 6.5, revised)
+  - [x] 5.4.1 Shipped opt-in per the spec as approved, then flagged the
+        divergence: proto3 and edition 2023 both default repeated numeric
+        fields to packed; only proto2 defaulted to expanded. Reversed on
+        Glenn's call.
+  - [x] 5.4.2 `packed` is now tri-state in the synthesizer, read through
+        `findArg` so unset is distinguishable from an explicit `false`. Unset on
+        a repeated numeric field means packed; `packed = false` forces expanded.
+        Non-numeric elements are never packed whatever is declared.
+  - [x] 5.4.3 `ProtoRepeatedMsg` reshaped so all three states are covered by
+        tests rather than by inspection: field 2 `packed = false`, field 3
+        defaulted, field 5 explicit `packed = true`. New
+        `defaultIsPackedForRepeatedNumeric` pins the default;
+        `packedFalseStaysExpanded` pins the opt-out.
+  - [x] 5.4.4 Timing was the argument for doing it now rather than later:
+        repeated fields had existed for under a day, so nothing depended on the
+        byte layout. Once a message class exists in a user's tree, flipping the
+        default silently changes their wire output.
 
 ## 6. SIMD structural scan  (spec 7.1–7.5, framework §8.2)  — this repo
 

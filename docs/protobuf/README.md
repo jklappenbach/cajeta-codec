@@ -109,27 +109,29 @@ An array field is a repeated field. `int8[]` is the one exception — it means
 protobuf `bytes`, a single LEN record, not a repeated `int8`.
 
 ```cajeta
-@ProtoField(2)                        public int64[] scores;
-@ProtoField(value = 3, packed = true) public int32[] counts;
-@ProtoField(6)                        public String[] tags;
-@ProtoField(7)                        public Reading[] items;
+@ProtoField(2)                         public int64[] scores;   // packed
+@ProtoField(value = 3, packed = false) public int32[] counts;   // expanded
+@ProtoField(6)                         public String[] tags;
+@ProtoField(7)                         public Reading[] items;
 ```
 
-`packed = true` writes one LEN record holding the values concatenated with no
-tags, instead of one tagged record per value — roughly a byte per element rather
-than two, for a run of small numbers. It applies only to repeated numeric
-fields and composes with `encoding`, so packed zigzag and packed fixed-width
-both work. Asking for it on a non-repeated or non-numeric field is a compile
-error.
+**Repeated numeric fields are packed by default** — one LEN record holding the
+values concatenated with no tags, instead of one tagged record per value. That
+is roughly a byte per element rather than two for a run of small numbers, and it
+matches proto3 and edition 2023 (`features.repeated_field_encoding = PACKED`);
+only proto2 defaulted to expanded.
+
+`packed = false` opts back out. Packing applies only to repeated numeric fields
+— strings, bytes, and messages carry their own length and have no packed form,
+so they are never packed and asking for it is a compile error, as is asking on a
+non-repeated field. It composes with `encoding`, so packed zigzag and packed
+fixed-width both work.
 
 **Reading accepts either wire form**, whatever the field declares, and copes
-with a message that mixes them — values concatenate in wire order. `packed`
-only chooses what this side writes.
-
-> `packed` is opt-in here, where **proto3 makes it the default** for repeated
-> numeric fields. Both forms are valid and every conforming reader takes either,
-> so the cost is bytes rather than interoperability — but a field left unpacked
-> by omission is larger on the wire than the same field declared in a `.proto`.
+with a message that mixes them — values concatenate in wire order. This is
+required of conforming parsers, which is what makes the default safe to rely on:
+a peer that sends the expanded form still reads correctly here, and vice versa.
+The declaration only chooses what this side writes.
 
 A repeated field is never null after a parse. Protobuf cannot distinguish an
 absent repeated field from an empty one, so absent decodes to an empty array.

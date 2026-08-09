@@ -66,13 +66,14 @@ public class TempDelta {
     }
 }
 
-// support: repeated fields. `samples` is packed — one LEN record for the whole
-// run; `raw` is left unpacked, one tagged record per value. Both are legal
-// protobuf and each side reads the other, so the choice is about size.
+// support: repeated fields. `samples` takes the default — packed, one LEN
+// record for the whole run. `raw` opts out with packed = false, paying a tag
+// per value. Both are legal protobuf and each side reads the other, so the
+// choice is about size, not compatibility.
 public class SensorRun {
     @ProtoField(1) public int64 sensorId;
-    @ProtoField(value = 2, packed = true) public int32[] samples;
-    @ProtoField(3) public int64[] raw;
+    @ProtoField(2) public int32[] samples;
+    @ProtoField(value = 3, packed = false) public int64[] raw;
 
     public SensorRun() {
         this.sensorId = (int64) 0;
@@ -304,10 +305,11 @@ public class ProtobufDemo extends DemoClass {
         this.check(fixedIsI64, "an encoding=\"fixed\" int64 field rides wire type I64");
 
         // 11. Repeated fields. An array field is a repeated field; int8[] is
-        //     the one exception, meaning `bytes`. `packed = true` collapses a
-        //     numeric run into ONE length-delimited record instead of one
-        //     tagged record per value — the difference between paying a tag
-        //     byte per reading and paying it once for the run.
+        //     the one exception, meaning `bytes`. A repeated numeric field is
+        //     PACKED by default — the whole run collapses into one
+        //     length-delimited record instead of one tagged record per value,
+        //     the difference between paying a tag byte per reading and paying
+        //     it once. `packed = false` opts out, as `raw` does below.
         SensorRun run = heap SensorRun();
         run.sensorId = (int64) 4;
         int32[] samples = [20, 21, 22, 21, 20];
@@ -319,11 +321,11 @@ public class ProtobufDemo extends DemoClass {
         this.check(rb.samples.count() == 5 && rb.samples[0] == 20
             && rb.samples[4] == 20 && rb.raw.count() == 2
             && rb.raw[1] == (int64) 200,
-            "repeated fields round-trip, packed and unpacked alike");
+            "repeated fields round-trip, packed and expanded alike");
 
-        // The packed field is a single record; the unpacked one is a record per
-        // element. Both are legal protobuf, and a reader takes either — so this
-        // is a size choice, not a compatibility one.
+        // The defaulted field is a single record; the opted-out one is a record
+        // per element. Both are legal protobuf, and a conforming reader must
+        // take either — so this is a size choice, not a compatibility one.
         ProtobufIndex ridx = ProtobufIndex.build(rw, (int64) rw.count());
         int32 packedRecords = 0;
         int32 plainRecords = 0;
@@ -333,10 +335,10 @@ public class ProtobufDemo extends DemoClass {
             if (ridx.fieldNumber(ri) == 3) { plainRecords = plainRecords + 1; }
             ri = ri + 1;
         }
-        System.stdout.println("  5 packed samples -> " + packedRecords
-            + " record, 2 unpacked -> " + plainRecords + " records");
+        System.stdout.println("  5 samples (default packed) -> " + packedRecords
+            + " record, 2 raw (packed = false) -> " + plainRecords + " records");
         this.check(packedRecords == 1 && plainRecords == 2,
-            "packed collapses to one record; unpacked keeps one per element");
+            "packed is the default; packed = false keeps one record per element");
 
         // A repeated field is never null after a parse: protobuf cannot tell
         // "absent" from "empty", so absent decodes as an empty array.

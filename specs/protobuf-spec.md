@@ -187,8 +187,19 @@ encodings on read, since a conforming reader must accept either.
 - **6.4** When a repeated field is absent from the wire, it binds as an empty
   array rather than null, matching protobuf's "repeated fields are never absent,
   only empty" contract.
-- **6.5** When a repeated numeric field is declared packed, `toBytes<T>` writes a
-  single LEN record holding the concatenated values.
+- **6.5** When a repeated numeric field is written, `toBytes<T>` emits a single
+  LEN record holding the concatenated values — packed is the **default**, as in
+  proto3 and edition 2023 (`features.repeated_field_encoding = PACKED`); only
+  proto2 defaulted to expanded. `packed = false` opts back out. This reverses
+  the spec's original wording ("when declared packed"), decided after the
+  implementation landed: matching the format's own default is worth more than
+  the opt-in, and the change is wire-safe because 6.6 requires readers to accept
+  both forms. Flipping it later would have silently changed users' bytes, so it
+  was done while nothing yet depended on it.
+- **6.5b** When a repeated field's elements are String, bytes, or messages, it is
+  never packed — they carry their own length and protobuf defines no packed form
+  for them — and asking for `packed` there, or on a non-repeated field, fails
+  compilation.
 - **6.6** When a packed repeated field is read, its values decode from the one
   LEN payload — and an unpacked wire form of the same field decodes identically,
   because peers may send either.

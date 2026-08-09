@@ -33,9 +33,41 @@ public class ProtobufRepeatedTest {
         return;
     }
 
-    /** An unpacked repeated field writes one tagged record per element. */
+    /**
+     * The default for a repeated numeric field is **packed** — one LEN record,
+     * no matter how many elements. Field 3 declares no `packed` option, so this
+     * pins the default itself rather than an explicit request.
+     */
     @Test
-    public void unpackedRepeatedWritesOneRecordPerElement() {
+    public void defaultIsPackedForRepeatedNumeric() {
+        ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
+        int32[] c = [1, 2, 3, 4];
+        m.counts = c;
+        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+
+        int32 n = 0;
+        int32 i = 0;
+        while (i < idx.fieldCount()) {
+            if (idx.fieldNumber(i) == 3) {
+                n = n + 1;
+                Assert.that((int64) idx.wireType(i)).isEqualTo((int64) 2);
+                Assert.that(idx.valueEnd(i) - idx.valueStart(i))
+                    .isEqualTo((int64) 4);
+            }
+            i = i + 1;
+        }
+        Assert.that((int64) n).isEqualTo((int64) 1);
+        return;
+    }
+
+    /**
+     * `packed = false` opts back out to one tagged record per element. Field 2
+     * declares it, which is the only way to get the expanded form now that
+     * packed is the default.
+     */
+    @Test
+    public void packedFalseStaysExpanded() {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int64[] s = [(int64) 1, (int64) 2, (int64) 3];
         m.scores = s;
@@ -121,24 +153,27 @@ public class ProtobufRepeatedTest {
         return;
     }
 
-    /** 5.1.4 — a packed field is one LEN record, whatever the element count. */
+    /**
+     * 5.1.4 — an explicitly packed field is one LEN record, whatever the
+     * element count. Field 5 declares `packed = true` outright.
+     */
     @Test
     public void packedWriteProducesSingleLenRecord() {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
-        int32[] c = [1, 2, 3, 4, 5];
-        m.counts = c;
+        int32[] s = [1, 2, 3, 4, 5];
+        m.stamps = s;
         int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
         ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
 
         int32 n = 0;
         int32 i = 0;
         while (i < idx.fieldCount()) {
-            if (idx.fieldNumber(i) == 3) {
+            if (idx.fieldNumber(i) == 5) {
                 n = n + 1;
                 Assert.that((int64) idx.wireType(i)).isEqualTo((int64) 2);
-                // Five single-byte varints in one payload.
+                // Five fixed32 elements, four bytes each, in one payload.
                 Assert.that(idx.valueEnd(i) - idx.valueStart(i))
-                    .isEqualTo((int64) 5);
+                    .isEqualTo((int64) 20);
             }
             i = i + 1;
         }
@@ -165,7 +200,7 @@ public class ProtobufRepeatedTest {
     /**
      * 5.1.6 — the same field sent **unpacked** by a peer decodes identically.
      * A conforming reader must accept either form regardless of declaration;
-     * field 3 is declared packed, and this hand-writes it the other way.
+     * field 3 is packed by default, and this hand-writes it the other way.
      */
     @Test
     public void unpackedWireFormDecodesIdentically() {
@@ -183,9 +218,9 @@ public class ProtobufRepeatedTest {
         return;
     }
 
-    /** The mirror: a field declared unpacked also reads when sent packed. */
+    /** The mirror: a field declared `packed = false` still reads a packed peer. */
     @Test
-    public void packedWireFormDecodesForUnpackedDeclaration() {
+    public void packedWireFormDecodesForExpandedDeclaration() {
         int64[] vals = [(int64) 7, (int64) 8];
         ProtobufWriter w = heap ProtobufWriter();
         w.writePackedVarintField(2, vals, (int32) 2);
