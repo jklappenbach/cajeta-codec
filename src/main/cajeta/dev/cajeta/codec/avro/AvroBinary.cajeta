@@ -38,12 +38,30 @@ public final class AvroBinary {
         return r;
     }
 
-    /** Undo zigzag: even → n/2, odd → -(n+1)/2. */
+    /**
+     * The int64 whose bit pattern is 2^63. It has no positive counterpart, so
+     * `0 - v` overflows there and this toolchain traps signed overflow (SIGILL)
+     * in release builds as well as under `--profile=test`. Callers that negate
+     * a decoded magnitude must exclude it first.
+     */
+    static int64 int64Min() { return ((int64) 0 - (int64) 1) << 63; }
+
+    /**
+     * Undo zigzag: even → n/2, odd → -(n+1)/2.
+     *
+     * `raw` is a **logically unsigned** word, so the shift must be `>>>`. With
+     * `>>` the sign bit re-fills and every value from |v| ≥ 2^62 up decodes
+     * wrong — int64Min came back as 0.
+     */
     public static int64 zigzagDecode(int64 raw) {
-        return (raw >> 1) ^ ((int64) 0 - (raw & (int64) 1));
+        return (raw >>> 1) ^ ((int64) 0 - (raw & (int64) 1));
     }
 
-    /** Zigzag-encode a signed value: n → (n<<1) ^ (n>>63). */
+    /**
+     * Zigzag-encode a signed value: n → (n<<1) ^ (n>>63). The `>>` here is
+     * deliberate and must stay arithmetic — it builds the all-ones/all-zeros
+     * mask from the sign bit.
+     */
     public static int64 zigzagEncode(int64 v) {
         return (v << 1) ^ (v >> 63);
     }

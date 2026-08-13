@@ -71,6 +71,32 @@ repo they land in.
     affected: they mask with `& 0x01FFFFFFFFFFFFFF` after the shift, which is a
     correct workaround for an arithmetic `>>`.
   - Truncation hardening (§2) has not been checked for any of them.
+
+  **Resolved 2026-08-12** — swept and fixed on branch `wire-extremes`; see
+  `WireExtremesTest`. Two corrections to the analysis above, both found by
+  probing rather than reading:
+  - The `ThriftCompactWriter` bullet was **wrong**. The mask does make its
+    shift logical, but the loop is gated on `t >= (int64) 128`, a *signed*
+    compare — so a bit-63-set word looked already-small and a 10-byte varint
+    was written as one byte. Parquet i64 statistics past ±2^62 were silently
+    truncated on write. `AvroWriter` is genuinely unaffected: its loop tests
+    `t != 0`, not a magnitude. Masking the shift is not sufficient; the loop
+    bound has to be unsigned too.
+  - `IonWriter` was worse than "reachable if `t` can go negative".
+    `uintMagLen` / `varUIntLenOf` answered **0** for a bit-63-set value, and
+    fixing them exposed that `writeIntValue(int64Min)` computes `0 - v`, which
+    overflows and **traps (SIGILL) in release builds, not only under
+    `--profile=test`**. Ion stores sign and magnitude separately and 2^63 is a
+    legal magnitude, so the value has a correct encoding: `0x38` + eight bytes
+    of `0x80 00…`.
+
+  Also learned, and the reason the sweep could not be done by grep alone: `>>`
+  semantics are **toolchain-version-dependent for `uint64`**. Through cajeta
+  0.17.0 `>>` was arithmetic on `uint64` as well as `int64`; from 0.19.0 it is
+  logical on `uint64` and arithmetic only on `int64`. So `OrcRleV2.bitLen` and
+  the DEFLATE bit accumulators were latent non-terminating loops that the
+  *compiler* fixed underneath them. `bitLen` now says `>>>` explicitly, which
+  means unsigned on every toolchain.
 - **1.5.4** Group wire types (3, 4). Deprecated in the format itself; fail-loud
   rejection is the correct and current behavior.
 - **1.5.5** Changing any existing public signature. Every change is additive or

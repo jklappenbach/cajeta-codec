@@ -106,6 +106,9 @@ public final class IonCursor {
         int64 e = ix.valueEnd(i);
         int64 mag = IonWire.decodeUIntMag(this.b, s, e - s);
         if (ix.typeCode(i) == IonWire.tcNegInt()) {
+            // -(2^63) IS int64Min, and the magnitude already carries that exact
+            // bit pattern; negating it would overflow and trap.
+            if (mag == IonWire.int64Min()) { return mag; }
             return (int64) 0 - mag;
         }
         return mag;

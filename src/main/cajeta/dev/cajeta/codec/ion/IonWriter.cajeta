@@ -71,14 +71,16 @@ public final class IonWriter {
         this.len = this.len + (int64) n;
     }
 
-    // Number of big-endian magnitude bytes of `v` (0 → 0).
+    // Number of big-endian magnitude bytes of `v` (0 → 0). `v` is read as an
+    // UNSIGNED word: both the test and the shift are unsigned, so a value with
+    // bit 63 set answers 8 rather than 0.
     static int64 uintMagLen(int64 v) {
         if (v == (int64) 0) { return (int64) 0; }
         int64 n = (int64) 0;
         int64 t = v;
-        while (t > (int64) 0) {
+        while (t != (int64) 0) {
             n = n + 1;
-            t = t >> 8;
+            t = t >>> 8;
         }
         return n;
     }
@@ -94,14 +96,16 @@ public final class IonWriter {
         }
     }
 
-    // Number of VarUInt octets for `v` (0 → 1).
+    // Number of VarUInt octets for `v` (0 → 1). Unsigned, as above: `t > 0`
+    // with an arithmetic shift answered 0 octets for a bit-63-set value, and
+    // appendVarUInt then emitted nothing at all for it.
     static int64 varUIntLenOf(int64 v) {
         if (v == (int64) 0) { return (int64) 1; }
         int64 g = (int64) 0;
         int64 t = v;
-        while (t > (int64) 0) {
+        while (t != (int64) 0) {
             g = g + 1;
-            t = t >> 7;
+            t = t >>> 7;
         }
         return g;
     }
@@ -206,7 +210,14 @@ public final class IonWriter {
             this.appendTypeDescriptor(2, n);
             this.appendUIntMag(v);
         } else {
-            int64 mag = (int64) 0 - v;
+            // int64Min's magnitude is 2^63, which no int64 holds as a positive
+            // number: `0 - v` overflows there and the toolchain traps it
+            // (SIGILL, in release builds too — not just --profile=test). Its
+            // own two's-complement bit pattern already IS that magnitude, and
+            // uintMagLen/appendUIntMag read their argument as unsigned, so it
+            // passes through untouched.
+            int64 mag = v;
+            if (v != IonWire.int64Min()) { mag = (int64) 0 - v; }
             int64 n = IonWriter.uintMagLen(mag);
             this.appendTypeDescriptor(3, n);
             this.appendUIntMag(mag);

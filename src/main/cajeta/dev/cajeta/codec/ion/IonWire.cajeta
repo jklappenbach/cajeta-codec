@@ -106,6 +106,18 @@ public final class IonWire {
     }
 
     /**
+     * The int64 whose bit pattern is 2^63 — Ion's magnitude for int64Min.
+     *
+     * Ion carries sign and magnitude separately, so 2^63 is a legal negint
+     * magnitude, but no int64 holds it as a positive number. `0 - v` overflows
+     * there and this toolchain **traps** signed overflow (SIGILL) rather than
+     * wrapping — in release builds, not just under `--profile=test`. Both the
+     * writer and the cursor special-case against this so the value survives a
+     * round trip instead of killing the process.
+     */
+    static int64 int64Min() { return ((int64) 0 - (int64) 1) << 63; }
+
+    /**
      * Decode a big-endian unsigned magnitude of `len` bytes at `pos` (an Ion
      * UInt — an int/symbol value's magnitude). `len == 0` yields 0.
      */

@@ -51,6 +51,16 @@ public final class AvroContainer {
             else {
                 int64 mm = cnt;
                 if (mm < (int64) 0) {
+                    // A negative count means "|count| entries, byte size
+                    // follows". int64Min has no positive magnitude, so `0 - mm`
+                    // would overflow and trap (SIGILL) on a corrupt file — and
+                    // it became reachable the moment zigzagDecode stopped
+                    // folding that value to 0. No real map has 2^63 entries.
+                    if (mm == AvroBinary.int64Min()) {
+                        throw heap AvroParseException(
+                            "Avro metadata block count out of range",
+                            c.position());
+                    }
                     mm = (int64) 0 - mm;
                     c.readLong();
                 }
