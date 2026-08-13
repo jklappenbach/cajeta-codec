@@ -97,11 +97,15 @@ public final class ThriftCompactReader {
         return result;
     }
 
-    /** Zigzag-decoded signed varint. */
+    /**
+     * Zigzag-decoded signed varint. `raw` is a logically unsigned word, so the
+     * shift is `>>>`: with `>>` the sign bit re-fills and everything from
+     * |v| ≥ 2^62 up decodes to the wrong value.
+     */
     public int64 readZigZag() {
         int64 raw = this.readVarint();
         int64 lowBit = raw & (int64) 1;
-        return (raw >> 1) ^ ((int64) 0 - lowBit);
+        return (raw >>> 1) ^ ((int64) 0 - lowBit);
     }
 
     /**

@@ -1,0 +1,269 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.avro.AvroBinary;
+import dev.cajeta.codec.avro.AvroWriter;
+import dev.cajeta.codec.avro.AvroCursor;
+import dev.cajeta.codec.avro.AvroContainer;
+import dev.cajeta.codec.avro.AvroParseException;
+import dev.cajeta.codec.parquet.ThriftCompactWriter;
+import dev.cajeta.codec.parquet.ThriftCompactReader;
+import dev.cajeta.codec.ion.IonWriter;
+import dev.cajeta.codec.ion.IonCursor;
+import dev.cajeta.codec.orc.OrcRleV2;
+import cajeta.lang.String;
+
+/**
+ * Extreme-magnitude values across every format that hand-rolls a varint.
+ *
+ * These all guard one bug class: a value that is *logically unsigned* being
+ * shifted or compared with *signed* semantics. In Cajeta `>>` is arithmetic on
+ * a signed type and `>>>` is the logical shift — signedness rides the operator,
+ * not the operand — so `raw >> 1` on a zigzag word re-fills the sign bit, and
+ * `t >= 128` on a varint accumulator reads a bit-63-set word as "already
+ * small". Both are invisible until |v| crosses 2^62, which is exactly where no
+ * hand-written test had ever looked.
+ *
+ * Every case below failed before the fix: Avro and Thrift decoded wrong values,
+ * Thrift wrote 1 byte where 10 were needed, and Ion aborted the process.
+ */
+public class WireExtremesTest {
+
+    public WireExtremesTest() {
+        return;
+    }
+
+    // Built by shifting, not by negating a literal: `0 - int64Min` overflows,
+    // and this toolchain traps signed overflow rather than wrapping it.
+    static int64 int64Min() { return ((int64) 0 - (int64) 1) << 63; }
+    static int64 int64Max() { return ((int64) 0 - (int64) 1) >>> 1; }
+    static int64 twoTo62()  { return (int64) 1 << 62; }
+
+    // ---- Avro -------------------------------------------------------------
+
+    @Test
+    public void avroZigzagRoundTripsPastTheBit63Boundary() {
+        // 2^62 is the first positive whose zigzag word sets bit 63.
+        Assert.that(AvroBinary.zigzagDecode(AvroBinary.zigzagEncode(
+            WireExtremesTest.twoTo62()))).isEqualTo(WireExtremesTest.twoTo62());
+
+        int64 justBelow = ((int64) 0 - WireExtremesTest.twoTo62()) - (int64) 1;
+        Assert.that(AvroBinary.zigzagDecode(AvroBinary.zigzagEncode(justBelow)))
+            .isEqualTo(justBelow);
+    }
+
+    @Test
+    public void avroZigzagRoundTripsAtTheInt64Limits() {
+        int64 mn = WireExtremesTest.int64Min();
+        int64 mx = WireExtremesTest.int64Max();
+        // Pre-fix these came back 0 and -1 respectively.
+        Assert.that(AvroBinary.zigzagDecode(AvroBinary.zigzagEncode(mn)))
+            .isEqualTo(mn);
+        Assert.that(AvroBinary.zigzagDecode(AvroBinary.zigzagEncode(mx)))
+            .isEqualTo(mx);
+    }
+
+    @Test
+    public void avroSmallValuesAreUnchangedByTheFix() {
+        Assert.that(AvroBinary.zigzagDecode(AvroBinary.zigzagEncode((int64) 0)))
+            .isEqualTo((int64) 0);
+        int64 neg = (int64) 0 - (int64) 1;
+        Assert.that(AvroBinary.zigzagDecode(AvroBinary.zigzagEncode(neg)))
+            .isEqualTo(neg);
+        Assert.that(AvroBinary.zigzagEncode(neg)).isEqualTo((int64) 1);
+        Assert.that(AvroBinary.zigzagDecode(AvroBinary.zigzagEncode(
+            (int64) 300))).isEqualTo((int64) 300);
+    }
+
+    @Test
+    public void avroWriterAndCursorAgreeAtTheLimits() {
+        AvroWriter w = heap AvroWriter();
+        w.writeLong(WireExtremesTest.int64Min());
+        w.writeLong(WireExtremesTest.int64Max());
+        w.writeLong(WireExtremesTest.twoTo62());
+        w.writeLong((int64) 7);
+        int8[] bytes = w.result();
+
+        AvroCursor c = heap AvroCursor(bytes, (int64) 0);
+        Assert.that(c.readLong()).isEqualTo(WireExtremesTest.int64Min());
+        Assert.that(c.readLong()).isEqualTo(WireExtremesTest.int64Max());
+        Assert.that(c.readLong()).isEqualTo(WireExtremesTest.twoTo62());
+        Assert.that(c.readLong()).isEqualTo((int64) 7);
+    }
+
+    // ---- Thrift compact ---------------------------------------------------
+
+    @Test
+    public void thriftVarintEmitsEveryByteOfAHighBitWord() {
+        // zigzag(int64Min) is 0xFFFF_FFFF_FFFF_FFFF — ten ULEB128 bytes. The
+        // signed `t >= 128` test used to write exactly one.
+        ThriftCompactWriter w = heap ThriftCompactWriter();
+        w.writeZigZag(WireExtremesTest.int64Min());
+        Assert.that(w.size()).isEqualTo((int64) 10);
+    }
+
+    @Test
+    public void thriftZigZagRoundTripsAtTheLimits() {
+        ThriftCompactWriter w = heap ThriftCompactWriter();
+        w.writeZigZag(WireExtremesTest.int64Min());
+        w.writeZigZag(WireExtremesTest.int64Max());
+        w.writeZigZag(WireExtremesTest.twoTo62());
+        int8[] bytes = w.result();
+
+        ThriftCompactReader r = heap ThriftCompactReader(bytes, (int64) 0);
+        Assert.that(r.readZigZag()).isEqualTo(WireExtremesTest.int64Min());
+        Assert.that(r.readZigZag()).isEqualTo(WireExtremesTest.int64Max());
+        Assert.that(r.readZigZag()).isEqualTo(WireExtremesTest.twoTo62());
+    }
+
+    @Test
+    public void thriftSmallValuesKeepTheirCompactFraming() {
+        // The fix must not inflate the common case: 0 and 1 stay one byte.
+        ThriftCompactWriter w = heap ThriftCompactWriter();
+        w.writeVarint((int64) 0);
+        Assert.that(w.size()).isEqualTo((int64) 1);
+
+        ThriftCompactWriter w2 = heap ThriftCompactWriter();
+        w2.writeVarint((int64) 127);
+        Assert.that(w2.size()).isEqualTo((int64) 1);
+
+        ThriftCompactWriter w3 = heap ThriftCompactWriter();
+        w3.writeVarint((int64) 128);
+        Assert.that(w3.size()).isEqualTo((int64) 2);
+
+        ThriftCompactWriter w4 = heap ThriftCompactWriter();
+        w4.writeZigZag((int64) 0 - (int64) 3);
+        int8[] b4 = w4.result();
+        ThriftCompactReader r4 = heap ThriftCompactReader(b4, (int64) 0);
+        Assert.that(r4.readZigZag()).isEqualTo((int64) 0 - (int64) 3);
+    }
+
+    @Test
+    public void thriftI64FieldCarriesAnExtremeStatistic() {
+        // The path parquet column statistics actually take.
+        ThriftCompactWriter w = heap ThriftCompactWriter();
+        w.writeI64Field(1, WireExtremesTest.int64Min());
+        w.writeI64Field(2, WireExtremesTest.int64Max());
+        w.stop();
+        int8[] bytes = w.result();
+
+        ThriftCompactReader r = heap ThriftCompactReader(bytes, (int64) 0);
+        Assert.that(r.readFieldHeader()).isEqualTo(ThriftCompactReader.T_I64);
+        Assert.that(r.fieldId()).isEqualTo(1);
+        Assert.that(r.readI64()).isEqualTo(WireExtremesTest.int64Min());
+        Assert.that(r.readFieldHeader()).isEqualTo(ThriftCompactReader.T_I64);
+        Assert.that(r.fieldId()).isEqualTo(2);
+        Assert.that(r.readI64()).isEqualTo(WireExtremesTest.int64Max());
+        Assert.that(r.readFieldHeader()).isEqualTo(ThriftCompactReader.T_STOP);
+    }
+
+    // ---- Ion --------------------------------------------------------------
+
+    @Test
+    public void ionWritesInt64MinWithoutAborting() {
+        // `0 - int64Min` overflows; the toolchain traps it with SIGILL, so
+        // before the fix this killed the process rather than failing an
+        // assertion. Ion stores sign and magnitude separately, and 2^63 is a
+        // representable magnitude, so the value has a legal encoding.
+        IonWriter w = heap IonWriter();
+        w.intern("v");
+        w.writeBvm();
+        w.writeLocalSymbolTable();
+        w.beginContainer();
+        w.writeFieldSid(w.intern("v"));
+        w.writeIntValue(WireExtremesTest.int64Min());
+        w.endContainer(13);
+        int8[] bytes = w.toBytes();
+
+        IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
+        Assert.that(cur.readInt(cur.slotOf("v")))
+            .isEqualTo(WireExtremesTest.int64Min());
+    }
+
+    @Test
+    public void ionRoundTripsBothIntLimits() {
+        IonWriter w = heap IonWriter();
+        w.intern("lo");
+        w.intern("hi");
+        w.writeBvm();
+        w.writeLocalSymbolTable();
+        w.beginContainer();
+        w.writeFieldSid(w.intern("lo"));
+        w.writeIntValue(WireExtremesTest.int64Min());
+        w.writeFieldSid(w.intern("hi"));
+        w.writeIntValue(WireExtremesTest.int64Max());
+        w.endContainer(13);
+        int8[] bytes = w.toBytes();
+
+        IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
+        Assert.that(cur.readInt(cur.slotOf("lo")))
+            .isEqualTo(WireExtremesTest.int64Min());
+        Assert.that(cur.readInt(cur.slotOf("hi")))
+            .isEqualTo(WireExtremesTest.int64Max());
+    }
+
+    @Test
+    public void ionOrdinaryIntsAreUnchangedByTheFix() {
+        IonWriter w = heap IonWriter();
+        w.intern("a");
+        w.intern("b");
+        w.writeBvm();
+        w.writeLocalSymbolTable();
+        w.beginContainer();
+        w.writeFieldSid(w.intern("a"));
+        w.writeIntValue((int64) 150);
+        w.writeFieldSid(w.intern("b"));
+        w.writeIntValue((int64) 0 - (int64) 42);
+        w.endContainer(13);
+        int8[] bytes = w.toBytes();
+
+        IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
+        Assert.that(cur.readInt(cur.slotOf("a"))).isEqualTo((int64) 150);
+        Assert.that(cur.readInt(cur.slotOf("b")))
+            .isEqualTo((int64) 0 - (int64) 42);
+    }
+
+    @Test
+    public void avroContainerRejectsAnOutOfRangeBlockCount() {
+        // A negative metadata block count means "|count| entries". int64Min has
+        // no positive magnitude, so negating it traps -- and decoding it only
+        // became possible once zigzagDecode stopped folding that word to 0. A
+        // corrupt file must raise, not kill the process.
+        AvroWriter w = heap AvroWriter();
+        w.putByte(0x4F); w.putByte(0x62); w.putByte(0x6A); w.putByte(0x01);
+        w.writeLong(WireExtremesTest.int64Min());
+        int8[] bytes = w.result();
+
+        boolean raised = false;
+        try {
+            AvroContainer ac = heap AvroContainer(bytes, (int64) bytes.count());
+        } catch (AvroParseException e) {
+            raised = true;
+        }
+        Assert.isTrue(raised);
+    }
+
+    // ---- ORC RLEv2 --------------------------------------------------------
+
+    @Test
+    public void orcRleV2EncodesLargeMagnitudeValues() {
+        // bitLen() walks a zigzag word down to zero. Through cajeta 0.17.0 `>>`
+        // was arithmetic on uint64 too and this never terminated; `>>>` says
+        // unsigned on every toolchain.
+        int64[] vals = heap int64[4];
+        vals[0] = WireExtremesTest.twoTo62();
+        vals[1] = WireExtremesTest.int64Min();
+        vals[2] = WireExtremesTest.int64Max();
+        vals[3] = (int64) 0 - (int64) 1;
+        int8[] enc = OrcRleV2.encodeDirect(vals, 4);
+        Assert.isTrue(enc.count() > (int64) 0);
+
+        int64[] out = heap int64[4];
+        OrcRleV2 r = heap OrcRleV2(enc, (int64) 0);
+        r.decodeInto(out, 4);
+        Assert.that(out[0]).isEqualTo(WireExtremesTest.twoTo62());
+        Assert.that(out[1]).isEqualTo(WireExtremesTest.int64Min());
+        Assert.that(out[2]).isEqualTo(WireExtremesTest.int64Max());
+        Assert.that(out[3]).isEqualTo((int64) 0 - (int64) 1);
+    }
+}

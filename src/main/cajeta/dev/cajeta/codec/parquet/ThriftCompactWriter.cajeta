@@ -35,16 +35,25 @@ public final class ThriftCompactWriter {
         this.len = this.len + 1;
     }
 
+    /**
+     * ULEB128. `v` is treated as an unsigned 64-bit word, so both the shift and
+     * the continue test must be unsigned. `t >= 128` is a SIGNED compare: any
+     * value with bit 63 set looked "already small" and fell straight through to
+     * the final byte, so a 10-byte varint was written as one — parquet i64
+     * statistics beyond ±2^62 were silently truncated on write.
+     */
     public void writeVarint(int64 v) {
         int64 t = v;
-        while (t >= (int64) 128) {
+        int64 above7 = ~((int64) 0x7F);
+        while ((t & above7) != (int64) 0) {
             this.putByte((int32) ((t & (int64) 0x7F) | (int64) 0x80));
-            t = (t >> 7) & (int64) 0x01FFFFFFFFFFFFFF;
+            t = t >>> 7;
         }
         this.putByte((int32) (t & (int64) 0x7F));
     }
 
     public void writeZigZag(int64 v) {
+        // `v >> 63` is deliberately arithmetic: it is the sign mask.
         int64 zz = (v << 1) ^ (v >> 63);
         this.writeVarint(zz);
     }
