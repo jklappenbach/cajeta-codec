@@ -235,9 +235,10 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
       silently link an old backend). **Also found + fixed there:** cajeta-http's
       `repositories` URL `https://repo.cajeta.org` is **NXDOMAIN** and always
       has been — resolution only ever worked off a hand-seeded `~/.olla`. The
-      live registry is `https://olla.cajeta.dev`. **NOTE: this manifest
-      (cajeta-codec/cajeta.json line 75) still has the dead URL — fix it here
-      too.**
+      live registry is `https://olla.cajeta.dev`. *(That note once said this
+      manifest still carried the dead URL; checked 2026-08-13 —
+      `cajeta.json:75` reads `https://olla.cajeta.dev`, so it was fixed here
+      too and the follow-up is closed.)*
       **Verified end-to-end:** `DeflateBackend.useNative() = true` on
       cajeta-http's `ContentCoding` path; 4 MiB gzip round-trip byte-exact;
       encode ~800 MiB/s native vs 17.8 MiB/s forced-fallback (**~45×**), output
@@ -254,12 +255,27 @@ must carry the per-platform artifact so consumers (cajeta-http) link offline.
       `CAJETA_NATIVE_PATH=<dir>/native` → links offline (recipe in
       `native/CROSS-BUILD.md`). Verified twice: the tour consumer (11/11
       offline) and now cajeta-http.
-- [ ] **7.6** Toolchain gap (out of codec scope): implement §3.2.2 — the
-      consumer resolver should search dependency `.cja` `native/` trees directly,
-      so the extract-bridge becomes unnecessary. File against the compiler.
-- [ ] **7.7** Toolchain gap (out of codec scope): implement §3.B multi-platform
-      baking — `cajeta build` bakes only the host platform's native artifact even
-      when all declared platforms' archives are resolvable; a publisher can't
-      produce one self-contained multi-platform `.cja` from a single host. Until
-      then the release ships per-platform archives as separate assets. File
-      against the compiler.
+- [x] **7.6 FILED (2026-08-13) — cajeta#4.** Toolchain gap, out of codec scope:
+      §3.2.2, the consumer resolver should search dependency `.cja` `native/`
+      trees directly so the extract-bridge becomes unnecessary. The codec-side
+      deliverable was the filing; implementation is tracked in
+      https://github.com/jklappenbach/cajeta/issues/4.
+      **Re-verified on cajeta 0.19.0 before filing** (the finding dated from
+      v0.10.0): still reproduces — with `HOME` isolated and no
+      `CAJETA_NATIVE_PATH`, `--emit=exe --classpath=<codec.cja>` fails and the
+      "searched:" list names only `<home>/.cajeta/native`, never the archive on
+      the classpath.
+      **Trap worth keeping:** the same link *succeeds* with a real `HOME`,
+      because `~/.cajeta/native/linux-x64/libcajeta_zlib.a` seeded during unit 1
+      satisfies it. That false pass reads exactly like the feature working —
+      isolate `HOME` when verifying any fix.
+- [x] **7.7 FILED (2026-08-13) — cajeta#5.** Toolchain gap, out of codec scope:
+      §3.B multi-platform baking — `cajeta build` bakes only the host platform
+      even when all declared platforms' archives resolve, so a publisher can't
+      produce one self-contained multi-platform `.cja` from a single host.
+      Tracked in https://github.com/jklappenbach/cajeta/issues/5; the release
+      keeps shipping per-platform archives as separate assets meanwhile.
+      **Re-verified on cajeta 0.19.0 before filing:** staged all six genuine
+      per-platform archives (from the v0.8.1 release assets) at
+      `CAJETA_NATIVE_PATH` against the six declared platforms — six resolvable,
+      only `native/linux-x64/` baked, and no diagnostic that five were skipped.

@@ -4,4 +4,6 @@ Active work only. A row is removed and its spec + plan archived when the plan cl
 
 | Spec | Plan | Status |
 |------|------|--------|
-| [native-libz-spec.md](native-libz-spec.md) | agents/native-libz-plan.md | active |
+
+_No active work. Completed specs and plans live in `specs/archive/` and
+`agents/archive/`._
