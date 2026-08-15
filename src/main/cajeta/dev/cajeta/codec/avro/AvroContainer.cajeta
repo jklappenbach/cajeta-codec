@@ -33,7 +33,9 @@ public final class AvroContainer {
      * (P-COMPILER-FQN), but a FQ constructor is fine.
      */
     public AvroContainer(int8[] b, int64 n) {
-        this.b = b;
+        // `#=` (ownership 3.3.3): record the caller's mode — a lent buffer
+        // stays lent, `#b` at the call site transfers it.
+        this.b #= b;
         this.n = n;
         int32 m0 = ((int32) b[0]) & 0xFF;
         int32 m1 = ((int32) b[1]) & 0xFF;

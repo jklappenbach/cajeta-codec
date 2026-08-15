@@ -26,7 +26,9 @@ public final class IonCursor {
     int64 topTd;     // type-descriptor position of the current top-level value
 
     public IonCursor(int8[] b, int64 n) {
-        this.b = b;
+        // `#=` (ownership 3.3.3): record the caller's mode — a lent buffer
+        // stays lent, `#b` at the call site transfers it.
+        this.b #= b;
         this.n = n;
         IonSymbolTable t = IonSymbolTable.parse(b, n);
         this.table = #t;

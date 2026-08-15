@@ -18,7 +18,9 @@ public final class ProtobufCursor {
     ProtobufIndex idx;
 
     public ProtobufCursor(int8[] b, int64 n) {
-        this.b = b;
+        // `#=` (ownership 3.3.3): record the caller's mode — a lent buffer
+        // stays lent, `#b` at the call site transfers it.
+        this.b #= b;
         ProtobufIndex ix = ProtobufIndex.build(b, n);
         this.idx = #ix;
     }

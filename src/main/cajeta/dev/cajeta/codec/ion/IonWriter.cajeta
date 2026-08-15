@@ -266,7 +266,11 @@ public final class IonWriter {
             if (e.equals(name)) { return (int64) 10 + (int64) k; }
             k = k + 1;
         }
-        this.locals[this.localCount] = name;
+        // `#=` (ownership 3.3.3): the symbol table keeps `name` for the whole
+        // stream, well past this call. `#=` records the caller's mode in the
+        // slot — a lent name stays lent, exactly as the plain store behaved,
+        // and `intern(#n)` hands the string to the table to free.
+        this.locals[this.localCount] #= name;
         int64 sid = (int64) 10 + (int64) this.localCount;
         this.localCount = this.localCount + 1;
         return sid;

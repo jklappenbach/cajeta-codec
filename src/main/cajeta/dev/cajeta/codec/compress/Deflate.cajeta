@@ -36,7 +36,9 @@ public final class Deflate {
     int32 accSkew;
 
     public Deflate(int8[] src, int64 n, int64 destLen) {
-        this.src = src;
+        // `#=` (ownership 3.3.3): record the caller's mode — a lent buffer
+        // stays lent, `#src` at the call site transfers it.
+        this.src #= src;
         this.n = n;
         this.bitpos = (int64) 0;
         int8[] ob = heap int8[destLen];

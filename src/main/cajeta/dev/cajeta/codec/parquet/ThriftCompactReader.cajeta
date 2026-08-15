@@ -41,7 +41,9 @@ public final class ThriftCompactReader {
     boolean curBool;
 
     public ThriftCompactReader(int8[] b, int64 pos) {
-        this.b = b;
+        // `#=` (ownership 3.3.3): record the caller's mode — a lent buffer
+        // stays lent, `#b` at the call site transfers it.
+        this.b #= b;
         this.pos = pos;
         this.lastFieldId = 0;
         this.curType = 0;

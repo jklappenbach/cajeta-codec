@@ -18,7 +18,9 @@ public final class OrcRleV2 {
     int64 bp;
 
     public OrcRleV2(int8[] src, int64 off) {
-        this.src = src;
+        // `#=` (ownership 3.3.3): record the caller's mode — a lent buffer
+        // stays lent, `#src` at the call site transfers it.
+        this.src #= src;
         this.bp = off;
     }
 
