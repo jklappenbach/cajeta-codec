@@ -53,8 +53,8 @@ public final class Zlib {
                 "zlib preset dictionary unsupported", (int64) 1);
         }
         int64 dlen = (n - (int64) 4) - (int64) 2;
-        int8[] def = Gzip.slice(src, (int64) 2, dlen);
-        int8[] out = Deflate.inflate(def, dlen, destLen);
+        int8[] def #= Gzip.slice(src, (int64) 2, dlen);
+        int8[] out #= Deflate.inflate(def, dlen, destLen);
         int64 outLen = (int64) out.count();
         int64 adPos = n - (int64) 4;
         int64 a3 = adPos + 1;
@@ -85,7 +85,7 @@ public final class Zlib {
         if (DeflateBackend.useNative()) {
             return #NativeZlib.zlibCompress(src, n, level);
         }
-        int8[] def = Deflate.deflate(src, n, level);
+        int8[] def #= Deflate.deflate(src, n, level);
         int64 dlen = (int64) def.count();
         int64 ad = Zlib.adler32(src, n);
 

@@ -52,7 +52,7 @@ public final class Dictionary {
 
     /** Build a Parquet dictionary data page: bit-width byte + hybrid indices. */
     public static #int8[] encodePage(int32[] indices, int32 count, int32 w) {
-        int8[] body = Rle.encode(indices, w, count);
+        int8[] body #= Rle.encode(indices, w, count);
         int64 bn = (int64) body.count();
         int8[] page = heap int8[bn + (int64) 1];
         page[0] = (int8) (w & 0xFF);
@@ -84,7 +84,7 @@ public final class Dictionary {
     public static #int32[] decode(int8[] src, int64 off, int32 count,
                                   int32[] dict) {
         int32 w = ((int32) src[off]) & 0xFF;
-        int32[] idx = Rle.decode(src, off + (int64) 1, w, count);
+        int32[] idx #= Rle.decode(src, off + (int64) 1, w, count);
         return Dictionary.gather(idx, count, dict);
     }
 }

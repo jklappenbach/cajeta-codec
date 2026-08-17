@@ -112,11 +112,11 @@ public final class ParquetColumnInfo {
                                                             if (sfid == 3) {
                                                                 info.nullCount = r.readI64();
                                                             } else if (sfid == 5) {
-                                                                int8[] mx = r.readBinary();
+                                                                int8[] mx #= r.readBinary();
                                                                 info.maxValue = ParquetColumnInfo.leBytesToLong(mx);
                                                                 info.hasStats = true;
                                                             } else if (sfid == 6) {
-                                                                int8[] mn = r.readBinary();
+                                                                int8[] mn #= r.readBinary();
                                                                 info.minValue = ParquetColumnInfo.leBytesToLong(mn);
                                                                 info.hasStats = true;
                                                             } else {

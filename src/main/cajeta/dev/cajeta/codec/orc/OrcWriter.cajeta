@@ -28,7 +28,7 @@ public final class OrcWriter {
 
     public static #int8[] writeLongColumn(int64[] vals, int32 count) {
         // DATA stream (RLE v2 DIRECT).
-        int8[] data = OrcRleV2.encodeDirect(vals, count);
+        int8[] data #= OrcRleV2.encodeDirect(vals, count);
         int32 dataLen = (int32) data.count();
 
         // StripeFooter: one Stream{kind=DATA(1), column=1, length} + two
@@ -37,21 +37,21 @@ public final class OrcWriter {
         streamMsg.writeVarintField(1, (int64) 1);            // kind DATA
         streamMsg.writeVarintField(2, (int64) 1);            // column
         streamMsg.writeVarintField(3, (int64) dataLen);      // length
-        int8[] streamBytes = streamMsg.toBytes();
+        int8[] streamBytes #= streamMsg.toBytes();
 
         ProtobufWriter enc0 = heap ProtobufWriter();
         enc0.writeVarintField(1, (int64) 0);                 // DIRECT
-        int8[] enc0Bytes = enc0.toBytes();
+        int8[] enc0Bytes #= enc0.toBytes();
 
         ProtobufWriter enc1 = heap ProtobufWriter();
         enc1.writeVarintField(1, (int64) 3);                 // DIRECT_V2
-        int8[] enc1Bytes = enc1.toBytes();
+        int8[] enc1Bytes #= enc1.toBytes();
 
         ProtobufWriter sf = heap ProtobufWriter();
         sf.writeLenField(1, streamBytes, (int32) streamBytes.count());
         sf.writeLenField(2, enc0Bytes, (int32) enc0Bytes.count());
         sf.writeLenField(2, enc1Bytes, (int32) enc1Bytes.count());
-        int8[] sfBytes = sf.toBytes();
+        int8[] sfBytes #= sf.toBytes();
         int32 sfLen = (int32) sfBytes.count();
 
         // StripeInformation: offset(1)=3, indexLength(2)=0, dataLength(3),
@@ -62,7 +62,7 @@ public final class OrcWriter {
         si.writeVarintField(3, (int64) dataLen);
         si.writeVarintField(4, (int64) sfLen);
         si.writeVarintField(5, (int64) count);
-        int8[] siBytes = si.toBytes();
+        int8[] siBytes #= si.toBytes();
 
         // Types: [0] STRUCT{subtypes=[1], fieldNames=["x"]}, [1] LONG.
         int8[] subPacked = [ (int8) 0x01 ];
@@ -71,11 +71,11 @@ public final class OrcWriter {
         t0.writeVarintField(1, (int64) 12);                  // STRUCT
         t0.writeLenField(2, subPacked, 1);
         t0.writeLenField(3, nameX, 1);
-        int8[] t0Bytes = t0.toBytes();
+        int8[] t0Bytes #= t0.toBytes();
 
         ProtobufWriter t1 = heap ProtobufWriter();
         t1.writeVarintField(1, (int64) 4);                   // LONG
-        int8[] t1Bytes = t1.toBytes();
+        int8[] t1Bytes #= t1.toBytes();
 
         // Footer.
         int64 contentLength = (int64) dataLen + (int64) sfLen;
@@ -86,7 +86,7 @@ public final class OrcWriter {
         footer.writeLenField(4, t0Bytes, (int32) t0Bytes.count());
         footer.writeLenField(4, t1Bytes, (int32) t1Bytes.count());
         footer.writeVarintField(6, (int64) count);           // numberOfRows
-        int8[] footerBytes = footer.toBytes();
+        int8[] footerBytes #= footer.toBytes();
         int32 footerLen = (int32) footerBytes.count();
 
         // PostScript.
@@ -97,7 +97,7 @@ public final class OrcWriter {
         ps.writeVarintField(2, (int64) 0);                   // compression NONE
         ps.writeLenField(4, ver, 2);
         ps.writeLenField(8000, orcMagic, 3);
-        int8[] psBytes = ps.toBytes();
+        int8[] psBytes #= ps.toBytes();
         int32 psLen = (int32) psBytes.count();
 
         // Assemble: ORC | data | stripeFooter | footer | postscript | psLen.

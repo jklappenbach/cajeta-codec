@@ -42,8 +42,8 @@ public final class OrcColumnStats {
         int64 lastPos = n - (int64) 1;
         int64 pslen = (int64) (((int32) file[lastPos]) & 0xFF);
         int64 psStart = n - (int64) 1 - pslen;
-        int8[] ps = OrcMetadata.slice(file, psStart, pslen);
-        ProtobufIndex psIdx = ProtobufIndex.build(ps, pslen);
+        int8[] ps #= OrcMetadata.slice(file, psStart, pslen);
+        ProtobufIndex psIdx #= ProtobufIndex.build(ps, pslen);
         int64 footerLength = (int64) 0;
         int32 compression = 0;
         int32 pc = psIdx.fieldCount();
@@ -58,9 +58,9 @@ public final class OrcColumnStats {
             i = i + 1;
         }
         int64 footerStart = psStart - footerLength;
-        int8[] footer = OrcCompression.decompress(file, footerStart, footerLength, compression);
+        int8[] footer #= OrcCompression.decompress(file, footerStart, footerLength, compression);
         int64 footerN = (int64) footer.count();
-        ProtobufIndex fIdx = ProtobufIndex.build(footer, footerN);
+        ProtobufIndex fIdx #= ProtobufIndex.build(footer, footerN);
 
         // field 7 = repeated ColumnStatistics, in column-id order.
         int32 statsSeen = 0;
@@ -71,8 +71,8 @@ public final class OrcColumnStats {
                 if (statsSeen == col) {
                     int64 cvs = fIdx.valueStart(i);
                     int64 cve = fIdx.valueEnd(i);
-                    int8[] cs = OrcMetadata.slice(footer, cvs, cve - cvs);
-                    ProtobufIndex csIdx = ProtobufIndex.build(cs, cve - cvs);
+                    int8[] cs #= OrcMetadata.slice(footer, cvs, cve - cvs);
+                    ProtobufIndex csIdx #= ProtobufIndex.build(cs, cve - cvs);
                     int32 cc = csIdx.fieldCount();
                     int32 j = 0;
                     while (j < cc) {
@@ -82,8 +82,8 @@ public final class OrcColumnStats {
                         } else if (fn == 2) {
                             int64 ivs = csIdx.valueStart(j);
                             int64 ive = csIdx.valueEnd(j);
-                            int8[] iv = OrcMetadata.slice(cs, ivs, ive - ivs);
-                            ProtobufIndex ivIdx = ProtobufIndex.build(iv, ive - ivs);
+                            int8[] iv #= OrcMetadata.slice(cs, ivs, ive - ivs);
+                            ProtobufIndex ivIdx #= ProtobufIndex.build(iv, ive - ivs);
                             int32 ic = ivIdx.fieldCount();
                             int32 k = 0;
                             while (k < ic) {

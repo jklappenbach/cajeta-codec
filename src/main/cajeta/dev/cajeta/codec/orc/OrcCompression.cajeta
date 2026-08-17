@@ -55,12 +55,12 @@ public final class OrcCompression {
                     k = k + 1;
                 }
             } else {
-                int8[] cbuf = OrcMetadata.slice(file, p, clen);
+                int8[] cbuf #= OrcMetadata.slice(file, p, clen);
                 int8[] inf = heap int8[1];
                 if (compKind == 1) {
-                    inf = Deflate.inflateGrow(cbuf, clen);
+                    inf #= Deflate.inflateGrow(cbuf, clen);
                 } else {
-                    inf = Snappy.decompress(cbuf, clen);
+                    inf #= Snappy.decompress(cbuf, clen);
                 }
                 int64 m = (int64) inf.count();
                 if (outLen + m > cap) {

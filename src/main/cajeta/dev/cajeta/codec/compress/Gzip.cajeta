@@ -113,8 +113,8 @@ public final class Gzip {
         }
 
         int64 dlen = limit - pos;
-        int8[] def = Gzip.slice(src, pos, dlen);
-        int8[] out = Deflate.inflateGrow(def, dlen);
+        int8[] def #= Gzip.slice(src, pos, dlen);
+        int8[] out #= Deflate.inflateGrow(def, dlen);
         int64 outLen = (int64) out.count();
 
         int64 crcPos = n - (int64) 8;
@@ -145,7 +145,7 @@ public final class Gzip {
         if (DeflateBackend.useNative()) {
             return #NativeZlib.gzipCompress(src, n, level);
         }
-        int8[] def = Deflate.deflate(src, n, level);
+        int8[] def #= Deflate.deflate(src, n, level);
         int64 dlen = (int64) def.count();
         int64 crc = Gzip.crc32(src, n);
 

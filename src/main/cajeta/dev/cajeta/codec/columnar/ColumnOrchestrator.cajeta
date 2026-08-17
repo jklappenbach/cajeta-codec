@@ -22,7 +22,7 @@ public final class ColumnOrchestrator {
         int64 off = offs[i];
         int32 w = ws[i];
         int32 count = counts[i];
-        out[i] = Rle.decode(flat, off, w, count);
+        out[i] #= Rle.decode(flat, off, w, count);
     }
 
     /** Decode `n` independent pages concurrently; slot `i` holds page `i`. */
@@ -48,7 +48,7 @@ public final class ColumnOrchestrator {
             int64 off = offs[i];
             int32 w = ws[i];
             int32 count = counts[i];
-            out[i] = Rle.decode(flat, off, w, count);
+            out[i] #= Rle.decode(flat, off, w, count);
             i = i + 1;
         }
         return out;

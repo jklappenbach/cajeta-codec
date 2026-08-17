@@ -370,11 +370,11 @@ public final class Deflate {
         while (i < 256) { litLengths[i] = 9; i = i + 1; }
         while (i < 280) { litLengths[i] = 7; i = i + 1; }
         while (i < 288) { litLengths[i] = 8; i = i + 1; }
-        FastHuff litTable = FastHuff.build(litLengths, 288, 288);
+        FastHuff litTable #= FastHuff.build(litLengths, 288, 288);
         int32[] distLengths = heap int32[30];
         int32 d = 0;
         while (d < 30) { distLengths[d] = 5; d = d + 1; }
-        FastHuff distTable = FastHuff.build(distLengths, 30, 30);
+        FastHuff distTable #= FastHuff.build(distLengths, 30, 30);
         this.huffmanBlock(litTable, distTable);
     }
 
@@ -394,7 +394,7 @@ public final class Deflate {
             clLengths[pos] = v;
             i = i + 1;
         }
-        FastHuff clTable = FastHuff.build(clLengths, 19, 19);
+        FastHuff clTable #= FastHuff.build(clLengths, 19, 19);
 
         int32 nsym = hlit + hdist;
         int32[] lengths = heap int32[320];
@@ -457,8 +457,8 @@ public final class Deflate {
         }
         while (j < 30) { distLengths[j] = 0; j = j + 1; }
 
-        FastHuff litTable = FastHuff.build(litLengths, 288, 288);
-        FastHuff distTable = FastHuff.build(distLengths, 30, 30);
+        FastHuff litTable #= FastHuff.build(litLengths, 288, 288);
+        FastHuff distTable #= FastHuff.build(distLengths, 30, 30);
         this.huffmanBlock(litTable, distTable);
     }
 
@@ -508,7 +508,7 @@ public final class Deflate {
         }
         // DynDeflate emits the smaller of a dynamic- or fixed-Huffman block;
         // fall back to stored when even that expands (incompressible input).
-        int8[] comp = DynDeflate.encode(src, n, level);
+        int8[] comp #= DynDeflate.encode(src, n, level);
         int64 clen = (int64) comp.count();
         int64 storedLen = n + ((n / (int64) 65535) + (int64) 1) * (int64) 5;
         if (clen <= storedLen) { return comp; }

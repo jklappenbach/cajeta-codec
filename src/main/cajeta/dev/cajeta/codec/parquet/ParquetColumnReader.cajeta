@@ -273,13 +273,13 @@ public final class ParquetColumnReader {
                 }
                 r.exitStruct(dSaved);
                 int64 dStart = r.position();
-                int8[] dCompBytes = r.slice(dStart, (int64) dComp);
-                int8[] dPage = ParquetColumnReader.decompress(
+                int8[] dCompBytes #= r.slice(dStart, (int64) dComp);
+                int8[] dPage #= ParquetColumnReader.decompress(
                     dCompBytes, (int64) dComp, codec, (int64) dUncomp);
                 if (isStr) {
-                    dictS = ParquetColumnReader.readPlainStrings(dPage, (int64) 0, dNum);
+                    dictS #= ParquetColumnReader.readPlainStrings(dPage, (int64) 0, dNum);
                 } else {
-                    dictL = ParquetColumnReader.readPlainLongs(dPage, (int64) 0, dNum, valueBytes);
+                    dictL #= ParquetColumnReader.readPlainLongs(dPage, (int64) 0, dNum, valueBytes);
                 }
             }
 
@@ -320,8 +320,8 @@ public final class ParquetColumnReader {
             r.exitStruct(pSaved);
 
             int64 dataStart = r.position();
-            int8[] compBytes = r.slice(dataStart, (int64) compSize);
-            int8[] page = ParquetColumnReader.decompress(
+            int8[] compBytes #= r.slice(dataStart, (int64) compSize);
+            int8[] page #= ParquetColumnReader.decompress(
                 compBytes, (int64) compSize, codec, (int64) uncompSize);
 
             // def levels: flat column ⇒ no rep levels; OPTIONAL ⇒ a 4-byte-LE-len
@@ -334,7 +334,7 @@ public final class ParquetColumnReader {
             boolean hasDef = repType == (int32) 1;
             if (hasDef) {
                 int64 defLen = ParquetColumnReader.le32(page, (int64) 0);
-                def = Rle.decode(page, (int64) 4, (int32) 1, rows);
+                def #= Rle.decode(page, (int64) 4, (int32) 1, rows);
                 valuesStart = (int64) 4 + defLen;
                 present = 0;
                 int32 di = 0;
@@ -349,11 +349,11 @@ public final class ParquetColumnReader {
             String[] valS = heap String[0];
             if (isStr) {
                 if (encoding == (int32) 0) {
-                    valS = ParquetColumnReader.readPlainStrings(page, valuesStart, present);
+                    valS #= ParquetColumnReader.readPlainStrings(page, valuesStart, present);
                 } else if (encoding == (int32) 2 || encoding == (int32) 8) {
                     int32 width = ((int32) page[valuesStart]) & 0xFF;
                     int64 idxStart = valuesStart + (int64) 1;
-                    int32[] idx = Rle.decode(page, idxStart, width, present);
+                    int32[] idx #= Rle.decode(page, idxStart, width, present);
                     valS = heap String[present];
                     int32 gg = 0;
                     while (gg < present) { valS[gg] = dictS[idx[gg]]; gg = gg + 1; }
@@ -362,11 +362,11 @@ public final class ParquetColumnReader {
                 }
             } else {
                 if (encoding == (int32) 0) {
-                    valL = ParquetColumnReader.readPlainLongs(page, valuesStart, present, valueBytes);
+                    valL #= ParquetColumnReader.readPlainLongs(page, valuesStart, present, valueBytes);
                 } else if (encoding == (int32) 2 || encoding == (int32) 8) {
                     int32 width = ((int32) page[valuesStart]) & 0xFF;
                     int64 idxStart = valuesStart + (int64) 1;
-                    int32[] idx = Rle.decode(page, idxStart, width, present);
+                    int32[] idx #= Rle.decode(page, idxStart, width, present);
                     valL = heap int64[present];
                     int32 gg = 0;
                     while (gg < present) { valL[gg] = dictL[idx[gg]]; gg = gg + 1; }

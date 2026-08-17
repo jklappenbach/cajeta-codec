@@ -68,8 +68,8 @@ public final class AvroContainer {
                 }
                 int64 k = (int64) 0;
                 while (k < mm) {
-                    String key = c.readString();
-                    int8[] val = c.readBytes();
+                    String key #= c.readString();
+                    int8[] val #= c.readBytes();
                     if (key.equals("avro.codec")) {
                         codec = heap cajeta.lang.String(#val, (int32) val.count());
                     }
@@ -112,7 +112,7 @@ public final class AvroContainer {
         if (this.codecName.equals("null")) {
             return this.rawSlice();
         }
-        int8[] raw = this.rawSlice();
+        int8[] raw #= this.rawSlice();
         if (this.codecName.equals("deflate")) {
             // Avro deflate blocks are raw DEFLATE with no stored output size.
             return Deflate.inflateGrow(raw, (int64) raw.count());
@@ -120,7 +120,7 @@ public final class AvroContainer {
         if (this.codecName.equals("snappy")) {
             // Snappy block followed by a 4-byte big-endian CRC-32 of the output.
             int64 clen = (int64) raw.count() - (int64) 4;
-            int8[] data = Snappy.decompress(raw, clen);
+            int8[] data #= Snappy.decompress(raw, clen);
             int64 want = this.beUint32(raw, clen);
             int64 got = Gzip.crc32(data, (int64) data.count()) & (int64) 0xFFFFFFFF;
             if (want != got) {
