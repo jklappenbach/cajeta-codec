@@ -20,7 +20,7 @@ public class ProtobufIndexTest {
     public void indexesSingleVarintField() {
         // field 1, VARINT, value 150 → tag 0x08, varint 0x96 0x01
         int8[] b = [(int8) 0x08, (int8) 0x96, (int8) 0x01];
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) 3);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 3);
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 1);
         Assert.that((int64) idx.fieldNumber(0)).isEqualTo((int64) 1);
         Assert.that((int64) idx.wireType(0)).isEqualTo((int64) 0);
@@ -36,7 +36,7 @@ public class ProtobufIndexTest {
     public void indexesLenField() {
         // field 2, LEN "hi" → tag 0x12, len 0x02, 'h' 'i'
         int8[] b = [(int8) 0x12, (int8) 0x02, (int8) 0x68, (int8) 0x69];
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) 4);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 4);
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 1);
         Assert.that((int64) idx.fieldNumber(0)).isEqualTo((int64) 2);
         Assert.that((int64) idx.wireType(0)).isEqualTo((int64) 2);
@@ -51,7 +51,7 @@ public class ProtobufIndexTest {
         // field 1 VARINT 150, then field 2 LEN "hi"
         int8[] b = [(int8) 0x08, (int8) 0x96, (int8) 0x01,
                     (int8) 0x12, (int8) 0x02, (int8) 0x68, (int8) 0x69];
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) 7);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 7);
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 2);
         Assert.that((int64) idx.fieldNumber(1)).isEqualTo((int64) 2);
         Assert.that((int64) idx.wireType(1)).isEqualTo((int64) 2);
@@ -66,7 +66,7 @@ public class ProtobufIndexTest {
         int8[] b = [(int8) 0x2D, (int8) 1, (int8) 2, (int8) 3, (int8) 4,
                     (int8) 0x31, (int8) 1, (int8) 2, (int8) 3, (int8) 4,
                     (int8) 5, (int8) 6, (int8) 7, (int8) 8];
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) 14);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 14);
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 2);
         Assert.that((int64) idx.wireType(0)).isEqualTo((int64) 5);   // I32
         Assert.that(idx.valueEnd(0) - idx.valueStart(0)).isEqualTo((int64) 4);
@@ -112,9 +112,9 @@ public class ProtobufIndexTest {
         w.writeFixed32Field(3, 1013);
         w.writeFixed64Field(4, (int64) 171532800);
         w.writeVarintField(5, (int64) 7);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
 
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 5);
 
         // f1: tag at 0, two value bytes.
@@ -150,8 +150,8 @@ public class ProtobufIndexTest {
             w.writeVarintField(i + 1, (int64) (i * 2));
             i = i + 1;
         }
-        int8[] b = w.toBytes();
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= w.toBytes();
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
 
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 300);
         // First, an arbitrary middle, and last — all intact after the growth.
@@ -181,9 +181,9 @@ public class ProtobufIndexTest {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeLenField(1, blob, (int32) 1000);
         w.writeVarintField(2, (int64) 42);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
 
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 2);
         // Two fields — the index stays at its initial allocation, nowhere near
         // the ~1005 slots the message length would have demanded.
@@ -201,8 +201,8 @@ public class ProtobufIndexTest {
             w.writeVarintField(1, (int64) i);
             i = i + 1;
         }
-        int8[] b = w.toBytes();
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= w.toBytes();
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 33);
         Assert.isTrue(idx.capacity() >= idx.fieldCount());
         return;
@@ -212,7 +212,7 @@ public class ProtobufIndexTest {
     @Test
     public void emptyMessageIndexesToNoFields() {
         int8[] b = heap int8[0];
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) 0);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 0);
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 0);
         Assert.isTrue(idx.capacity() >= 0);
         return;

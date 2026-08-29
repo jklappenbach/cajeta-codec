@@ -37,7 +37,7 @@ public class ProtobufCursorTest {
                     (int8) 0x18, (int8) 0x07];
         ProtobufCursor cur = heap ProtobufCursor(b, (int64) 9);
         int32 slot = cur.slotOf(2);
-        int8[] bytes = cur.readBytes(slot);
+        int8[] bytes #= cur.readBytes(slot);
         Assert.that((int64) bytes.count()).isEqualTo((int64) 2);
         Assert.that((int64) bytes[0]).isEqualTo((int64) 0x68);   // 'h'
         Assert.that((int64) bytes[1]).isEqualTo((int64) 0x69);   // 'i'

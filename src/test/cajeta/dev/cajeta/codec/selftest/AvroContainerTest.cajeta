@@ -46,7 +46,7 @@ public class AvroContainerTest {
 
     @Test
     public void parsesHeaderAndCodec() {
-        int8[] b = AvroContainerTest.fixture();
+        int8[] b #= AvroContainerTest.fixture();
         AvroContainer ct = heap AvroContainer(b, (int64) b.count());
         Assert.isTrue(ct.codec().equals("null"));
         return;
@@ -54,12 +54,12 @@ public class AvroContainerTest {
 
     @Test
     public void iteratesBlockAndDecodesRecord() {
-        int8[] b = AvroContainerTest.fixture();
+        int8[] b #= AvroContainerTest.fixture();
         AvroContainer ct = heap AvroContainer(b, (int64) b.count());
         Assert.isTrue(ct.nextBlock());
         Assert.that(ct.currentObjectCount()).isEqualTo((int64) 1);
 
-        int8[] data = ct.currentData();
+        int8[] data #= ct.currentData();
         AvroCursor rc = heap AvroCursor(data, (int64) 0);
         Assert.that(rc.readLong()).isEqualTo((int64) 42);
         Assert.isTrue(rc.readString().equals("hi"));

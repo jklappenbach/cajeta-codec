@@ -38,8 +38,8 @@ public class OrcMetadataTest {
 
     @Test
     public void parsesPostscriptAndFooter() {
-        int8[] f = OrcMetadataTest.simpleOrc();
-        OrcMetadata m = OrcMetadata.parse(f, (int64) f.count());
+        int8[] f #= OrcMetadataTest.simpleOrc();
+        OrcMetadata m #= OrcMetadata.parse(f, (int64) f.count());
         Assert.that(m.footerLength).isEqualTo((int64) 76);
         Assert.that((int64) m.compression).isEqualTo((int64) 0);   // NONE
         Assert.that(m.numberOfRows).isEqualTo((int64) 4);

@@ -67,7 +67,7 @@ public class StreamingDeflateTest {
                 k = k + 1;
             }
             s.feed(piece, take);
-            int8[] got = s.drain();
+            int8[] got #= s.drain();
             int64 gn = (int64) got.count();
             int64 j = (int64) 0;
             while (j < gn) {
@@ -89,12 +89,12 @@ public class StreamingDeflateTest {
 
     @Test
     public void chunkedEqualsOneShotStepOne() {
-        String p = StreamingDeflateTest.phrase();
-        int8[] plain = p.toBytes();
+        String p #= StreamingDeflateTest.phrase();
+        int8[] plain #= p.toBytes();
         int64 n = (int64) p.byteLength();
-        int8[] raw = Deflate.deflate(plain, n);
+        int8[] raw #= Deflate.deflate(plain, n);
         int64 rn = (int64) raw.count();
-        int8[] got = StreamingDeflateTest.chunkedInflate(raw, rn, 1);
+        int8[] got #= StreamingDeflateTest.chunkedInflate(raw, rn, 1);
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             got, (int64) got.count(), plain, n));
         return;
@@ -102,12 +102,12 @@ public class StreamingDeflateTest {
 
     @Test
     public void chunkedEqualsOneShotStepThree() {
-        String p = StreamingDeflateTest.phrase();
-        int8[] plain = p.toBytes();
+        String p #= StreamingDeflateTest.phrase();
+        int8[] plain #= p.toBytes();
         int64 n = (int64) p.byteLength();
-        int8[] raw = Deflate.deflate(plain, n);
+        int8[] raw #= Deflate.deflate(plain, n);
         int64 rn = (int64) raw.count();
-        int8[] got = StreamingDeflateTest.chunkedInflate(raw, rn, 3);
+        int8[] got #= StreamingDeflateTest.chunkedInflate(raw, rn, 3);
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             got, (int64) got.count(), plain, n));
         return;
@@ -115,12 +115,12 @@ public class StreamingDeflateTest {
 
     @Test
     public void chunkedEqualsOneShotStepSeven() {
-        String p = StreamingDeflateTest.phrase();
-        int8[] plain = p.toBytes();
+        String p #= StreamingDeflateTest.phrase();
+        int8[] plain #= p.toBytes();
         int64 n = (int64) p.byteLength();
-        int8[] raw = Deflate.deflate(plain, n);
+        int8[] raw #= Deflate.deflate(plain, n);
         int64 rn = (int64) raw.count();
-        int8[] got = StreamingDeflateTest.chunkedInflate(raw, rn, 7);
+        int8[] got #= StreamingDeflateTest.chunkedInflate(raw, rn, 7);
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             got, (int64) got.count(), plain, n));
         return;
@@ -135,9 +135,9 @@ public class StreamingDeflateTest {
             noise[i] = (int8) ((i * 89 + 31) & 0xFF);
             i = i + 1;
         }
-        int8[] raw = Deflate.deflateStored(noise, (int64) 97);
+        int8[] raw #= Deflate.deflateStored(noise, (int64) 97);
         int64 rn = (int64) raw.count();
-        int8[] got = StreamingDeflateTest.chunkedInflate(raw, rn, 3);
+        int8[] got #= StreamingDeflateTest.chunkedInflate(raw, rn, 3);
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             got, (int64) got.count(), noise, (int64) 97));
         return;
@@ -146,10 +146,10 @@ public class StreamingDeflateTest {
     @Test
     public void syncFlushSegmentDecodesStandalone() {
         String m1 = "hello streaming world";
-        int8[] m1b = m1.toBytes();
+        int8[] m1b #= m1.toBytes();
         DeflateStream d = heap DeflateStream();
         d.write(m1b, m1.byteLength());
-        int8[] w1 = d.syncFlush();
+        int8[] w1 #= d.syncFlush();
         int32 w1n = (int32) w1.count();
         // The segment ends with the byte-aligned 00 00 FF FF sync tail.
         Assert.isTrue(w1n >= 4);
@@ -161,7 +161,7 @@ public class StreamingDeflateTest {
         // segment, without the stream being finished.
         InflateStream s = heap InflateStream();
         s.feed(w1, w1n);
-        int8[] got = s.drain();
+        int8[] got #= s.drain();
         Assert.isFalse(s.finished());
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             got, (int64) got.count(), m1b, (int64) m1.byteLength()));
@@ -172,14 +172,14 @@ public class StreamingDeflateTest {
     public void contextCarriesAcrossMessages() {
         String m1 = "the quick brown fox jumps over the lazy dog. ";
         String m2 = "the quick brown fox jumps over the lazy dog. ";
-        int8[] m1b = m1.toBytes();
-        int8[] m2b = m2.toBytes();
+        int8[] m1b #= m1.toBytes();
+        int8[] m2b #= m2.toBytes();
 
         DeflateStream d = heap DeflateStream();
         d.write(m1b, m1.byteLength());
-        int8[] w1 = d.syncFlush();
+        int8[] w1 #= d.syncFlush();
         d.write(m2b, m2.byteLength());
-        int8[] w2 = d.syncFlush();
+        int8[] w2 #= d.syncFlush();
 
         // m2 must compress SMALLER than m1 — its whole text back-refs
         // into m1's window across the flush boundary.
@@ -188,11 +188,11 @@ public class StreamingDeflateTest {
         // A context-carrying inflater decodes both in order...
         InflateStream s = heap InflateStream();
         s.feed(w1, (int32) w1.count());
-        int8[] g1 = s.drain();
+        int8[] g1 #= s.drain();
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             g1, (int64) g1.count(), m1b, (int64) m1.byteLength()));
         s.feed(w2, (int32) w2.count());
-        int8[] g2 = s.drain();
+        int8[] g2 #= s.drain();
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             g2, (int64) g2.count(), m2b, (int64) m2.byteLength()));
 
@@ -203,7 +203,7 @@ public class StreamingDeflateTest {
         boolean caught = false;
         try {
             fresh.feed(w2, (int32) w2.count());
-            int8[] junk = fresh.drain();
+            int8[] junk #= fresh.drain();
         } catch (DeflateException e) {
             caught = true;
         }
@@ -215,14 +215,14 @@ public class StreamingDeflateTest {
     public void concatenatedSegmentsFormOneValidStream() {
         String m1 = "first message body. ";
         String m2 = "second message body. ";
-        int8[] m1b = m1.toBytes();
-        int8[] m2b = m2.toBytes();
+        int8[] m1b #= m1.toBytes();
+        int8[] m2b #= m2.toBytes();
 
         DeflateStream d = heap DeflateStream();
         d.write(m1b, m1.byteLength());
-        int8[] w1 = d.syncFlush();
+        int8[] w1 #= d.syncFlush();
         d.write(m2b, m2.byteLength());
-        int8[] w2 = d.finish();
+        int8[] w2 #= d.finish();
 
         int64 total = (int64) w1.count() + (int64) w2.count();
         int8[] whole = heap int8[total];
@@ -241,9 +241,9 @@ public class StreamingDeflateTest {
         }
         // The BLOCK core (one-shot) inflates the concatenation whole —
         // the streaming framing is ordinary DEFLATE, not a dialect.
-        int8[] got = Deflate.inflateGrow(whole, total);
+        int8[] got #= Deflate.inflateGrow(whole, total);
         String both = m1 + m2;
-        int8[] wantb = both.toBytes();
+        int8[] wantb #= both.toBytes();
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             got, (int64) got.count(), wantb, (int64) both.byteLength()));
         return;
@@ -252,13 +252,13 @@ public class StreamingDeflateTest {
     @Test
     public void finishMarksFinished() {
         String m = "done";
-        int8[] mb = m.toBytes();
+        int8[] mb #= m.toBytes();
         DeflateStream d = heap DeflateStream();
         d.write(mb, m.byteLength());
-        int8[] w = d.finish();
+        int8[] w #= d.finish();
         InflateStream s = heap InflateStream();
         s.feed(w, (int32) w.count());
-        int8[] got = s.drain();
+        int8[] got #= s.drain();
         Assert.isTrue(s.finished());
         Assert.isTrue(StreamingDeflateTest.bytesEqual(
             got, (int64) got.count(), mb, (int64) m.byteLength()));
@@ -269,13 +269,13 @@ public class StreamingDeflateTest {
     public void truncatedFeedRaisesOnlyAtEndInput() {
         // A truncated stream is NOT an error while more input may come;
         // endInput() declares EOF and the incomplete tail raises then.
-        String p = StreamingDeflateTest.phrase();
-        int8[] plain = p.toBytes();
-        int8[] raw = Deflate.deflate(plain, (int64) p.byteLength());
+        String p #= StreamingDeflateTest.phrase();
+        int8[] plain #= p.toBytes();
+        int8[] raw #= Deflate.deflate(plain, (int64) p.byteLength());
         int32 half = (int32) (raw.count() / (int64) 2);
         InflateStream s = heap InflateStream();
         s.feed(raw, half);
-        int8[] some = s.drain();          // whatever committed so far — fine
+        int8[] some #= s.drain();          // whatever committed so far — fine
         Assert.isFalse(s.finished());
         boolean caught = false;
         try {

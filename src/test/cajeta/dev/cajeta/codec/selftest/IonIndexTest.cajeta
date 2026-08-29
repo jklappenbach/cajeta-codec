@@ -54,16 +54,16 @@ public class IonIndexTest {
 
     @Test
     public void indexesThreeFields() {
-        int8[] b = IonIndexTest.fixture();
-        IonIndex idx = IonIndex.build(b, (int64) b.count());
+        int8[] b #= IonIndexTest.fixture();
+        IonIndex idx #= IonIndex.build(b, (int64) b.count());
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 3);
         return;
     }
 
     @Test
     public void resolvesFieldNamesAndTypes() {
-        int8[] b = IonIndexTest.fixture();
-        IonIndex idx = IonIndex.build(b, (int64) b.count());
+        int8[] b #= IonIndexTest.fixture();
+        IonIndex idx #= IonIndex.build(b, (int64) b.count());
 
         Assert.that(idx.fieldNameSid(0)).isEqualTo((int64) 10);
         Assert.isTrue(idx.fieldName(0).equals("id"));
@@ -79,8 +79,8 @@ public class IonIndexTest {
 
     @Test
     public void recordsValueBounds() {
-        int8[] b = IonIndexTest.fixture();
-        IonIndex idx = IonIndex.build(b, (int64) b.count());
+        int8[] b #= IonIndexTest.fixture();
+        IonIndex idx #= IonIndex.build(b, (int64) b.count());
 
         // id = posint 150: value byte [0x96] at 31..32
         Assert.that(idx.valueStart(0)).isEqualTo((int64) 31);
@@ -96,8 +96,8 @@ public class IonIndexTest {
 
     @Test
     public void findsFieldByName() {
-        int8[] b = IonIndexTest.fixture();
-        IonIndex idx = IonIndex.build(b, (int64) b.count());
+        int8[] b #= IonIndexTest.fixture();
+        IonIndex idx #= IonIndex.build(b, (int64) b.count());
         Assert.that((int64) idx.indexOfName("name")).isEqualTo((int64) 1);
         Assert.that((int64) idx.indexOfName("active")).isEqualTo((int64) 2);
         Assert.that((int64) idx.indexOfName("missing")).isEqualTo((int64) -1);

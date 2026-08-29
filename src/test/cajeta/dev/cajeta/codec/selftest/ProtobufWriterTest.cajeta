@@ -22,7 +22,7 @@ public class ProtobufWriterTest {
     public void encodesVarint150ByteExact() {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarint((int64) 150);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
         Assert.that((int64) b.count()).isEqualTo((int64) 2);
         int8 b0 = b[0];
         int8 b1 = b[1];
@@ -38,7 +38,7 @@ public class ProtobufWriterTest {
         int8[] hi = [(int8) 0x68, (int8) 0x69];
         w.writeLenField(2, hi, (int32) 2);
         w.writeVarintField(3, (int64) 7);
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
 
         ProtobufCursor cur = heap ProtobufCursor(bytes, (int64) bytes.count());
         int32 slot1 = cur.slotOf(1);
@@ -46,7 +46,7 @@ public class ProtobufWriterTest {
         int32 slot2 = cur.slotOf(2);
         Assert.that(cur.readVarint(slot1)).isEqualTo((int64) 150);
         Assert.that(cur.readVarint(slot3)).isEqualTo((int64) 7);
-        int8[] back = cur.readBytes(slot2);
+        int8[] back #= cur.readBytes(slot2);
         Assert.that((int64) back.count()).isEqualTo((int64) 2);
         int8 h0 = back[0];
         int8 h1 = back[1];
@@ -60,7 +60,7 @@ public class ProtobufWriterTest {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeFixed32Field(5, (int32) 0x04030201);
         w.writeFixed64Field(6, (int64) 0x0807060504030201);
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
 
         ProtobufCursor cur = heap ProtobufCursor(bytes, (int64) bytes.count());
         Assert.that((int64) cur.readFixed32(cur.slotOf(5)))
@@ -79,7 +79,7 @@ public class ProtobufWriterTest {
             w.writeVarintField(1, (int64) i);
             i = i + 1;
         }
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
         ProtobufCursor cur = heap ProtobufCursor(bytes, (int64) bytes.count());
         Assert.that((int64) cur.fieldCount()).isEqualTo((int64) 100);
         // first and last field-1 occurrences decode to 0 and 99

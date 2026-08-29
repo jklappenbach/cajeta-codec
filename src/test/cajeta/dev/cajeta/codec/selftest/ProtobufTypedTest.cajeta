@@ -22,15 +22,15 @@ public class ProtobufTypedTest {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(1, (int64) 150);            // id
         String name = "hi";
-        int8[] nb = name.toBytes();
+        int8[] nb #= name.toBytes();
         w.writeLenField(2, nb, (int32) nb.count());    // name
         w.writeVarintField(3, (int64) 1);              // active = true
         w.writeVarintField(4, (int64) 42);             // count
         int8[] pay = [(int8) 0x07, (int8) 0x09];
         w.writeLenField(5, pay, (int32) 2);            // payload
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
 
-        ProtoScalarMsg m = Protobuf.parse<ProtoScalarMsg>(
+        ProtoScalarMsg m #= Protobuf.parse<ProtoScalarMsg>(
             bytes, (int64) bytes.count());
 
         Assert.that(m.id).isEqualTo((int64) 150);
@@ -55,8 +55,8 @@ public class ProtobufTypedTest {
         int8[] pay = [(int8) 0x07, (int8) 0x09];
         m.payload = pay;
 
-        int8[] bytes = Protobuf.toBytes<ProtoScalarMsg>(m);
-        ProtoScalarMsg back = Protobuf.parse<ProtoScalarMsg>(
+        int8[] bytes #= Protobuf.toBytes<ProtoScalarMsg>(m);
+        ProtoScalarMsg back #= Protobuf.parse<ProtoScalarMsg>(
             bytes, (int64) bytes.count());
 
         Assert.that(back.id).isEqualTo((int64) 150);
@@ -78,8 +78,8 @@ public class ProtobufTypedTest {
         outer.id = (int64) 5;
         outer.inner = inner;
 
-        int8[] bytes = Protobuf.toBytes<ProtoOuterMsg>(outer);
-        ProtoOuterMsg back = Protobuf.parse<ProtoOuterMsg>(
+        int8[] bytes #= Protobuf.toBytes<ProtoOuterMsg>(outer);
+        ProtoOuterMsg back #= Protobuf.parse<ProtoOuterMsg>(
             bytes, (int64) bytes.count());
 
         Assert.that(back.id).isEqualTo((int64) 5);
@@ -101,8 +101,8 @@ public class ProtobufTypedTest {
         b.count = 2;
         src[1] = b;
 
-        int8[] bytes = Protobuf.toBytes<ProtoScalarMsg[]>(src);
-        ProtoScalarMsg[] back = Protobuf.parse<ProtoScalarMsg[]>(
+        int8[] bytes #= Protobuf.toBytes<ProtoScalarMsg[]>(src);
+        ProtoScalarMsg[] back #= Protobuf.parse<ProtoScalarMsg[]>(
             bytes, (int64) bytes.count());
 
         Assert.that((int64) back.count()).isEqualTo((int64) 2);
@@ -119,16 +119,16 @@ public class ProtobufTypedTest {
         ProtobufWriter iw = heap ProtobufWriter();
         iw.writeVarintField(1, (int64) 77);            // inner.x
         String tag = "hi";
-        int8[] tb = tag.toBytes();
+        int8[] tb #= tag.toBytes();
         iw.writeLenField(2, tb, (int32) tb.count());   // inner.tag
-        int8[] innerBytes = iw.toBytes();
+        int8[] innerBytes #= iw.toBytes();
 
         ProtobufWriter ow = heap ProtobufWriter();
         ow.writeVarintField(1, (int64) 5);             // outer.id
         ow.writeLenField(2, innerBytes, (int32) innerBytes.count());  // outer.inner
-        int8[] bytes = ow.toBytes();
+        int8[] bytes #= ow.toBytes();
 
-        ProtoOuterMsg m = Protobuf.parse<ProtoOuterMsg>(
+        ProtoOuterMsg m #= Protobuf.parse<ProtoOuterMsg>(
             bytes, (int64) bytes.count());
 
         Assert.that(m.id).isEqualTo((int64) 5);
@@ -150,15 +150,15 @@ public class ProtobufTypedTest {
     public void decodesDelimitedStream() {
         // Three length-delimited messages → Protobuf.parse<ProtoScalarMsg[]>.
         ProtobufWriter s = heap ProtobufWriter();
-        int8[] m0 = ProtobufTypedTest.encodeScalar((int64) 10, (int64) 1);
+        int8[] m0 #= ProtobufTypedTest.encodeScalar((int64) 10, (int64) 1);
         s.writeDelimited(m0, (int32) m0.count());
-        int8[] m1 = ProtobufTypedTest.encodeScalar((int64) 20, (int64) 2);
+        int8[] m1 #= ProtobufTypedTest.encodeScalar((int64) 20, (int64) 2);
         s.writeDelimited(m1, (int32) m1.count());
-        int8[] m2 = ProtobufTypedTest.encodeScalar((int64) 30, (int64) 3);
+        int8[] m2 #= ProtobufTypedTest.encodeScalar((int64) 30, (int64) 3);
         s.writeDelimited(m2, (int32) m2.count());
-        int8[] bytes = s.toBytes();
+        int8[] bytes #= s.toBytes();
 
-        ProtoScalarMsg[] msgs = Protobuf.parse<ProtoScalarMsg[]>(
+        ProtoScalarMsg[] msgs #= Protobuf.parse<ProtoScalarMsg[]>(
             bytes, (int64) bytes.count());
 
         Assert.that((int64) msgs.count()).isEqualTo((int64) 3);
@@ -176,9 +176,9 @@ public class ProtobufTypedTest {
         // null), exercising slotOf == -1 skip in the synthesized bind.
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(4, (int64) 99);
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
 
-        ProtoScalarMsg m = Protobuf.parse<ProtoScalarMsg>(
+        ProtoScalarMsg m #= Protobuf.parse<ProtoScalarMsg>(
             bytes, (int64) bytes.count());
 
         Assert.that((int64) m.count).isEqualTo((int64) 99);

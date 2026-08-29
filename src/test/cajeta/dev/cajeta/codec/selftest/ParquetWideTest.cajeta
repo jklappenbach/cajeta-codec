@@ -143,8 +143,8 @@ public class ParquetWideTest {
 
     @Test
     public void readsInt32() {
-        int8[] f = ParquetWideTest.wideParquet();
-        int32[] v = ParquetColumnReader.readInt32Column(f, (int64) f.count(), 0);
+        int8[] f #= ParquetWideTest.wideParquet();
+        int32[] v #= ParquetColumnReader.readInt32Column(f, (int64) f.count(), 0);
         Assert.that((int64) v.count()).isEqualTo((int64) 5);
         int32 i = 0;
         while (i < 5) { Assert.that((int64) v[i]).isEqualTo((int64) (i + 1)); i = i + 1; }
@@ -153,8 +153,8 @@ public class ParquetWideTest {
 
     @Test
     public void readsInt64() {
-        int8[] f = ParquetWideTest.wideParquet();
-        int64[] v = ParquetColumnReader.readInt64Column(f, (int64) f.count(), 1);
+        int8[] f #= ParquetWideTest.wideParquet();
+        int64[] v #= ParquetColumnReader.readInt64Column(f, (int64) f.count(), 1);
         Assert.that((int64) v.count()).isEqualTo((int64) 5);
         int32 i = 0;
         while (i < 5) { Assert.that(v[i]).isEqualTo((int64) ((i + 1) * 10)); i = i + 1; }
@@ -163,8 +163,8 @@ public class ParquetWideTest {
 
     @Test
     public void readsFloat32() {
-        int8[] f = ParquetWideTest.wideParquet();
-        float32[] v = ParquetColumnReader.readFloat32Column(f, (int64) f.count(), 2);
+        int8[] f #= ParquetWideTest.wideParquet();
+        float32[] v #= ParquetColumnReader.readFloat32Column(f, (int64) f.count(), 2);
         Assert.that((int64) v.count()).isEqualTo((int64) 5);
         Assert.thatFloat((float64) v[0]).isCloseTo((float64) 1.5, (float64) 0.0001);
         Assert.thatFloat((float64) v[2]).isCloseTo((float64) 3.5, (float64) 0.0001);
@@ -174,8 +174,8 @@ public class ParquetWideTest {
 
     @Test
     public void readsFloat64() {
-        int8[] f = ParquetWideTest.wideParquet();
-        float64[] v = ParquetColumnReader.readFloat64Column(f, (int64) f.count(), 3);
+        int8[] f #= ParquetWideTest.wideParquet();
+        float64[] v #= ParquetColumnReader.readFloat64Column(f, (int64) f.count(), 3);
         Assert.that((int64) v.count()).isEqualTo((int64) 5);
         Assert.thatFloat(v[0]).isCloseTo((float64) 1.25, (float64) 0.0000001);
         Assert.thatFloat(v[3]).isCloseTo((float64) 4.25, (float64) 0.0000001);
@@ -184,8 +184,8 @@ public class ParquetWideTest {
 
     @Test
     public void readsStrings() {
-        int8[] f = ParquetWideTest.wideParquet();
-        String[] v = ParquetColumnReader.readStringColumn(f, (int64) f.count(), 4);
+        int8[] f #= ParquetWideTest.wideParquet();
+        String[] v #= ParquetColumnReader.readStringColumn(f, (int64) f.count(), 4);
         Assert.that((int64) v.count()).isEqualTo((int64) 5);
         Assert.equals("ab", v[0]);
         Assert.equals("cde", v[1]);

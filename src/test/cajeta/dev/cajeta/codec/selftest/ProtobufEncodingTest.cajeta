@@ -65,7 +65,7 @@ public class ProtobufEncodingTest {
         w.writeVarintField(1, (int64) 0 - (int64) 1);
         w.writeVarintField(2, ProtobufEncodingTest.int64Min());
         w.writeVarintField(3, (int64) 0 - (int64) 300);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
 
         // Protobuf encodes a negative as the full ten payload bytes.
         ProtobufCursor cur = heap ProtobufCursor(b, (int64) b.count());
@@ -84,8 +84,8 @@ public class ProtobufEncodingTest {
         ProtoScalarMsg m = heap ProtoScalarMsg();
         m.id = (int64) 0 - (int64) 42;
         m.count = 0 - 7;
-        int8[] b = Protobuf.toBytes<ProtoScalarMsg>(m);
-        ProtoScalarMsg back = Protobuf.parse<ProtoScalarMsg>(
+        int8[] b #= Protobuf.toBytes<ProtoScalarMsg>(m);
+        ProtoScalarMsg back #= Protobuf.parse<ProtoScalarMsg>(
             b, (int64) b.count());
         Assert.that(back.id).isEqualTo((int64) 0 - (int64) 42);
         Assert.that((int64) back.count).isEqualTo((int64) 0 - (int64) 7);
@@ -97,11 +97,11 @@ public class ProtobufEncodingTest {
     public void zigzagIsCompactForSmallNegatives() {
         ProtobufWriter zw = heap ProtobufWriter();
         zw.writeZigzagField(1, (int64) 0 - (int64) 1);
-        int8[] z = zw.toBytes();
+        int8[] z #= zw.toBytes();
 
         ProtobufWriter pw = heap ProtobufWriter();
         pw.writeVarintField(1, (int64) 0 - (int64) 1);
-        int8[] p = pw.toBytes();
+        int8[] p #= pw.toBytes();
 
         // tag + one payload byte, against tag + ten.
         Assert.that((int64) z.count()).isEqualTo((int64) 2);
@@ -115,7 +115,7 @@ public class ProtobufEncodingTest {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeZigzagField(1, (int64) 0 - (int64) 75);
         w.writeZigzagField(2, (int64) 4096);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
 
         ProtobufCursor cur = heap ProtobufCursor(b, (int64) b.count());
         Assert.that(cur.readZigzag(cur.slotOf(1)))
@@ -123,7 +123,7 @@ public class ProtobufEncodingTest {
         Assert.that(cur.readZigzag(cur.slotOf(2))).isEqualTo((int64) 4096);
         // Zigzag rides on wire type VARINT — it is a value mapping, not a
         // separate wire type.
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
         Assert.that((int64) idx.wireType(0)).isEqualTo((int64) 0);
         return;
     }
@@ -144,17 +144,17 @@ public class ProtobufEncodingTest {
         m.count = 42;
         int8[] pay = [(int8) 0x07, (int8) 0x09];
         m.payload = pay;
-        int8[] got = Protobuf.toBytes<ProtoScalarMsg>(m);
+        int8[] got #= Protobuf.toBytes<ProtoScalarMsg>(m);
 
         // The same message written by hand with the plain writer calls.
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(1, (int64) 150);
-        int8[] nb = "hi".toBytes();
+        int8[] nb #= "hi".toBytes();
         w.writeLenField(2, nb, (int32) nb.count());
         w.writeVarintField(3, (int64) 1);
         w.writeVarintField(4, (int64) 42);
         w.writeLenField(5, pay, (int32) 2);
-        int8[] want = w.toBytes();
+        int8[] want #= w.toBytes();
 
         Assert.that((int64) got.count()).isEqualTo((int64) want.count());
         int32 i = 0;
@@ -175,8 +175,8 @@ public class ProtobufEncodingTest {
         m.plain = (int64) 7;
         m.zz = (int64) 0 - (int64) 1;
         m.zz32 = 0 - 2;
-        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
-        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+        int8[] b #= Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back #= Protobuf.parse<ProtoEncodingMsg>(
             b, (int64) b.count());
 
         Assert.that(back.plain).isEqualTo((int64) 7);
@@ -190,8 +190,8 @@ public class ProtobufEncodingTest {
     public void zigzagRoundTripsLargeNegative() {
         ProtoEncodingMsg m = heap ProtoEncodingMsg();
         m.zz = (int64) 0 - (int64) 1000000000000;
-        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
-        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+        int8[] b #= Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back #= Protobuf.parse<ProtoEncodingMsg>(
             b, (int64) b.count());
         Assert.that(back.zz).isEqualTo((int64) 0 - (int64) 1000000000000);
         return;
@@ -203,8 +203,8 @@ public class ProtobufEncodingTest {
         ProtoEncodingMsg m = heap ProtoEncodingMsg();
         m.f32 = 1013;
         m.f64 = (int64) 171532800;
-        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
 
         int32 i = 0;
         boolean saw32 = false;
@@ -233,8 +233,8 @@ public class ProtobufEncodingTest {
         ProtoEncodingMsg m = heap ProtoEncodingMsg();
         m.f32 = 1013;
         m.f64 = (int64) 171532800;
-        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
-        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+        int8[] b #= Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back #= Protobuf.parse<ProtoEncodingMsg>(
             b, (int64) b.count());
         Assert.that((int64) back.f32).isEqualTo((int64) 1013);
         Assert.that(back.f64).isEqualTo((int64) 171532800);
@@ -250,8 +250,8 @@ public class ProtobufEncodingTest {
         m.zz32 = 0 - 3;
         m.f32 = 7;
         m.f64 = (int64) 9;
-        int8[] b = Protobuf.toBytes<ProtoEncodingMsg>(m);
-        ProtoEncodingMsg back = Protobuf.parse<ProtoEncodingMsg>(
+        int8[] b #= Protobuf.toBytes<ProtoEncodingMsg>(m);
+        ProtoEncodingMsg back #= Protobuf.parse<ProtoEncodingMsg>(
             b, (int64) b.count());
 
         Assert.that(back.plain).isEqualTo((int64) 300);
@@ -267,8 +267,8 @@ public class ProtobufEncodingTest {
     public void absentOptionedFieldsKeepDefaults() {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(1, (int64) 5);
-        int8[] b = w.toBytes();
-        ProtoEncodingMsg m = Protobuf.parse<ProtoEncodingMsg>(
+        int8[] b #= w.toBytes();
+        ProtoEncodingMsg m #= Protobuf.parse<ProtoEncodingMsg>(
             b, (int64) b.count());
         Assert.that(m.plain).isEqualTo((int64) 5);
         Assert.that(m.zz).isEqualTo((int64) 0);

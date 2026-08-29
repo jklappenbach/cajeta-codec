@@ -23,8 +23,8 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int64[] s = [(int64) 10, (int64) 20, (int64) 30];
         m.scores = s;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.scores.count()).isEqualTo((int64) 3);
         Assert.that(back.scores[0]).isEqualTo((int64) 10);
@@ -43,8 +43,8 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int32[] c = [1, 2, 3, 4];
         m.counts = c;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
 
         int32 n = 0;
         int32 i = 0;
@@ -71,8 +71,8 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int64[] s = [(int64) 1, (int64) 2, (int64) 3];
         m.scores = s;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
 
         int32 n = 0;
         int32 i = 0;
@@ -102,8 +102,8 @@ public class ProtobufRepeatedTest {
         items[1] = #c;
         m.items = #items;
 
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.items.count()).isEqualTo((int64) 2);
         Assert.that(back.items[0].x).isEqualTo((int64) 1);
@@ -124,8 +124,8 @@ public class ProtobufRepeatedTest {
         tags[1] = t1;
         m.tags = #tags;
 
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.tags.count()).isEqualTo((int64) 2);
         Assert.isTrue(back.tags[0].equals("alpha"));
@@ -138,8 +138,8 @@ public class ProtobufRepeatedTest {
     public void absentRepeatedIsEmptyNotNull() {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(1, (int64) 5);
-        int8[] b = w.toBytes();
-        ProtoRepeatedMsg m = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= w.toBytes();
+        ProtoRepeatedMsg m #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that(m.id).isEqualTo((int64) 5);
         Assert.isTrue(m.scores != null);
@@ -162,8 +162,8 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int32[] s = [1, 2, 3, 4, 5];
         m.stamps = s;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
 
         int32 n = 0;
         int32 i = 0;
@@ -187,8 +187,8 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int32[] c = [1, 300, 70000];
         m.counts = c;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.counts.count()).isEqualTo((int64) 3);
         Assert.that((int64) back.counts[0]).isEqualTo((int64) 1);
@@ -208,8 +208,8 @@ public class ProtobufRepeatedTest {
         w.writeVarintField(3, (int64) 1);
         w.writeVarintField(3, (int64) 300);
         w.writeVarintField(3, (int64) 70000);
-        int8[] b = w.toBytes();
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= w.toBytes();
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.counts.count()).isEqualTo((int64) 3);
         Assert.that((int64) back.counts[0]).isEqualTo((int64) 1);
@@ -224,8 +224,8 @@ public class ProtobufRepeatedTest {
         int64[] vals = [(int64) 7, (int64) 8];
         ProtobufWriter w = heap ProtobufWriter();
         w.writePackedVarintField(2, vals, (int32) 2);
-        int8[] b = w.toBytes();
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= w.toBytes();
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.scores.count()).isEqualTo((int64) 2);
         Assert.that(back.scores[0]).isEqualTo((int64) 7);
@@ -240,8 +240,8 @@ public class ProtobufRepeatedTest {
         ProtobufWriter w = heap ProtobufWriter();
         w.writePackedVarintField(2, first, (int32) 2);
         w.writeVarintField(2, (int64) 3);
-        int8[] b = w.toBytes();
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= w.toBytes();
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.scores.count()).isEqualTo((int64) 3);
         Assert.that(back.scores[0]).isEqualTo((int64) 1);
@@ -258,11 +258,11 @@ public class ProtobufRepeatedTest {
                       (int8) 4, (int8) 5, (int8) 6];
         ProtobufWriter w = heap ProtobufWriter();
         w.writeLenField(5, six, (int32) 6);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
 
         boolean caught = false;
         try {
-            ProtoRepeatedMsg m = Protobuf.parse<ProtoRepeatedMsg>(
+            ProtoRepeatedMsg m #= Protobuf.parse<ProtoRepeatedMsg>(
                 b, (int64) b.count());
         } catch (ProtobufParseException pe) {
             caught = true;
@@ -278,12 +278,12 @@ public class ProtobufRepeatedTest {
                       (int8) 4, (int8) 5, (int8) 6];
         ProtobufWriter w = heap ProtobufWriter();
         w.writeLenField(5, six, (int32) 6);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
         ProtobufCursor cur = heap ProtobufCursor(b, (int64) b.count());
 
         boolean caught = false;
         try {
-            int32[] v = cur.readRepeatedFixed32(5);
+            int32[] v #= cur.readRepeatedFixed32(5);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -297,8 +297,8 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int64[] d = [(int64) 0 - (int64) 1, (int64) 0 - (int64) 2, (int64) 5];
         m.deltas = d;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.deltas.count()).isEqualTo((int64) 3);
         Assert.that(back.deltas[0]).isEqualTo((int64) 0 - (int64) 1);
@@ -306,7 +306,7 @@ public class ProtobufRepeatedTest {
         Assert.that(back.deltas[2]).isEqualTo((int64) 5);
 
         // Zigzag keeps the payload tight: three values, one byte each.
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
         int32 i = 0;
         while (i < idx.fieldCount()) {
             if (idx.fieldNumber(i) == 4) {
@@ -324,15 +324,15 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int32[] s = [1013, 2026, 7];
         m.stamps = s;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that((int64) back.stamps.count()).isEqualTo((int64) 3);
         Assert.that((int64) back.stamps[0]).isEqualTo((int64) 1013);
         Assert.that((int64) back.stamps[1]).isEqualTo((int64) 2026);
         Assert.that((int64) back.stamps[2]).isEqualTo((int64) 7);
 
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
         int32 i = 0;
         while (i < idx.fieldCount()) {
             if (idx.fieldNumber(i) == 5) {
@@ -350,8 +350,8 @@ public class ProtobufRepeatedTest {
         ProtoRepeatedMsg m = heap ProtoRepeatedMsg();
         int8[] blob = [(int8) 0x07, (int8) 0x09, (int8) 0x0B];
         m.blob = blob;
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
 
         int32 n = 0;
         int32 i = 0;
@@ -367,7 +367,7 @@ public class ProtobufRepeatedTest {
         }
         Assert.that((int64) n).isEqualTo((int64) 1);
 
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
         Assert.that((int64) back.blob.count()).isEqualTo((int64) 3);
         return;
     }
@@ -394,8 +394,8 @@ public class ProtobufRepeatedTest {
                 i = i + 1;
             }
             m.counts = #vals;
-            int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-            ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(
+            int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+            ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(
                 b, (int64) b.count());
 
             Assert.that((int64) back.counts.count()).isEqualTo((int64) n);
@@ -425,8 +425,8 @@ public class ProtobufRepeatedTest {
                 i = i + 1;
             }
             m.counts = #vals;
-            int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-            ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(
+            int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+            ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(
                 b, (int64) b.count());
 
             Assert.that((int64) back.counts.count()).isEqualTo((int64) n);
@@ -455,11 +455,11 @@ public class ProtobufRepeatedTest {
         payload[16] = (int8) 0x80;   // continuation set, nothing follows
         ProtobufWriter w = heap ProtobufWriter();
         w.writeLenField(3, payload, (int32) 17);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
 
         boolean caught = false;
         try {
-            ProtoRepeatedMsg m = Protobuf.parse<ProtoRepeatedMsg>(
+            ProtoRepeatedMsg m #= Protobuf.parse<ProtoRepeatedMsg>(
                 b, (int64) b.count());
         } catch (ProtobufParseException pe) {
             caught = true;
@@ -480,11 +480,11 @@ public class ProtobufRepeatedTest {
         payload[11] = (int8) 0x01;
         ProtobufWriter w = heap ProtobufWriter();
         w.writeLenField(3, payload, (int32) 12);
-        int8[] b = w.toBytes();
+        int8[] b #= w.toBytes();
 
         boolean caught = false;
         try {
-            ProtoRepeatedMsg m = Protobuf.parse<ProtoRepeatedMsg>(
+            ProtoRepeatedMsg m #= Protobuf.parse<ProtoRepeatedMsg>(
                 b, (int64) b.count());
         } catch (ProtobufParseException pe) {
             caught = true;
@@ -513,8 +513,8 @@ public class ProtobufRepeatedTest {
         items[0] = #one;
         m.items = #items;
 
-        int8[] b = Protobuf.toBytes<ProtoRepeatedMsg>(m);
-        ProtoRepeatedMsg back = Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoRepeatedMsg>(m);
+        ProtoRepeatedMsg back #= Protobuf.parse<ProtoRepeatedMsg>(b, (int64) b.count());
 
         Assert.that(back.id).isEqualTo((int64) 99);
         Assert.that((int64) back.scores.count()).isEqualTo((int64) 2);

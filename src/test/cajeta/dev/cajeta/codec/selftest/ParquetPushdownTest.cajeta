@@ -17,8 +17,8 @@ public class ParquetPushdownTest {
 
     @Test
     public void extractsMinMaxStats() {
-        int8[] f = ParquetDictTest.dictParquet();
-        ParquetColumnInfo ci = ParquetColumnInfo.read(f, (int64) f.count(), 0);
+        int8[] f #= ParquetDictTest.dictParquet();
+        ParquetColumnInfo ci #= ParquetColumnInfo.read(f, (int64) f.count(), 0);
         Assert.isTrue(ci.hasStats);
         Assert.that(ci.minValue).isEqualTo((int64) 10);
         Assert.that(ci.maxValue).isEqualTo((int64) 30);
@@ -27,8 +27,8 @@ public class ParquetPushdownTest {
 
     @Test
     public void pushdownSkipsAndKeeps() {
-        int8[] f = ParquetDictTest.dictParquet();
-        ParquetColumnInfo ci = ParquetColumnInfo.read(f, (int64) f.count(), 0);
+        int8[] f #= ParquetDictTest.dictParquet();
+        ParquetColumnInfo ci #= ParquetColumnInfo.read(f, (int64) f.count(), 0);
         // Overlapping ranges must be kept (might contain a match).
         Assert.isTrue(ci.mightContainRange((int64) 5, (int64) 15));
         Assert.isTrue(ci.mightContainRange((int64) 25, (int64) 100));

@@ -39,7 +39,7 @@ public class ThriftCompactReaderTest {
         // field 3: binary "hi"
         t = r.readFieldHeader();
         Assert.that((int64) r.fieldId()).isEqualTo((int64) 3);
-        int8[] bin = r.readBinary();
+        int8[] bin #= r.readBinary();
         Assert.that((int64) bin.count()).isEqualTo((int64) 2);
         Assert.that((int64) (((int32) bin[0]) & 0xFF)).isEqualTo((int64) 0x68);
         Assert.that((int64) (((int32) bin[1]) & 0xFF)).isEqualTo((int64) 0x69);

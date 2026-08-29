@@ -16,7 +16,7 @@ public class OrcProjectionTest {
 
     @Test
     public void resolvesNameToColumnId() {
-        int8[] f = OrcMetadataTest.simpleOrc();
+        int8[] f #= OrcMetadataTest.simpleOrc();
         int32 col = OrcColumnReader.columnIdByName(f, (int64) f.count(), "x");
         Assert.that((int64) col).isEqualTo((int64) 1);
         return;
@@ -24,7 +24,7 @@ public class OrcProjectionTest {
 
     @Test
     public void unknownNameIsMinusOne() {
-        int8[] f = OrcMetadataTest.simpleOrc();
+        int8[] f #= OrcMetadataTest.simpleOrc();
         int32 col = OrcColumnReader.columnIdByName(f, (int64) f.count(), "missing");
         Assert.that((int64) col).isEqualTo((int64) 0 - (int64) 1);
         return;
@@ -32,7 +32,7 @@ public class OrcProjectionTest {
 
     @Test
     public void readsProjectedColumnByName() {
-        int8[] f = OrcMetadataTest.simpleOrc();
+        int8[] f #= OrcMetadataTest.simpleOrc();
         int64 sum = OrcColumnReader.int32ColumnSumByName(f, (int64) f.count(), "x");
         Assert.that(sum).isEqualTo((int64) 50);
         return;

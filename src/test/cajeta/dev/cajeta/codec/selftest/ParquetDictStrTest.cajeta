@@ -58,8 +58,8 @@ public class ParquetDictStrTest {
 
     @Test
     public void gathersDictionaryStrings() {
-        int8[] f = ParquetDictStrTest.dictStrParquet();
-        String[] v = ParquetColumnReader.readStringColumn(f, (int64) f.count(), 0);
+        int8[] f #= ParquetDictStrTest.dictStrParquet();
+        String[] v #= ParquetColumnReader.readStringColumn(f, (int64) f.count(), 0);
         Assert.that((int64) v.count()).isEqualTo((int64) 6);
         Assert.equals("red", v[0]);
         Assert.equals("green", v[1]);

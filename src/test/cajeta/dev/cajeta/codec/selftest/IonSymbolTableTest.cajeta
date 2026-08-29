@@ -44,7 +44,7 @@ public class IonSymbolTableTest {
 
     @Test
     public void resolvesSystemSymbols() {
-        IonSymbolTable t = IonSymbolTable.system();
+        IonSymbolTable t #= IonSymbolTable.system();
         Assert.isTrue(t.resolve((int64) 3).equals("$ion_symbol_table"));
         Assert.isTrue(t.resolve((int64) 4).equals("name"));
         Assert.isTrue(t.resolve((int64) 7).equals("symbols"));
@@ -59,7 +59,7 @@ public class IonSymbolTableTest {
             (int8) 0xE0, (int8) 0x01, (int8) 0x00, (int8) 0xEA,
             (int8) 0xD0
         ];
-        IonSymbolTable t = IonSymbolTable.parse(b, (int64) b.count());
+        IonSymbolTable t #= IonSymbolTable.parse(b, (int64) b.count());
         Assert.that((int64) t.localSymbolCount()).isEqualTo((int64) 0);
         Assert.that(t.userValueStart()).isEqualTo((int64) 4);
         return;
@@ -67,8 +67,8 @@ public class IonSymbolTableTest {
 
     @Test
     public void parsesLocalSymbolTable() {
-        int8[] b = IonSymbolTableTest.lstStream();
-        IonSymbolTable t = IonSymbolTable.parse(b, (int64) b.count());
+        int8[] b #= IonSymbolTableTest.lstStream();
+        IonSymbolTable t #= IonSymbolTable.parse(b, (int64) b.count());
 
         Assert.that((int64) t.localSymbolCount()).isEqualTo((int64) 2);
         Assert.isTrue(t.resolve((int64) 10).equals("id"));
@@ -80,15 +80,15 @@ public class IonSymbolTableTest {
 
     @Test
     public void userDataStartsAfterLocalSymbolTable() {
-        int8[] b = IonSymbolTableTest.lstStream();
-        IonSymbolTable t = IonSymbolTable.parse(b, (int64) b.count());
+        int8[] b #= IonSymbolTableTest.lstStream();
+        IonSymbolTable t #= IonSymbolTable.parse(b, (int64) b.count());
         Assert.that(t.userValueStart()).isEqualTo((int64) 18);
         return;
     }
 
     @Test
     public void unknownSidResolvesNull() {
-        IonSymbolTable t = IonSymbolTable.system();
+        IonSymbolTable t #= IonSymbolTable.system();
         Assert.isTrue(t.resolve((int64) 99) == null);
         Assert.isTrue(t.resolve((int64) 0) == null);
         return;

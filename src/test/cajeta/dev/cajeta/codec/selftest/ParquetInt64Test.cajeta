@@ -66,7 +66,7 @@ public class ParquetInt64Test {
         // Validated by a scalar sum: returning int64[] to the test exe miscompiles
         // (array elements read as garbage) — a toolchain bug, not the reader. The
         // int64 decode itself is correct (sum == sum of the 5 values).
-        int8[] f = ParquetInt64Test.i64Parquet();
+        int8[] f #= ParquetInt64Test.i64Parquet();
         int64 sum = ParquetColumnReader.int64ColumnSum(f, (int64) f.count(), 0);
         // 100 + 2000000000000 + 100 + 300 + 2000000000000
         Assert.that(sum).isEqualTo((int64) 4000000000500);

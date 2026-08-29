@@ -39,7 +39,7 @@ public class IonCursorTest {
 
     @Test
     public void readsPositiveAndNegativeInts() {
-        int8[] b = IonCursorTest.fixture();
+        int8[] b #= IonCursorTest.fixture();
         IonCursor cur = heap IonCursor(b, (int64) b.count());
         int32 v = cur.slotOf("version");
         Assert.that(cur.readInt(v)).isEqualTo((int64) 150);
@@ -50,7 +50,7 @@ public class IonCursorTest {
 
     @Test
     public void readsStringAndBool() {
-        int8[] b = IonCursorTest.fixture();
+        int8[] b #= IonCursorTest.fixture();
         IonCursor cur = heap IonCursor(b, (int64) b.count());
         int32 nm = cur.slotOf("name");
         Assert.isTrue(cur.readString(nm).equals("hi"));
@@ -61,10 +61,10 @@ public class IonCursorTest {
 
     @Test
     public void readsBlobBytes() {
-        int8[] b = IonCursorTest.fixture();
+        int8[] b #= IonCursorTest.fixture();
         IonCursor cur = heap IonCursor(b, (int64) b.count());
         int32 mx = cur.slotOf("max_id");
-        int8[] payload = cur.readBytes(mx);
+        int8[] payload #= cur.readBytes(mx);
         Assert.that((int64) payload.count()).isEqualTo((int64) 2);
         int8 p0 = payload[0];
         int8 p1 = payload[1];
@@ -75,7 +75,7 @@ public class IonCursorTest {
 
     @Test
     public void readsSymbolThroughTable() {
-        int8[] b = IonCursorTest.fixture();
+        int8[] b #= IonCursorTest.fixture();
         IonCursor cur = heap IonCursor(b, (int64) b.count());
         int32 s = cur.slotOf("$ion_shared_symbol_table");
         Assert.isTrue(cur.readSymbol(s).equals("name"));
@@ -84,7 +84,7 @@ public class IonCursorTest {
 
     @Test
     public void reportsAbsentFieldAndNonNull() {
-        int8[] b = IonCursorTest.fixture();
+        int8[] b #= IonCursorTest.fixture();
         IonCursor cur = heap IonCursor(b, (int64) b.count());
         Assert.that((int64) cur.slotOf("missing")).isEqualTo((int64) -1);
         Assert.isFalse(cur.has("missing"));

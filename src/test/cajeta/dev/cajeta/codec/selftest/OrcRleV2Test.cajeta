@@ -87,7 +87,7 @@ public class OrcRleV2Test {
     public void encodeDirectRoundTrips() {
         int64[] v = heap int64[4];
         v[0] = (int64) 5; v[1] = (int64) 10; v[2] = (int64) 15; v[3] = (int64) 20;
-        int8[] enc = OrcRleV2.encodeDirect(v, 4);
+        int8[] enc #= OrcRleV2.encodeDirect(v, 4);
         Assert.that(OrcRleV2.decodeSum(enc, (int64) 0, 4)).isEqualTo((int64) 50);
         return;
     }
@@ -98,7 +98,7 @@ public class OrcRleV2Test {
         int64[] v = heap int64[5];
         v[0] = (int64) 1000; v[1] = (int64) 0 - (int64) 2000; v[2] = (int64) 3;
         v[3] = (int64) 0; v[4] = (int64) 65000;
-        int8[] enc = OrcRleV2.encodeDirect(v, 5);
+        int8[] enc #= OrcRleV2.encodeDirect(v, 5);
         Assert.that(OrcRleV2.decodeSum(enc, (int64) 0, 5)).isEqualTo((int64) 64003);
         return;
     }

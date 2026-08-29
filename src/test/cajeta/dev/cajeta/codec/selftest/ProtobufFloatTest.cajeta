@@ -29,8 +29,8 @@ public class ProtobufFloatTest {
         ProtoFloatMsg m = heap ProtoFloatMsg();
         m.id = (int64) 7;
         m.price = (float64) 19.5;
-        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
-        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back #= Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
 
         Assert.that(back.id).isEqualTo((int64) 7);
         Assert.that(Cajeta.f64ToBits(back.price))
@@ -43,8 +43,8 @@ public class ProtobufFloatTest {
     public void float32RoundTrips() {
         ProtoFloatMsg m = heap ProtoFloatMsg();
         m.ratio = (float32) 0.5;
-        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
-        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back #= Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
 
         Assert.that((int64) Cajeta.f32ToBits(back.ratio))
             .isEqualTo((int64) Cajeta.f32ToBits((float32) 0.5));
@@ -60,8 +60,8 @@ public class ProtobufFloatTest {
         ProtoFloatMsg m = heap ProtoFloatMsg();
         m.price = (float64) 1.25;
         m.ratio = (float32) 2.5;
-        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
 
         boolean saw64 = false;
         boolean saw32 = false;
@@ -89,8 +89,8 @@ public class ProtobufFloatTest {
     public void negativeZeroSurvives() {
         ProtoFloatMsg m = heap ProtoFloatMsg();
         m.price = ProtobufFloatTest.negZero();
-        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
-        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back #= Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
 
         // Bit-exact: -0.0 is 0x8000000000000000, +0.0 is 0.
         Assert.that(Cajeta.f64ToBits(back.price))
@@ -104,15 +104,15 @@ public class ProtobufFloatTest {
     public void infinitiesSurvive() {
         ProtoFloatMsg p = heap ProtoFloatMsg();
         p.price = ProtobufFloatTest.posInf();
-        int8[] pb = Protobuf.toBytes<ProtoFloatMsg>(p);
-        ProtoFloatMsg pBack = Protobuf.parse<ProtoFloatMsg>(pb, (int64) pb.count());
+        int8[] pb #= Protobuf.toBytes<ProtoFloatMsg>(p);
+        ProtoFloatMsg pBack #= Protobuf.parse<ProtoFloatMsg>(pb, (int64) pb.count());
         Assert.that(Cajeta.f64ToBits(pBack.price))
             .isEqualTo(Cajeta.f64ToBits(ProtobufFloatTest.posInf()));
 
         ProtoFloatMsg n = heap ProtoFloatMsg();
         n.price = ProtobufFloatTest.negInf();
-        int8[] nb = Protobuf.toBytes<ProtoFloatMsg>(n);
-        ProtoFloatMsg nBack = Protobuf.parse<ProtoFloatMsg>(nb, (int64) nb.count());
+        int8[] nb #= Protobuf.toBytes<ProtoFloatMsg>(n);
+        ProtoFloatMsg nBack #= Protobuf.parse<ProtoFloatMsg>(nb, (int64) nb.count());
         Assert.that(Cajeta.f64ToBits(nBack.price))
             .isEqualTo(Cajeta.f64ToBits(ProtobufFloatTest.negInf()));
         return;
@@ -123,8 +123,8 @@ public class ProtobufFloatTest {
     public void nanSurvives() {
         ProtoFloatMsg m = heap ProtoFloatMsg();
         m.price = ProtobufFloatTest.nan();
-        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
-        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back #= Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
 
         Assert.isTrue(back.price != back.price);
         Assert.that(Cajeta.f64ToBits(back.price))
@@ -137,8 +137,8 @@ public class ProtobufFloatTest {
     public void absentFloatKeepsConstructorDefault() {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(1, (int64) 3);
-        int8[] b = w.toBytes();
-        ProtoFloatMsg m = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+        int8[] b #= w.toBytes();
+        ProtoFloatMsg m #= Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
 
         Assert.that(m.id).isEqualTo((int64) 3);
         Assert.that(Cajeta.f64ToBits(m.price)).isEqualTo((int64) 0);
@@ -175,8 +175,8 @@ public class ProtobufFloatTest {
         m.id = (int64) 0 - (int64) 5;
         m.price = (float64) 1234.5;
         m.ratio = (float32) 0 - (float32) 0.25;
-        int8[] b = Protobuf.toBytes<ProtoFloatMsg>(m);
-        ProtoFloatMsg back = Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
+        int8[] b #= Protobuf.toBytes<ProtoFloatMsg>(m);
+        ProtoFloatMsg back #= Protobuf.parse<ProtoFloatMsg>(b, (int64) b.count());
 
         Assert.that(back.id).isEqualTo((int64) 0 - (int64) 5);
         Assert.that(Cajeta.f64ToBits(back.price))

@@ -16,7 +16,7 @@ public class OrcColumnReaderTest {
 
     @Test
     public void readsRealOrcColumn() {
-        int8[] f = OrcMetadataTest.simpleOrc();
+        int8[] f #= OrcMetadataTest.simpleOrc();
         int64 sum = OrcColumnReader.int32ColumnSum(f, (int64) f.count(), 1);
         Assert.that(sum).isEqualTo((int64) 50);   // 5+10+15+20
         return;

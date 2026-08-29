@@ -93,8 +93,8 @@ public class ParquetMultiRowGroupTest {
 
     @Test
     public void concatenatesAllRowGroups() {
-        int8[] f = ParquetMultiRowGroupTest.multiRgParquet();
-        int64[] v = ParquetColumnReader.readInt64Column(f, (int64) f.count(), 0);
+        int8[] f #= ParquetMultiRowGroupTest.multiRgParquet();
+        int64[] v #= ParquetColumnReader.readInt64Column(f, (int64) f.count(), 0);
         Assert.that((int64) v.count()).isEqualTo((int64) 10);
         int32 i = 0;
         while (i < 10) { Assert.that(v[i]).isEqualTo((int64) (i + 1)); i = i + 1; }

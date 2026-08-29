@@ -25,7 +25,7 @@ public class AvroWriteTest {
         AvroRec r = heap AvroRec();
         r.id = (int64) 42;
         r.name = "hi";
-        int8[] enc = Avro.toBytes<AvroRec>(r);
+        int8[] enc #= Avro.toBytes<AvroRec>(r);
         // id=42 -> zigzag 0x54 ; name="hi" -> len 0x04 + 'h','i'.
         Assert.that((int64) enc.count()).isEqualTo((int64) 4);
         Assert.that((int64) (((int32) enc[0]) & 0xFF)).isEqualTo((int64) 0x54);
@@ -40,8 +40,8 @@ public class AvroWriteTest {
         AvroRec r = heap AvroRec();
         r.id = (int64) 0 - (int64) 7;
         r.name = "round-trip";
-        int8[] enc = Avro.toBytes<AvroRec>(r);
-        AvroRec back = Avro.parse<AvroRec>(enc, (int64) enc.count());
+        int8[] enc #= Avro.toBytes<AvroRec>(r);
+        AvroRec back #= Avro.parse<AvroRec>(enc, (int64) enc.count());
         Assert.that(back.id).isEqualTo((int64) 0 - (int64) 7);
         Assert.isTrue(back.name.equals("round-trip"));
         return;
@@ -54,20 +54,20 @@ public class AvroWriteTest {
         body.writeString("one");
         body.writeLong((int64) 222);
         body.writeString("two-two-two");
-        int8[] data = body.result();
+        int8[] data #= body.result();
         int64 dlen = body.size();
         String schema = "{\"type\":\"record\",\"name\":\"AvroRec\",\"fields\":[{\"name\":\"id\",\"type\":\"long\"},{\"name\":\"name\",\"type\":\"string\"}]}";
-        int8[] file = AvroContainerWriter.wrap(data, dlen, (int64) 2, schema);
+        int8[] file #= AvroContainerWriter.wrap(data, dlen, (int64) 2, schema);
         AvroContainer ct = heap AvroContainer(file, (int64) file.count());
         Assert.isTrue(ct.codec().equals("null"));
         Assert.isTrue(ct.nextBlock());
         Assert.that(ct.currentObjectCount()).isEqualTo((int64) 2);
 
         // Constructor + result() path (the one the synthesizer uses).
-        int8[] data2 = body.result();
+        int8[] data2 #= body.result();
         AvroContainerWriter cw = heap AvroContainerWriter(
             data2, body.size(), (int64) 2, schema);
-        int8[] file2 = cw.result();
+        int8[] file2 #= cw.result();
         AvroContainer ct2 = heap AvroContainer(file2, (int64) file2.count());
         Assert.isTrue(ct2.codec().equals("null"));
         return;
@@ -85,9 +85,9 @@ public class AvroWriteTest {
         b.name = "two-two-two";
         recs[1] = b;
 
-        int8[] file = Avro.toBytes<AvroRec[]>(recs);
+        int8[] file #= Avro.toBytes<AvroRec[]>(recs);
 
-        AvroRec[] back = Avro.parse<AvroRec[]>(file, (int64) file.count());
+        AvroRec[] back #= Avro.parse<AvroRec[]>(file, (int64) file.count());
         Assert.that((int64) back.count()).isEqualTo((int64) 2);
         Assert.that(back[0].id).isEqualTo((int64) 1);
         Assert.isTrue(back[0].name.equals("one"));

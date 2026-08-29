@@ -16,7 +16,7 @@ public class FrameOfReferenceTest {
     @Test
     public void decodesForBlock() {
         int8[] s = [ (int8) 0x50, (int8) 0xA3, (int8) 0xF0 ];
-        int32[] got = FrameOfReference.decode(s, (int64) 0, 4, 6, 1000);
+        int32[] got #= FrameOfReference.decode(s, (int64) 0, 4, 6, 1000);
         int32[] want = [ 1000, 1005, 1003, 1010, 1000, 1015 ];
         int32 i = 0;
         while (i < 6) {

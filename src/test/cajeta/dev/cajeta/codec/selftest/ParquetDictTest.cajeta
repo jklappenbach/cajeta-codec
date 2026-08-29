@@ -61,8 +61,8 @@ public class ParquetDictTest {
 
     @Test
     public void readsDictionarySnappyColumn() {
-        int8[] f = ParquetDictTest.dictParquet();
-        int32[] vals = ParquetColumnReader.readInt32Column(f, (int64) f.count(), 0);
+        int8[] f #= ParquetDictTest.dictParquet();
+        int32[] vals #= ParquetColumnReader.readInt32Column(f, (int64) f.count(), 0);
         int32[] want = [ 10, 20, 10, 30, 20, 10, 30, 30 ];
         Assert.that((int64) vals.count()).isEqualTo((int64) 8);
         int32 i = 0;

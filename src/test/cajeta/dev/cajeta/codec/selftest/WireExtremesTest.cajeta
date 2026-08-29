@@ -82,7 +82,7 @@ public class WireExtremesTest {
         w.writeLong(WireExtremesTest.int64Max());
         w.writeLong(WireExtremesTest.twoTo62());
         w.writeLong((int64) 7);
-        int8[] bytes = w.result();
+        int8[] bytes #= w.result();
 
         AvroCursor c = heap AvroCursor(bytes, (int64) 0);
         Assert.that(c.readLong()).isEqualTo(WireExtremesTest.int64Min());
@@ -108,7 +108,7 @@ public class WireExtremesTest {
         w.writeZigZag(WireExtremesTest.int64Min());
         w.writeZigZag(WireExtremesTest.int64Max());
         w.writeZigZag(WireExtremesTest.twoTo62());
-        int8[] bytes = w.result();
+        int8[] bytes #= w.result();
 
         ThriftCompactReader r = heap ThriftCompactReader(bytes, (int64) 0);
         Assert.that(r.readZigZag()).isEqualTo(WireExtremesTest.int64Min());
@@ -133,7 +133,7 @@ public class WireExtremesTest {
 
         ThriftCompactWriter w4 = heap ThriftCompactWriter();
         w4.writeZigZag((int64) 0 - (int64) 3);
-        int8[] b4 = w4.result();
+        int8[] b4 #= w4.result();
         ThriftCompactReader r4 = heap ThriftCompactReader(b4, (int64) 0);
         Assert.that(r4.readZigZag()).isEqualTo((int64) 0 - (int64) 3);
     }
@@ -145,7 +145,7 @@ public class WireExtremesTest {
         w.writeI64Field(1, WireExtremesTest.int64Min());
         w.writeI64Field(2, WireExtremesTest.int64Max());
         w.stop();
-        int8[] bytes = w.result();
+        int8[] bytes #= w.result();
 
         ThriftCompactReader r = heap ThriftCompactReader(bytes, (int64) 0);
         Assert.that(r.readFieldHeader()).isEqualTo(ThriftCompactReader.T_I64);
@@ -173,7 +173,7 @@ public class WireExtremesTest {
         w.writeFieldSid(w.intern("v"));
         w.writeIntValue(WireExtremesTest.int64Min());
         w.endContainer(13);
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
 
         IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
         Assert.that(cur.readInt(cur.slotOf("v")))
@@ -193,7 +193,7 @@ public class WireExtremesTest {
         w.writeFieldSid(w.intern("hi"));
         w.writeIntValue(WireExtremesTest.int64Max());
         w.endContainer(13);
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
 
         IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
         Assert.that(cur.readInt(cur.slotOf("lo")))
@@ -215,7 +215,7 @@ public class WireExtremesTest {
         w.writeFieldSid(w.intern("b"));
         w.writeIntValue((int64) 0 - (int64) 42);
         w.endContainer(13);
-        int8[] bytes = w.toBytes();
+        int8[] bytes #= w.toBytes();
 
         IonCursor cur = heap IonCursor(bytes, (int64) bytes.count());
         Assert.that(cur.readInt(cur.slotOf("a"))).isEqualTo((int64) 150);
@@ -232,7 +232,7 @@ public class WireExtremesTest {
         AvroWriter w = heap AvroWriter();
         w.putByte(0x4F); w.putByte(0x62); w.putByte(0x6A); w.putByte(0x01);
         w.writeLong(WireExtremesTest.int64Min());
-        int8[] bytes = w.result();
+        int8[] bytes #= w.result();
 
         boolean raised = false;
         try {
@@ -255,7 +255,7 @@ public class WireExtremesTest {
         vals[1] = WireExtremesTest.int64Min();
         vals[2] = WireExtremesTest.int64Max();
         vals[3] = (int64) 0 - (int64) 1;
-        int8[] enc = OrcRleV2.encodeDirect(vals, 4);
+        int8[] enc #= OrcRleV2.encodeDirect(vals, 4);
         Assert.isTrue(enc.count() > (int64) 0);
 
         int64[] out = heap int64[4];

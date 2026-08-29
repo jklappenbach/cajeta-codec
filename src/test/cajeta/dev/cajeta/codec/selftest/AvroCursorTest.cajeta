@@ -52,7 +52,7 @@ public class AvroCursorTest {
         // bytes [0x07,0x09]: long len 2 (0x04) + the two bytes.
         int8[] b = [ (int8) 0x04, (int8) 0x07, (int8) 0x09 ];
         AvroCursor c = heap AvroCursor(b, (int64) 0);
-        int8[] out = c.readBytes();
+        int8[] out #= c.readBytes();
         Assert.that((int64) out.count()).isEqualTo((int64) 2);
         int8 p0 = out[0];
         int8 p1 = out[1];

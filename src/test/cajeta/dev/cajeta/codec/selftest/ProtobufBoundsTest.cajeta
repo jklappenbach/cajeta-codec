@@ -52,7 +52,7 @@ public class ProtobufBoundsTest {
         int8[] b = [(int8) 0x08, (int8) 0x96];
         boolean caught = false;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 2);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 2);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -69,7 +69,7 @@ public class ProtobufBoundsTest {
                     (int8) 0x80, (int8) 0x80, (int8) 0x01];
         boolean caught = false;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 11);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 11);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -84,7 +84,7 @@ public class ProtobufBoundsTest {
         int8[] b = [(int8) 0x12, (int8) 0x64, (int8) 0x68, (int8) 0x69];
         boolean caught = false;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 4);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 4);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -99,7 +99,7 @@ public class ProtobufBoundsTest {
         int8[] b = [(int8) 0x0D, (int8) 0x01, (int8) 0x02];
         boolean caught = false;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 3);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 3);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -114,7 +114,7 @@ public class ProtobufBoundsTest {
         int8[] b = [(int8) 0x09, (int8) 0x01, (int8) 0x02, (int8) 0x03];
         boolean caught = false;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 4);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 4);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -129,7 +129,7 @@ public class ProtobufBoundsTest {
         int8[] b = [(int8) 0x00, (int8) 0x01];
         boolean caught = false;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 2);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 2);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -140,10 +140,10 @@ public class ProtobufBoundsTest {
     /** A declared length longer than the array itself is rejected, not trusted. */
     @Test
     public void lengthBeyondArrayRaises() {
-        int8[] b = ProtobufBoundsTest.validMessage();
+        int8[] b #= ProtobufBoundsTest.validMessage();
         boolean caught = false;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 900);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 900);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -158,14 +158,14 @@ public class ProtobufBoundsTest {
      */
     @Test
     public void everyPrefixOfAValidMessageRaisesOrParses() {
-        int8[] full = ProtobufBoundsTest.validMessage();
+        int8[] full #= ProtobufBoundsTest.validMessage();
         int32 n = (int32) full.count();
         int32 accounted = 0;
         int32 k = 1;
         while (k < n) {
-            int8[] p = ProtobufBoundsTest.prefix(full, k);
+            int8[] p #= ProtobufBoundsTest.prefix(full, k);
             try {
-                ProtobufIndex idx = ProtobufIndex.build(p, (int64) k);
+                ProtobufIndex idx #= ProtobufIndex.build(p, (int64) k);
                 accounted = accounted + 1;      // a clean parse of a short prefix
             } catch (ProtobufParseException pe) {
                 accounted = accounted + 1;      // rejected, as it should be
@@ -184,7 +184,7 @@ public class ProtobufBoundsTest {
         int8[] b = [(int8) 0x08, (int8) 0x96];
         int64 pos = (int64) 0 - (int64) 1;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 2);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 2);
         } catch (ProtobufParseException pe) {
             pos = pe.position;
         }
@@ -200,7 +200,7 @@ public class ProtobufBoundsTest {
                     (int8) 0x12, (int8) 0x64, (int8) 0x68];
         int64 pos = (int64) 0 - (int64) 1;
         try {
-            ProtobufIndex idx = ProtobufIndex.build(b, (int64) 6);
+            ProtobufIndex idx #= ProtobufIndex.build(b, (int64) 6);
         } catch (ProtobufParseException pe) {
             pos = pe.position;
         }
@@ -211,9 +211,9 @@ public class ProtobufBoundsTest {
     /** 1.1.8 — bytes handed back by an accepted index lie inside the buffer. */
     @Test
     public void cursorReadsStayInBuffer() {
-        int8[] b = ProtobufBoundsTest.validMessage();
+        int8[] b #= ProtobufBoundsTest.validMessage();
         ProtobufCursor cur = heap ProtobufCursor(b, (int64) b.count());
-        int8[] payload = cur.readBytes(cur.slotOf(2));
+        int8[] payload #= cur.readBytes(cur.slotOf(2));
         Assert.that((int64) payload.count()).isEqualTo((int64) 2);
         int8 p0 = payload[0];
         int8 p1 = payload[1];
@@ -236,21 +236,21 @@ public class ProtobufBoundsTest {
         ProtobufWriter inner = heap ProtobufWriter();
         inner.writeVarintField(1, (int64) 10);
         inner.writeVarintField(4, (int64) 1);
-        int8[] frame = inner.toBytes();
+        int8[] frame #= inner.toBytes();
 
         ProtobufWriter s = heap ProtobufWriter();
         s.writeDelimited(frame, (int32) frame.count());
         s.writeDelimited(frame, (int32) frame.count());
-        int8[] full = s.toBytes();
+        int8[] full #= s.toBytes();
 
         // Lop off the tail of the second frame — its header still promises
         // more bytes than the buffer now holds.
         int32 cutLen = (int32) full.count() - 2;
-        int8[] cut = ProtobufBoundsTest.prefix(full, cutLen);
+        int8[] cut #= ProtobufBoundsTest.prefix(full, cutLen);
 
         boolean caught = false;
         try {
-            ProtoScalarMsg[] msgs = Protobuf.parse<ProtoScalarMsg[]>(
+            ProtoScalarMsg[] msgs #= Protobuf.parse<ProtoScalarMsg[]>(
                 cut, (int64) cutLen);
         } catch (ProtobufParseException pe) {
             caught = true;
@@ -264,13 +264,13 @@ public class ProtobufBoundsTest {
     public void intactDelimitedStreamStillParses() {
         ProtobufWriter inner = heap ProtobufWriter();
         inner.writeVarintField(1, (int64) 10);
-        int8[] frame = inner.toBytes();
+        int8[] frame #= inner.toBytes();
         ProtobufWriter s = heap ProtobufWriter();
         s.writeDelimited(frame, (int32) frame.count());
         s.writeDelimited(frame, (int32) frame.count());
-        int8[] full = s.toBytes();
+        int8[] full #= s.toBytes();
 
-        ProtoScalarMsg[] msgs = Protobuf.parse<ProtoScalarMsg[]>(
+        ProtoScalarMsg[] msgs #= Protobuf.parse<ProtoScalarMsg[]>(
             full, (int64) full.count());
         Assert.that((int64) msgs.count()).isEqualTo((int64) 2);
         Assert.that(msgs[0].id).isEqualTo((int64) 10);
@@ -280,8 +280,8 @@ public class ProtobufBoundsTest {
     /** 1.1.9 — the well-formed path is untouched by the hardening. */
     @Test
     public void wellFormedMessageStillIndexesUnchanged() {
-        int8[] b = ProtobufBoundsTest.validMessage();
-        ProtobufIndex idx = ProtobufIndex.build(b, (int64) b.count());
+        int8[] b #= ProtobufBoundsTest.validMessage();
+        ProtobufIndex idx #= ProtobufIndex.build(b, (int64) b.count());
         Assert.that((int64) idx.fieldCount()).isEqualTo((int64) 3);
         Assert.that((int64) idx.fieldNumber(0)).isEqualTo((int64) 1);
         Assert.that((int64) idx.fieldNumber(1)).isEqualTo((int64) 2);

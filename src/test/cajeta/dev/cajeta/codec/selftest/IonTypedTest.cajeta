@@ -46,8 +46,8 @@ public class IonTypedTest {
 
     @Test
     public void decodesScalarStruct() {
-        int8[] bytes = IonTypedTest.scalarStream();
-        IonScalarMsg m = Ion.parse<IonScalarMsg>(bytes, (int64) bytes.count());
+        int8[] bytes #= IonTypedTest.scalarStream();
+        IonScalarMsg m #= Ion.parse<IonScalarMsg>(bytes, (int64) bytes.count());
 
         Assert.that(m.id).isEqualTo((int64) 150);
         Assert.isTrue(m.name.equals("hi"));
@@ -84,7 +84,7 @@ public class IonTypedTest {
             (int8) 0x8C, (int8) 0x21, (int8) 0x4D,
             (int8) 0x8D, (int8) 0x82, (int8) 0x68, (int8) 0x69
         ];
-        IonOuterMsg m = Ion.parse<IonOuterMsg>(b, (int64) b.count());
+        IonOuterMsg m #= Ion.parse<IonOuterMsg>(b, (int64) b.count());
 
         Assert.that(m.id).isEqualTo((int64) 5);
         Assert.isTrue(m.inner != null);
@@ -107,7 +107,7 @@ public class IonTypedTest {
             (int8) 0xD6, (int8) 0x85, (int8) 0x21, (int8) 0x1E,
             (int8) 0x84, (int8) 0x81, (int8) 0x63
         ];
-        IonStreamMsg[] msgs = Ion.parse<IonStreamMsg[]>(b, (int64) b.count());
+        IonStreamMsg[] msgs #= Ion.parse<IonStreamMsg[]>(b, (int64) b.count());
 
         Assert.that((int64) msgs.count()).isEqualTo((int64) 3);
         Assert.that(msgs[0].version).isEqualTo((int64) 10);
@@ -139,7 +139,7 @@ public class IonTypedTest {
             (int8) 0x6F, (int8) 0x61, (int8) 0x64,
             (int8) 0xD3, (int8) 0x8D, (int8) 0x21, (int8) 0x63
         ];
-        IonScalarMsg m = Ion.parse<IonScalarMsg>(b, (int64) b.count());
+        IonScalarMsg m #= Ion.parse<IonScalarMsg>(b, (int64) b.count());
         Assert.that((int64) m.count).isEqualTo((int64) 99);
         Assert.that(m.id).isEqualTo((int64) 0);
         Assert.isFalse(m.active);

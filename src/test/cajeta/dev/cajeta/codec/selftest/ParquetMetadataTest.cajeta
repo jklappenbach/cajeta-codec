@@ -56,13 +56,13 @@ public class ParquetMetadataTest {
     public void decodesRealFooter() {
         // A fresh byte buffer per call: constructing the reader stores (consumes)
         // the array, so the same buffer can't feed two parse calls.
-        int8[] f = ParquetMetadataTest.simpleParquet();
-        ParquetMetadata m = ParquetMetadata.parse(f, (int64) f.count());
+        int8[] f #= ParquetMetadataTest.simpleParquet();
+        ParquetMetadata m #= ParquetMetadata.parse(f, (int64) f.count());
         Assert.that(m.numRows).isEqualTo((int64) 5);
         Assert.that((int64) m.numColumns).isEqualTo((int64) 1);
 
-        int8[] f2 = ParquetMetadataTest.simpleParquet();
-        ParquetColumnInfo ci = ParquetColumnInfo.read(f2, (int64) f2.count(), 0);
+        int8[] f2 #= ParquetMetadataTest.simpleParquet();
+        ParquetColumnInfo ci #= ParquetColumnInfo.read(f2, (int64) f2.count(), 0);
         Assert.that((int64) ci.type).isEqualTo((int64) 1);    // INT32
         Assert.that((int64) ci.codec).isEqualTo((int64) 0);   // UNCOMPRESSED
         Assert.that(ci.numValues).isEqualTo((int64) 5);
