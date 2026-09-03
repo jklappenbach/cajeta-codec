@@ -223,14 +223,14 @@ public class BridgeTest {
 
     @Test
     public void parquetCrossesArrowIntoTypedTable() {
-        int8[] f = BridgeTest.tickParquet();
+        int8[] f #= BridgeTest.tickParquet();
         int64 fc = (int64) f.count();
-        DynCol[] cols = ParquetArrow.readColumns(f, fc, 4);
+        DynCol[] cols #= ParquetArrow.readColumns(f, fc, 4);
         int64[] sc = heap int64[4];
         int64[] ar = heap int64[4];
         BridgeTest.split(cols, 4, sc, ar);
 
-        Table<Tick> t = Table.importArrow<Tick>(sc, ar, 4);
+        Table<Tick> t #= Table.importArrow<Tick>(sc, ar, 4);
         Assert.that(t.rowCount()).isEqualTo((int64) 6);
 
         // non-null int64 key + double, spanning both row groups
@@ -259,9 +259,9 @@ public class BridgeTest {
 
     @Test
     public void schemaMismatchFailsLoud() {
-        int8[] f = BridgeTest.tickParquet();
+        int8[] f #= BridgeTest.tickParquet();
         int64 fc = (int64) f.count();
-        DynCol[] cols = ParquetArrow.readColumns(f, fc, 4);
+        DynCol[] cols #= ParquetArrow.readColumns(f, fc, 4);
         int64[] sc = heap int64[4];
         int64[] ar = heap int64[4];
         BridgeTest.split(cols, 4, sc, ar);
@@ -270,7 +270,7 @@ public class BridgeTest {
         try {
             // TickBad wants int64 `price`; the file's column is double — the
             // rebind's asI64 rejects it, naming the actual column type.
-            Table<TickBad> t = Table.importArrow<TickBad>(sc, ar, 4);
+            Table<TickBad> t #= Table.importArrow<TickBad>(sc, ar, 4);
         } catch (ColumnTypeException e) {
             caught = true;
         }
