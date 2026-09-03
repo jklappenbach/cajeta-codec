@@ -21,10 +21,10 @@ public final class GpuColumnarMain {
             vals[i] = (i * 2654435761 + 17) & mask;
             i = i + 1;
         }
-        int8[] packed = BitPack.pack(vals, w, count);
-        int32[] gpu = GpuColumnar.unpackOnGpu(packed, w, count);
-        int8[] packed2 = BitPack.pack(vals, w, count);
-        int32[] cpu = BitPack.unpack(packed2, (int64) 0, w, count);
+        int8[] packed #= BitPack.pack(vals, w, count);
+        int32[] gpu #= GpuColumnar.unpackOnGpu(packed, w, count);
+        int8[] packed2 #= BitPack.pack(vals, w, count);
+        int32[] cpu #= BitPack.unpack(packed2, (int64) 0, w, count);
         int32 bad = 0;
         i = 0;
         while (i < count) {

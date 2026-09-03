@@ -68,7 +68,7 @@ public final class GpuColumnar {
         KernelBuffer<uint32> pb = heap KernelBuffer<uint32>((uint64) nwords);
         KernelBuffer<uint32> ob = heap KernelBuffer<uint32>((uint64) count);
         pb.upload(words);
-        KernelStream s = KernelStream.current();
+        KernelStream s #= KernelStream.current();
         uint32 grid = ((uint32) count + (uint32) 63) / (uint32) 64;
         bitUnpack.launch(s, grid: [grid], block: [64])(ob, pb, (uint32) w, (uint32) count);
         s.sync();
