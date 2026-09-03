@@ -22,7 +22,7 @@
 
     "details": {
         "name":               "dev.cajeta.codec",
-        "version":            "0.8.1",
+        "version":            "0.8.2",
         "description":        "cajeta-codec — standalone codec library (protobuf, ion, avro, parquet, orc)",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -68,7 +68,7 @@
 
         // Test-only dependencies — not shipped in the published .cja.
         "dev-dependencies": {
-            "cajeta.testkit": "1.0.*"
+            "dev.cajeta.unit": "0.2.4"
         },
 
         "repositories": [

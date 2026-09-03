@@ -54,7 +54,7 @@ env:
   # v0.19.0 and not v0.18.0. Worth repeating the check when raising this pin
   # again; a release cut from before the work it is presumed to carry has
   # already happened twice on this line.
-  CAJETA_VERSION: v0.19.0
+  CAJETA_VERSION: v0.26.0
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
@@ -135,7 +135,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jklappenbach/cajeta-unit
-          ref: v0.2.2
+          ref: v0.2.4
           path: cajeta-unit-dep
 
       - name: Install cajeta toolchain (${{ env.CAJETA_VERSION }})
