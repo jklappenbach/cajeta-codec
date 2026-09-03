@@ -45,14 +45,14 @@ public class ColumnarDemo extends DemoClass {
         //    finds 5 bits; 8 values pack into 5 bytes instead of 32.
         int32[] hours = [ 0, 6, 9, 12, 14, 17, 21, 23 ];
         int32 hw = BitPack.minWidth(hours, 8);
-        int8[] hpage = BitPack.pack(hours, hw, 8);
+        int8[] hpage #= BitPack.pack(hours, hw, 8);
         System.stdout.println("  bitpack: 8 hours @ " + hw + " bits = "
             + hpage.count() + " bytes (raw int32 = 32)");
         this.check(hw == 5, "minWidth finds 5 bits for values up to 23");
         this.check(BitPack.packedBytes(hw, 8) == (int64) 5
             && (int64) hpage.count() == (int64) 5,
             "packedBytes predicts the page size (expect 5)");
-        int32[] hback = BitPack.unpack(hpage, (int64) 0, hw, 8);
+        int32[] hback #= BitPack.unpack(hpage, (int64) 0, hw, 8);
         boolean hoursOk = true;
         int32 i = 0;
         while (i < 8) {
@@ -66,9 +66,9 @@ public class ColumnarDemo extends DemoClass {
         //    (0=200, 1=404, 2=500). Mostly-200 traffic is one long run plus
         //    a bit-packed tail; RLE stores the run as (count, value).
         int32[] statuses = [ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 0 ];
-        int8[] rpage = Rle.encode(statuses, 2, 12);
+        int8[] rpage #= Rle.encode(statuses, 2, 12);
         System.stdout.println("  rle: 12 statuses -> " + rpage.count() + " bytes");
-        int32[] rback = Rle.decode(rpage, (int64) 0, 2, 12);
+        int32[] rback #= Rle.decode(rpage, (int64) 0, 2, 12);
         boolean runsOk = true;
         i = 0;
         while (i < 12) {
@@ -85,12 +85,12 @@ public class ColumnarDemo extends DemoClass {
         int32[] ts = [ 171532800, 171532802, 171532805, 171532806,
                        171532811, 171532811, 171532817 ];
         int32 first = Delta.firstOf(ts, 7);
-        int32[] deltas = Delta.encode(ts, 7);
+        int32[] deltas #= Delta.encode(ts, 7);
         this.check(first == 171532800 && (int64) deltas.count() == (int64) 6,
             "delta stores the first value plus count-1 gaps");
         this.check(deltas[0] == 2 && deltas[4] == 0,
             "gaps are small (repeat -> 0) where values cluster");
-        int32[] tsBack = Delta.decode(first, deltas, 7);
+        int32[] tsBack #= Delta.decode(first, deltas, 7);
         boolean tsOk = true;
         i = 0;
         while (i < 7) {
@@ -107,12 +107,12 @@ public class ColumnarDemo extends DemoClass {
         int32 ref = FrameOfReference.referenceOf(prices, 6);
         int32[] residuals = [ 0, 5, 3, 10, 0, 15 ];
         int32 pw = BitPack.minWidth(residuals, 6);
-        int8[] ppage = FrameOfReference.encode(prices, 6, ref, pw);
+        int8[] ppage #= FrameOfReference.encode(prices, 6, ref, pw);
         System.stdout.println("  frame-of-reference: base " + ref + ", "
             + pw + "-bit offsets, " + ppage.count() + " bytes");
         this.check(ref == 1000 && pw == 4,
             "reference is the min; residuals need 4 bits");
-        int32[] pback = FrameOfReference.decode(ppage, (int64) 0, pw, 6, ref);
+        int32[] pback #= FrameOfReference.decode(ppage, (int64) 0, pw, 6, ref);
         boolean pricesOk = true;
         i = 0;
         while (i < 6) {
@@ -127,15 +127,15 @@ public class ColumnarDemo extends DemoClass {
         //    the indices into a page, then gather back through the
         //    dictionary. This is exactly Parquet's RLE_DICTIONARY shape.
         int32[] venues = [ 4001, 4007, 4001, 4001, 4009, 4007, 4001, 4009 ];
-        int32[] dict = Dictionary.buildDict(venues, 8);
-        int32[] idx = Dictionary.indicesFor(venues, 8, dict, (int32) dict.count());
+        int32[] dict #= Dictionary.buildDict(venues, 8);
+        int32[] idx #= Dictionary.indicesFor(venues, 8, dict, (int32) dict.count());
         int32 dw = BitPack.minWidth(idx, 8);
-        int8[] dpage = Dictionary.encodePage(idx, 8, dw);
+        int8[] dpage #= Dictionary.encodePage(idx, 8, dw);
         System.stdout.println("  dictionary: 8 venue ids, "
             + dict.count() + " distinct -> " + dpage.count() + "-byte page");
         this.check((int64) dict.count() == (int64) 3,
             "dictionary holds the 3 distinct venues");
-        int32[] vback = Dictionary.decode(dpage, (int64) 0, 8, dict);
+        int32[] vback #= Dictionary.decode(dpage, (int64) 0, 8, dict);
         boolean venuesOk = true;
         i = 0;
         while (i < 8) {
@@ -145,7 +145,7 @@ public class ColumnarDemo extends DemoClass {
         }
         this.check(venuesOk, "page decode + gather rebuilds the venue column");
         // gather() alone is the hot read path once indices are in hand.
-        int32[] gathered = Dictionary.gather(idx, 8, dict);
+        int32[] gathered #= Dictionary.gather(idx, 8, dict);
         int32 g0 = gathered[0];
         this.check(g0 == 4001, "gather maps index 0 back through the dictionary");
 
@@ -155,11 +155,11 @@ public class ColumnarDemo extends DemoClass {
         //    fiber per column, decodeAllSerial is the reference. Same
         //    directory, same results.
         int32[] col0 = [ 7, 7, 7, 7 ];
-        int8[] e0 = Rle.encode(col0, 3, 4);
+        int8[] e0 #= Rle.encode(col0, 3, 4);
         int32[] col1 = [ 0, 1, 2, 3, 4, 5, 6, 7 ];
-        int8[] e1 = Rle.encode(col1, 3, 8);
+        int8[] e1 #= Rle.encode(col1, 3, 8);
         int32[] col2 = [ 5, 5, 5 ];
-        int8[] e2 = Rle.encode(col2, 4, 3);
+        int8[] e2 #= Rle.encode(col2, 4, 3);
         int64 n0 = (int64) e0.count();
         int64 n1 = (int64) e1.count();
         int64 n2 = (int64) e2.count();
@@ -170,8 +170,8 @@ public class ColumnarDemo extends DemoClass {
         int64[] offs = [ (int64) 0, n0, n0 + n1 ];
         int32[] ws = [ 3, 3, 4 ];
         int32[] counts = [ 4, 8, 3 ];
-        int32[][] par = ColumnOrchestrator.decodeAll(flat, offs, ws, counts, 3);
-        int32[][] ser = ColumnOrchestrator.decodeAllSerial(flat, offs, ws, counts, 3);
+        int32[][] par #= ColumnOrchestrator.decodeAll(flat, offs, ws, counts, 3);
+        int32[][] ser #= ColumnOrchestrator.decodeAllSerial(flat, offs, ws, counts, 3);
         boolean allMatch = true;
         i = 0;
         while (i < 8) {

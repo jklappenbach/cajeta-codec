@@ -72,14 +72,14 @@ public class OrcDemo extends DemoClass {
         p95[3] = (int64) 31;
         p95[4] = (int64) 18;
         p95[5] = (int64) 27;
-        int8[] file = OrcWriter.writeLongColumn(p95, 6);
+        int8[] file #= OrcWriter.writeLongColumn(p95, 6);
         int64 fn = (int64) file.count();
         System.stdout.println("  6-row BIGINT column -> " + fn + "-byte file");
 
         // 2. Metadata — parsed back-to-front from the postscript. typeCount
         //    counts the root struct plus our column; compression 0 = NONE
         //    (1 = ZLIB and 2 = SNAPPY decode transparently on read).
-        OrcMetadata meta = OrcMetadata.parse(file, fn);
+        OrcMetadata meta #= OrcMetadata.parse(file, fn);
         System.stdout.println("  footer: " + meta.numberOfRows + " rows, "
             + meta.stripeCount + " stripe(s), compression kind "
             + meta.compression);
@@ -96,12 +96,12 @@ public class OrcDemo extends DemoClass {
         //    range cannot match the predicate. (The v1 in-repo writer
         //    emits no stats yet, so its files take the conservative path
         //    below.)
-        int8[] pa = OrcDemo.pyarrowOrc();
+        int8[] pa #= OrcDemo.pyarrowOrc();
         int64 pn = (int64) pa.count();
-        OrcMetadata pmeta = OrcMetadata.parse(pa, pn);
+        OrcMetadata pmeta #= OrcMetadata.parse(pa, pn);
         this.check(pmeta.numberOfRows == (int64) 4 && pmeta.compression == 0,
             "pyarrow file parses through the same reader (4 rows)");
-        OrcColumnStats stats = OrcColumnStats.forColumn(pa, pn, 1);
+        OrcColumnStats stats #= OrcColumnStats.forColumn(pa, pn, 1);
         this.check(stats.hasStats && stats.minValue == (int64) 5
             && stats.maxValue == (int64) 20 && stats.numValues == (int64) 4,
             "pyarrow column stats: min 5 / max 20 / count 4");
@@ -109,7 +109,7 @@ public class OrcDemo extends DemoClass {
             && !stats.mightContainRange((int64) 100, (int64) 200),
             "overlapping range kept, disjoint range skipped");
         // Our writer's file: no stats -> mightContainRange keeps all.
-        OrcColumnStats ownStats = OrcColumnStats.forColumn(file, fn, 1);
+        OrcColumnStats ownStats #= OrcColumnStats.forColumn(file, fn, 1);
         this.check(!ownStats.hasStats
             && ownStats.mightContainRange((int64) 100, (int64) 200),
             "no stats -> conservative keep");
@@ -131,7 +131,7 @@ public class OrcDemo extends DemoClass {
         //    sum-by-name throws OrcParseException for an unknown name.
         boolean missingRaised = false;
         try {
-            int64 nope = OrcColumnReader.int32ColumnSumByName(file, fn, "latency");
+            int64 nope #= OrcColumnReader.int32ColumnSumByName(file, fn, "latency");
         } catch (OrcParseException me) {
             missingRaised = true;
         }
@@ -141,14 +141,14 @@ public class OrcDemo extends DemoClass {
         //    stream. Kind 0 (NONE) passes bytes through: slicing the head
         //    magic proves the plumbing; kinds 1/2 route the same call
         //    through DEFLATE/Snappy. Unsupported kinds fail loud.
-        int8[] magic = OrcCompression.decompress(file, (int64) 0, (int64) 3, 0);
+        int8[] magic #= OrcCompression.decompress(file, (int64) 0, (int64) 3, 0);
         this.check((int64) magic.count() == (int64) 3
             && magic[0] == (int8) 0x4F && magic[1] == (int8) 0x52
             && magic[2] == (int8) 0x43,
             "kind NONE slices the raw bytes ('O','R','C')");
         boolean kindRaised = false;
         try {
-            int8[] nope = OrcCompression.decompress(file, (int64) 0, (int64) 3, 3);
+            int8[] nope #= OrcCompression.decompress(file, (int64) 0, (int64) 3, 3);
         } catch (OrcParseException ke) {
             kindRaised = true;
         }
@@ -157,7 +157,7 @@ public class OrcDemo extends DemoClass {
         // 7. OrcRleV2 — the integer encoding inside the DATA stream. Encode
         //    the same latencies standalone, then decode both ways: the
         //    streaming sum and decodeInto filling a caller-owned buffer.
-        int8[] enc = OrcRleV2.encodeDirect(p95, 6);
+        int8[] enc #= OrcRleV2.encodeDirect(p95, 6);
         System.stdout.println("  RLEv2: 6 longs -> " + enc.count() + " bytes");
         this.check(OrcRleV2.decodeSum(enc, (int64) 0, 6) == (int64) 141,
             "RLEv2 stream sums back to 141");
@@ -184,7 +184,7 @@ public class OrcDemo extends DemoClass {
         broken[0] = (int8) 0x58;
         boolean raised = false;
         try {
-            OrcMetadata bad = OrcMetadata.parse(broken, fn);
+            OrcMetadata bad #= OrcMetadata.parse(broken, fn);
         } catch (OrcParseException pe) {
             raised = true;
         }

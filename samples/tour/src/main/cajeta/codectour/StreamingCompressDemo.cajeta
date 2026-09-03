@@ -51,17 +51,17 @@ public class StreamingCompressDemo extends DemoClass {
             + "\"net_rx\":10442,\"net_tx\":8931,\"status\":\"nominal\"}";
         String snap2 = "{\"host\":\"edge-04\",\"cpu\":43,\"mem\":62,\"disk\":71,"
             + "\"net_rx\":10471,\"net_tx\":8977,\"status\":\"nominal\"}";
-        int8[] s1 = snap1.toBytes();
-        int8[] s2 = snap2.toBytes();
+        int8[] s1 #= snap1.toBytes();
+        int8[] s2 #= snap2.toBytes();
 
         // 1. Per-message segments via syncFlush. Each segment ends with
         //    the empty stored block 00 00 FF FF — the byte-aligned seam
         //    that lets the peer decode message-by-message.
         DeflateStream d = heap DeflateStream();
         d.write(s1, (int32) s1.count());
-        int8[] w1 = d.syncFlush();
+        int8[] w1 #= d.syncFlush();
         d.write(s2, (int32) s2.count());
-        int8[] w2 = d.syncFlush();
+        int8[] w2 #= d.syncFlush();
         int32 w1n = (int32) w1.count();
         System.stdout.println("  snapshot 1: " + s1.count() + " -> " + w1.count()
             + " bytes; snapshot 2: " + s2.count() + " -> " + w2.count()
@@ -80,10 +80,10 @@ public class StreamingCompressDemo extends DemoClass {
         //    order, draining each message as its segment arrives.
         InflateStream r = heap InflateStream();
         r.feed(w1, (int32) w1.count());
-        int8[] g1 = r.drain();
+        int8[] g1 #= r.drain();
         this.check(this.sameBytes(g1, s1), "segment 1 drains to snapshot 1");
         r.feed(w2, (int32) w2.count());
-        int8[] g2 = r.drain();
+        int8[] g2 #= r.drain();
         this.check(this.sameBytes(g2, s2), "segment 2 drains to snapshot 2");
         this.check(!r.finished(),
             "stream stays open between messages (no final block yet)");
@@ -95,7 +95,7 @@ public class StreamingCompressDemo extends DemoClass {
         boolean lostContext = false;
         try {
             fresh.feed(w2, (int32) w2.count());
-            int8[] junk = fresh.drain();
+            int8[] junk #= fresh.drain();
         } catch (DeflateException ce) {
             lostContext = true;
         }
@@ -105,7 +105,7 @@ public class StreamingCompressDemo extends DemoClass {
         // 5. finish() emits the final block; the concatenated segments are
         //    ONE ordinary DEFLATE stream — the one-shot inflater decodes
         //    the whole thing. Streaming is a framing pattern, not a dialect.
-        int8[] w3 = d.finish();
+        int8[] w3 #= d.finish();
         this.check(d.finished(), "finish() closes the deflater");
         int64 total = (int64) w1.count() + (int64) w2.count() + (int64) w3.count();
         int8[] whole = heap int8[total];
@@ -113,7 +113,7 @@ public class StreamingCompressDemo extends DemoClass {
         StreamingCompressDemo.blit(whole, (int64) w1.count(), w2, (int64) w2.count());
         StreamingCompressDemo.blit(whole,
             (int64) w1.count() + (int64) w2.count(), w3, (int64) w3.count());
-        int8[] flat = Deflate.inflateGrow(whole, total);
+        int8[] flat #= Deflate.inflateGrow(whole, total);
         int64 wantLen = (int64) s1.count() + (int64) s2.count();
         this.check((int64) flat.count() == wantLen,
             "concatenated segments one-shot-inflate to both snapshots");
@@ -138,7 +138,7 @@ public class StreamingCompressDemo extends DemoClass {
                 k = k + 1;
             }
             cr.feed(piece, take);
-            int8[] part = cr.drain();
+            int8[] part #= cr.drain();
             got = got + (int64) part.count();
             pos = pos + (int64) take;
         }
@@ -148,11 +148,11 @@ public class StreamingCompressDemo extends DemoClass {
 
         // 7. Truncation raises at endInput(), not mid-feed. Half a stream
         //    is fine while more may come; declaring EOF on it is the error.
-        int8[] blob = Deflate.deflate(s1, (int64) s1.count());
+        int8[] blob #= Deflate.deflate(s1, (int64) s1.count());
         int32 half = (int32) ((int64) blob.count() / (int64) 2);
         InflateStream tr = heap InflateStream();
         tr.feed(blob, half);
-        int8[] partial = tr.drain();       // whatever committed — fine
+        int8[] partial #= tr.drain();       // whatever committed — fine
         this.check(!tr.finished(), "half a stream is not finished");
         boolean truncated = false;
         try {
@@ -167,16 +167,16 @@ public class StreamingCompressDemo extends DemoClass {
         //    value for "hello world"; zlib framing round-trips, and the
         //    pure-cajeta decoder reads native output (one wire format).
         String probe = "hello world";
-        int8[] pb = probe.toBytes();
+        int8[] pb #= probe.toBytes();
         this.check(NativeZlib.crc32(pb, (int64) pb.count()) == (int64) 222957957,
             "native crc32(\"hello world\") == 0x0D4A1185");
         this.check(NativeZlib.adler32(pb, (int64) pb.count()) != (int64) 0,
             "native adler32 computed");
-        int8[] nz = NativeZlib.zlibCompress(s1, (int64) s1.count(), 6);
-        int8[] nout = NativeZlib.zlibDecompress(nz, (int64) nz.count(),
+        int8[] nz #= NativeZlib.zlibCompress(s1, (int64) s1.count(), 6);
+        int8[] nout #= NativeZlib.zlibDecompress(nz, (int64) nz.count(),
             (int64) s1.count());
         this.check(this.sameBytes(nout, s1), "native zlib round-trips");
-        int8[] cajOut = Zlib.decompress(nz, (int64) nz.count(), (int64) s1.count());
+        int8[] cajOut #= Zlib.decompress(nz, (int64) nz.count(), (int64) s1.count());
         this.check(this.sameBytes(cajOut, s1),
             "pure-cajeta decoder reads native zlib output (interop)");
     }

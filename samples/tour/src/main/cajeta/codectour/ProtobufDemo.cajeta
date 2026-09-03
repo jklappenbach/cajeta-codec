@@ -96,9 +96,9 @@ public class ProtobufDemo extends DemoClass {
         e.buy = true;
         e.quantity = 250;
         e.priceCents = (int64) 1999;
-        int8[] wire = Protobuf.toBytes<OrderEvent>(e);
+        int8[] wire #= Protobuf.toBytes<OrderEvent>(e);
         System.stdout.println("  order 88231 -> " + wire.count() + " wire bytes");
-        OrderEvent back = Protobuf.parse<OrderEvent>(wire, (int64) wire.count());
+        OrderEvent back #= Protobuf.parse<OrderEvent>(wire, (int64) wire.count());
         this.check(back.orderId == (int64) 88231 && back.symbol.equals("ACME"),
             "typed round-trip preserves id and symbol");
         this.check(back.buy && back.quantity == 250
@@ -108,19 +108,19 @@ public class ProtobufDemo extends DemoClass {
         // 2. A stream of messages: T[] frames each event with a varint length
         //    prefix (writeDelimited under the hood) — the journal file shape.
         OrderEvent[] batch = heap OrderEvent[2];
-        OrderEvent e0 = heap OrderEvent();
+        OrderEvent e0 #= heap OrderEvent();
         e0.orderId = (int64) 88232;
         e0.symbol = "GLOBEX";
         e0.quantity = 75;
         batch[0] = e0;
-        OrderEvent e1 = heap OrderEvent();
+        OrderEvent e1 #= heap OrderEvent();
         e1.orderId = (int64) 88233;
         e1.symbol = "INITECH";
         e1.buy = true;
         e1.quantity = 30;
         batch[1] = e1;
-        int8[] journal = Protobuf.toBytes<OrderEvent[]>(batch);
-        OrderEvent[] replay = Protobuf.parse<OrderEvent[]>(
+        int8[] journal #= Protobuf.toBytes<OrderEvent[]>(batch);
+        OrderEvent[] replay #= Protobuf.parse<OrderEvent[]>(
             journal, (int64) journal.count());
         this.check((int64) replay.count() == (int64) 2
             && replay[0].orderId == (int64) 88232
@@ -135,10 +135,10 @@ public class ProtobufDemo extends DemoClass {
         ProtobufWriter w = heap ProtobufWriter();
         w.writeVarintField(1, (int64) 90001);
         String sym = "HOOLI";
-        int8[] symBytes = sym.toBytes();
+        int8[] symBytes #= sym.toBytes();
         w.writeLenField(2, symBytes, (int32) symBytes.count());
-        int8[] partial = w.toBytes();
-        OrderEvent sparse = Protobuf.parse<OrderEvent>(
+        int8[] partial #= w.toBytes();
+        OrderEvent sparse #= Protobuf.parse<OrderEvent>(
             partial, (int64) partial.count());
         this.check(sparse.orderId == (int64) 90001 && sparse.symbol.equals("HOOLI"),
             "hand-written wire bytes bind through parse<T>");
@@ -156,8 +156,8 @@ public class ProtobufDemo extends DemoClass {
         this.check(cur.readVarint(qtySlot) == (int64) 250,
             "cursor projects a single varint field");
         int32 symSlot = cur.slotOf(2);
-        int8[] symRaw = cur.readBytes(symSlot);
-        int8[] symWant = e.symbol.toBytes();
+        int8[] symRaw #= cur.readBytes(symSlot);
+        int8[] symWant #= e.symbol.toBytes();
         this.check(this.sameBytes(symRaw, symWant),
             "cursor hands back a LEN field's payload bytes");
         this.check(!cur.has(9) && cur.slotOf(9) == 0 - 1,
@@ -169,7 +169,7 @@ public class ProtobufDemo extends DemoClass {
         ProtobufWriter fw = heap ProtobufWriter();
         fw.writeFixed32Field(1, 1013);              // millibars, fixed32
         fw.writeFixed64Field(2, (int64) 171532800); // epoch seconds, fixed64
-        int8[] fixed = fw.toBytes();
+        int8[] fixed #= fw.toBytes();
         ProtobufCursor fcur = heap ProtobufCursor(fixed, (int64) fixed.count());
         int32 f32Slot = fcur.slotOf(1);
         int32 f64Slot = fcur.slotOf(2);
@@ -181,7 +181,7 @@ public class ProtobufDemo extends DemoClass {
         //    maps every field to (number, wire type, value byte span) without
         //    decoding a single value; ProtobufWire then decodes exactly the
         //    span you ask for. orderId=88231 is field 1, VARINT.
-        ProtobufIndex idx = ProtobufIndex.build(wire, (int64) wire.count());
+        ProtobufIndex idx #= ProtobufIndex.build(wire, (int64) wire.count());
         this.check(idx.fieldCount() == 5,
             "index maps all five fields of the order event");
         // The index sizes itself to the field count, not the message length —
@@ -207,7 +207,7 @@ public class ProtobufDemo extends DemoClass {
         int8[] junk = [ (int8) 0x0B ];
         boolean raised = false;
         try {
-            ProtobufIndex bad = ProtobufIndex.build(junk, (int64) 1);
+            ProtobufIndex bad #= ProtobufIndex.build(junk, (int64) 1);
         } catch (ProtobufParseException pe) {
             raised = true;
         }
@@ -221,7 +221,7 @@ public class ProtobufDemo extends DemoClass {
         int8[] cut = [ (int8) 0x08, (int8) 0x96 ];
         int64 where = (int64) 0 - (int64) 1;
         try {
-            ProtobufIndex bad = ProtobufIndex.build(cut, (int64) 2);
+            ProtobufIndex bad #= ProtobufIndex.build(cut, (int64) 2);
         } catch (ProtobufParseException pe) {
             where = pe.position;
         }
@@ -233,7 +233,7 @@ public class ProtobufDemo extends DemoClass {
         int8[] overrun = [ (int8) 0x12, (int8) 0x64, (int8) 0x68 ];
         boolean caught = false;
         try {
-            ProtobufIndex bad = ProtobufIndex.build(overrun, (int64) 3);
+            ProtobufIndex bad #= ProtobufIndex.build(overrun, (int64) 3);
         } catch (ProtobufParseException pe) {
             caught = true;
         }
@@ -254,8 +254,8 @@ public class ProtobufDemo extends DemoClass {
         t.deltaC = 0 - 3;
         t.observedAt = (int64) 171532800;
         t.celsius = (float64) 21.5;
-        int8[] tw = Protobuf.toBytes<TempDelta>(t);
-        TempDelta tb = Protobuf.parse<TempDelta>(tw, (int64) tw.count());
+        int8[] tw #= Protobuf.toBytes<TempDelta>(t);
+        TempDelta tb #= Protobuf.parse<TempDelta>(tw, (int64) tw.count());
         this.check(tb.sensorId == (int64) 9 && tb.deltaC == 0 - 3
             && tb.observedAt == (int64) 171532800,
             "zigzag and fixed fields round-trip through the typed facade");
@@ -269,8 +269,8 @@ public class ProtobufDemo extends DemoClass {
         this.check(tb.celsius == (float64) 21.5,
             "a float64 field round-trips as protobuf double");
         boolean celsiusIsI64 = false;
-        int32 ci = 0;
-        ProtobufIndex cidx = ProtobufIndex.build(tw, (int64) tw.count());
+        int32 ci #= 0;
+        ProtobufIndex cidx #= ProtobufIndex.build(tw, (int64) tw.count());
         while (ci < cidx.fieldCount()) {
             if (cidx.fieldNumber(ci) == 4) {
                 celsiusIsI64 = cidx.wireType(ci) == ProtobufWire.wireI64()
@@ -293,7 +293,7 @@ public class ProtobufDemo extends DemoClass {
 
         // Fixed-width fields carry wire type I32/I64 rather than VARINT, which
         // the index reports without decoding anything.
-        ProtobufIndex tidx = ProtobufIndex.build(tw, (int64) tw.count());
+        ProtobufIndex tidx #= ProtobufIndex.build(tw, (int64) tw.count());
         int32 fi = 0;
         boolean fixedIsI64 = false;
         while (fi < tidx.fieldCount()) {
@@ -316,8 +316,8 @@ public class ProtobufDemo extends DemoClass {
         run.samples = samples;
         int64[] raw = [(int64) 100, (int64) 200];
         run.raw = raw;
-        int8[] rw = Protobuf.toBytes<SensorRun>(run);
-        SensorRun rb = Protobuf.parse<SensorRun>(rw, (int64) rw.count());
+        int8[] rw #= Protobuf.toBytes<SensorRun>(run);
+        SensorRun rb #= Protobuf.parse<SensorRun>(rw, (int64) rw.count());
         this.check(rb.samples.count() == 5 && rb.samples[0] == 20
             && rb.samples[4] == 20 && rb.raw.count() == 2
             && rb.raw[1] == (int64) 200,
@@ -326,7 +326,7 @@ public class ProtobufDemo extends DemoClass {
         // The defaulted field is a single record; the opted-out one is a record
         // per element. Both are legal protobuf, and a conforming reader must
         // take either — so this is a size choice, not a compatibility one.
-        ProtobufIndex ridx = ProtobufIndex.build(rw, (int64) rw.count());
+        ProtobufIndex ridx #= ProtobufIndex.build(rw, (int64) rw.count());
         int32 packedRecords = 0;
         int32 plainRecords = 0;
         int32 ri = 0;
@@ -344,8 +344,8 @@ public class ProtobufDemo extends DemoClass {
         // "absent" from "empty", so absent decodes as an empty array.
         ProtobufWriter bare = heap ProtobufWriter();
         bare.writeVarintField(1, (int64) 8);
-        int8[] bareBytes = bare.toBytes();
-        SensorRun blank = Protobuf.parse<SensorRun>(
+        int8[] bareBytes #= bare.toBytes();
+        SensorRun blank #= Protobuf.parse<SensorRun>(
             bareBytes, (int64) bareBytes.count());
         this.check(blank.samples != null && blank.samples.count() == 0,
             "an absent repeated field decodes as empty, never null");

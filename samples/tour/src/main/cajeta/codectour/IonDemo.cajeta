@@ -59,9 +59,9 @@ public class IonDemo extends DemoClass {
         s.host = "edge-04";
         s.healthy = true;
         s.latencyMs = 0 - 12;     // clock skew: negative is representable
-        int8[] wire = Ion.toBytes<HealthSample>(s);
+        int8[] wire #= Ion.toBytes<HealthSample>(s);
         System.stdout.println("  sample for edge-04 -> " + wire.count() + " wire bytes");
-        HealthSample back = Ion.parse<HealthSample>(wire, (int64) wire.count());
+        HealthSample back #= Ion.parse<HealthSample>(wire, (int64) wire.count());
         this.check(back.ts == (int64) 171532800 && back.host.equals("edge-04"),
             "typed round-trip binds by field name");
         this.check(back.healthy && back.latencyMs == 0 - 12,
@@ -90,14 +90,14 @@ public class IonDemo extends DemoClass {
         w.writeIntValue((int64) 171532860);
         w.writeFieldSid(w.intern("host"));
         String host = "edge-07";
-        int8[] hostBytes = host.toBytes();
+        int8[] hostBytes #= host.toBytes();
         w.writeStringValue(hostBytes, (int32) hostBytes.count());
         w.writeFieldSid(w.intern("healthy"));
         w.writeBoolValue(false);
         w.writeFieldSid(w.intern("latencyMs"));
         w.writeIntValue((int64) 340);
         w.endContainer(13);                 // 13 = struct
-        int8[] manual = w.toBytes();
+        int8[] manual #= w.toBytes();
 
         // 4. IonCursor navigates the hand-written struct by name — and the
         //    typed facade parses it too (same wire format, no schema).
@@ -112,7 +112,7 @@ public class IonDemo extends DemoClass {
         int32 healthSlot = cur.slotOf("healthy");
         this.check(!cur.readBool(healthSlot) && !cur.isNull(healthSlot),
             "false is a real value, not null (isNull distinguishes)");
-        HealthSample degraded = Ion.parse<HealthSample>(
+        HealthSample degraded #= Ion.parse<HealthSample>(
             manual, (int64) manual.count());
         this.check(degraded.host.equals("edge-07") && degraded.latencyMs == 340,
             "typed facade parses the hand-written bytes (one wire format)");
@@ -120,10 +120,10 @@ public class IonDemo extends DemoClass {
         // 5. IonSymbolTable — the interning machinery itself. The system
         //    table predefines SIDs 1-9 ("name" is 4); parsing our stream
         //    recovers the local names we interned, local SIDs from 10.
-        IonSymbolTable sys = IonSymbolTable.system();
+        IonSymbolTable sys #= IonSymbolTable.system();
         this.check(sys.resolve((int64) 4).equals("name"),
             "system symbol 4 is \"name\"");
-        IonSymbolTable tbl = IonSymbolTable.parse(manual, (int64) manual.count());
+        IonSymbolTable tbl #= IonSymbolTable.parse(manual, (int64) manual.count());
         System.stdout.println("  local symbols: " + tbl.localSymbolCount()
             + " (SIDs 10.." + (9 + tbl.localSymbolCount()) + ")");
         this.check(tbl.localSymbolCount() == 4
@@ -135,7 +135,7 @@ public class IonDemo extends DemoClass {
         // 6. IonIndex — the per-struct field map: name, type code, and the
         //    value's byte span, nothing decoded yet. ts=171532860 is a
         //    positive int (type code 2).
-        IonIndex idx = IonIndex.build(manual, (int64) manual.count());
+        IonIndex idx #= IonIndex.build(manual, (int64) manual.count());
         this.check(idx.fieldCount() == 4 && idx.fieldName(0).equals("ts"),
             "index maps the struct's fields in order");
         this.check(idx.typeCode(0) == IonWire.tcPosInt()
@@ -154,7 +154,7 @@ public class IonDemo extends DemoClass {
         ];
         boolean raised = false;
         try {
-            IonIndex bad = IonIndex.build(junk, (int64) junk.count());
+            IonIndex bad #= IonIndex.build(junk, (int64) junk.count());
         } catch (IonParseException ie) {
             raised = true;
         }

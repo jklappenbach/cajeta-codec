@@ -51,10 +51,10 @@ public class AvroDemo extends DemoClass {
         DeviceReading r = heap DeviceReading();
         r.deviceId = (int64) 40417;
         r.status = "nominal";
-        int8[] datum = Avro.toBytes<DeviceReading>(r);
+        int8[] datum #= Avro.toBytes<DeviceReading>(r);
         System.stdout.println("  one reading -> " + datum.count()
             + " bytes (no names, no tags)");
-        DeviceReading back = Avro.parse<DeviceReading>(datum, (int64) datum.count());
+        DeviceReading back #= Avro.parse<DeviceReading>(datum, (int64) datum.count());
         this.check(back.deviceId == (int64) 40417 && back.status.equals("nominal"),
             "typed datum round-trips positionally");
 
@@ -75,7 +75,7 @@ public class AvroDemo extends DemoClass {
         body.writeString("degraded");
         body.writeLong((int64) 40419);
         body.writeString("nominal");
-        int8[] blockData = body.result();
+        int8[] blockData #= body.result();
         AvroCursor c = heap AvroCursor(blockData, (int64) 0);
         this.check(c.readLong() == (int64) 40418
             && c.readString().equals("degraded"),
@@ -95,7 +95,7 @@ public class AvroDemo extends DemoClass {
         String schema = "{\"type\":\"record\",\"name\":\"DeviceReading\","
             + "\"fields\":[{\"name\":\"deviceId\",\"type\":\"long\"},"
             + "{\"name\":\"status\",\"type\":\"string\"}]}";
-        int8[] file = AvroContainerWriter.wrap(
+        int8[] file #= AvroContainerWriter.wrap(
             blockData, body.size(), (int64) 2, schema);
         System.stdout.println("  container: " + blockData.count()
             + "-byte block -> " + file.count() + "-byte file (schema travels)");
@@ -107,7 +107,7 @@ public class AvroDemo extends DemoClass {
         while (ct.nextBlock()) {
             blocks = blocks + (int64) 1;
             records = records + ct.currentObjectCount();
-            int8[] data = ct.currentData();
+            int8[] data #= ct.currentData();
             AvroCursor rc = heap AvroCursor(data, (int64) 0);
             this.check(rc.readLong() == (int64) 40418,
                 "block data decodes from the container");
@@ -126,8 +126,8 @@ public class AvroDemo extends DemoClass {
         r1.deviceId = (int64) 40421;
         r1.status = "offline";
         log[1] = r1;
-        int8[] ocf = Avro.toBytes<DeviceReading[]>(log);
-        DeviceReading[] replay = Avro.parse<DeviceReading[]>(
+        int8[] ocf #= Avro.toBytes<DeviceReading[]>(log);
+        DeviceReading[] replay #= Avro.parse<DeviceReading[]>(
             ocf, (int64) ocf.count());
         this.check((int64) replay.count() == (int64) 2
             && replay[1].status.equals("offline"),
@@ -144,7 +144,7 @@ public class AvroDemo extends DemoClass {
         }
         boolean raised = false;
         try {
-            AvroContainer bad = heap AvroContainer(junk, (int64) 8);
+            AvroContainer bad #= heap AvroContainer(junk, (int64) 8);
         } catch (AvroParseException ae) {
             raised = true;
         }

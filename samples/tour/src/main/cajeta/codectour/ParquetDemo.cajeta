@@ -40,7 +40,7 @@ public class ParquetDemo extends DemoClass {
         // 1. Write a column. Five days of unit sales -> a complete Parquet
         //    file: "PAR1", one PLAIN data page, Thrift footer, "PAR1".
         int32[] sold = [ 132, 187, 143, 201, 176 ];
-        int8[] file = ParquetWriter.writeInt32Column(sold, 5);
+        int8[] file #= ParquetWriter.writeInt32Column(sold, 5);
         int64 fn = (int64) file.count();
         System.stdout.println("  5-row INT32 column -> " + fn + "-byte file");
         this.check(fn > (int64) 8, "writer produced a framed file");
@@ -49,7 +49,7 @@ public class ParquetDemo extends DemoClass {
         //    analytics job learns the shape without reading data pages.
         //    footerOffset locates it from the tail; parse decodes it.
         int64 footAt = ParquetMetadata.footerOffset(file, fn);
-        ParquetMetadata meta = ParquetMetadata.parse(file, fn);
+        ParquetMetadata meta #= ParquetMetadata.parse(file, fn);
         System.stdout.println("  footer @" + footAt + ": " + meta.numRows
             + " rows, " + meta.numColumns + " column(s), version " + meta.version);
         this.check(footAt > (int64) 4 && footAt < fn,
@@ -62,7 +62,7 @@ public class ParquetDemo extends DemoClass {
         //    magic, and there is no dictionary page (-1). The v1 writer
         //    emits no min/max statistics, which pins the pushdown contract:
         //    hasStats false -> mightContainRange must conservatively KEEP.
-        ParquetColumnInfo ci = ParquetColumnInfo.read(file, fn, 0);
+        ParquetColumnInfo ci #= ParquetColumnInfo.read(file, fn, 0);
         this.check(ci.type == 1 && ci.codec == 0
             && ci.numValues == (int64) 5,
             "column info: INT32, uncompressed, 5 values");
@@ -76,7 +76,7 @@ public class ParquetDemo extends DemoClass {
         // 4. Read the column back — the typed reader returns a plain
         //    int32[]; the generic readColumn returns the ParquetColumn
         //    carrier (type tag, row count, validity) for engine-style code.
-        int32[] soldBack = ParquetColumnReader.readInt32Column(file, fn, 0);
+        int32[] soldBack #= ParquetColumnReader.readInt32Column(file, fn, 0);
         boolean valuesOk = (int64) soldBack.count() == (int64) 5;
         int32 i = 0;
         while (i < 5) {
@@ -96,7 +96,7 @@ public class ParquetDemo extends DemoClass {
         //    (On a nullable column the same call returns the per-row
         //    null mask — the reader's test suite pins that against a
         //    pyarrow file with real nulls.)
-        boolean[] valid = ParquetColumnReader.readValidity(file, fn, 0);
+        boolean[] valid #= ParquetColumnReader.readValidity(file, fn, 0);
         boolean allPresent = (int64) valid.count() == (int64) 5;
         i = 0;
         while (i < 5) {
@@ -115,7 +115,7 @@ public class ParquetDemo extends DemoClass {
         tw.writeI64Field(2, (int64) 839);           // e.g. byte size
         tw.writeBoolField(3, true);
         tw.stop();
-        int8[] tbytes = tw.result();
+        int8[] tbytes #= tw.result();
         ThriftCompactReader tr = heap ThriftCompactReader(tbytes, (int64) 0);
         int32 saved = tr.enterStruct();
         int32 t1 = tr.readFieldHeader();
@@ -146,7 +146,7 @@ public class ParquetDemo extends DemoClass {
         broken[0] = (int8) 0x58;                    // "XAR1"
         boolean raised = false;
         try {
-            ParquetMetadata bad = ParquetMetadata.parse(broken, fn);
+            ParquetMetadata bad #= ParquetMetadata.parse(broken, fn);
         } catch (ParquetParseException pe) {
             raised = true;
         }

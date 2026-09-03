@@ -41,14 +41,14 @@ public class SnappyDemo extends DemoClass {
         }
         int64 n = (int64) 256;
 
-        int8[] comp = Snappy.compress(page, n);
+        int8[] comp #= Snappy.compress(page, n);
         System.stdout.println("  column page: " + n + " -> " + comp.count() + " bytes");
 
         // The blob is self-describing: its length header predicts the output.
         int64 predicted = Snappy.uncompressedLength(comp, (int64) comp.count());
         this.check(predicted == n, "uncompressedLength() matches the page size");
 
-        int8[] out = Snappy.decompress(comp, (int64) comp.count());
+        int8[] out #= Snappy.decompress(comp, (int64) comp.count());
         this.check(this.sameBytes(page, out), "snappy round-trips the page byte-exact");
     }
 }

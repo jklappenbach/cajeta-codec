@@ -37,12 +37,12 @@ public class Lz4Demo extends DemoClass {
 
         // The container's page entry: (uncompressedSize, compressedBlock).
         // Writing side records BOTH — the block alone is not decodable.
-        int8[] block = Lz4.compress(page, pageLen);
+        int8[] block #= Lz4.compress(page, pageLen);
         System.stdout.println("  page entry: size=" + pageLen + ", block="
             + block.count() + " bytes");
 
         // Reading side: the recorded size supplies destLen exactly.
-        int8[] out = Lz4.decompress(block, (int64) block.count(), pageLen);
+        int8[] out #= Lz4.decompress(block, (int64) block.count(), pageLen);
         this.check(this.sameBytes(page, out),
             "lz4 round-trips the page (container-supplied destLen)");
     }
