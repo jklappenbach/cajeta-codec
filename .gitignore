@@ -10,3 +10,6 @@ gen/
 native/linux-*/
 native/macos-*/
 native/windows-*/
+
+# Repo-local scratch: toolchain downloads, TMPDIR, gate logs.
+tmp/
