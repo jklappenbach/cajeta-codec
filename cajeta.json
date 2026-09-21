@@ -67,8 +67,17 @@
         },
 
         // Test-only dependencies — not shipped in the published .cja.
+        //
+        // Raised 0.2.4 -> 0.3.0 with the toolchain pin in
+        // .github/workflows/release.yml. 0.2.4 still resolves on Olla, but its
+        // SOURCES no longer compile on cajeta v0.29.0: Matcher keeps a plain
+        // parameter in a field and the captured-borrow check rejects it. A
+        // consumer's compiler re-checks a dependency archive's sources, so an
+        // old peg fails a v0.29.0 build with a diagnostic naming a symbol this
+        // package does not contain. 0.3.0 is cut on v0.29.0 and needs no
+        // change here, since no source in this repo calls argThat.
         "dev-dependencies": {
-            "dev.cajeta.unit": "0.2.4"
+            "dev.cajeta.unit": "0.3.0"
         },
 
         "repositories": [

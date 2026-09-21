@@ -54,7 +54,31 @@ env:
   # v0.19.0 and not v0.18.0. Worth repeating the check when raising this pin
   # again; a release cut from before the work it is presumed to carry has
   # already happened twice on this line.
-  CAJETA_VERSION: v0.26.0
+  #
+  # The v0.26.0 raise landed with no note of its own. Its reason was the owned
+  # result binding: v0.26.0 rejects a plain `=` on a call that returns `#T`
+  # with CAJETA_ERROR_OWNED_RESULT_NEEDS_TRANSFER. That is what 77c3897
+  # respelled across src/main, and what 56c23be, 593fe3e and 4d67b76 then had
+  # to repeat for samples/tour, gpu/src and src/bridge. Those are separate
+  # compiles in this workflow, so a migration covering only src/main reds a
+  # later step while the test suite itself stays green.
+  #
+  # Raised to v0.29.0 for the fleet sweep that puts every dev.cajeta.* package
+  # on one toolchain. Checked rather than assumed, and the check says nothing
+  # in this tree needs the new floor. Against the released v0.29.0 binary, with
+  # .cajeta/cache wiped first so no artifact hit could answer for the old
+  # compiler, every source here builds unchanged and the whole ritual is green:
+  # 288 passed / 0 failed / 1 skipped, 124 tour checks, 52 of 52 public types
+  # toured, the GPU oracle, and the Arrow bridge at 5 passed.
+  #
+  # What the raise does force is the cajeta-unit ref below. v0.29.0 added the
+  # captured-borrow check and cajeta-unit v0.2.4 stops at
+  # dev/cajeta/unit/Matcher.cajeta with CAJETA_ERROR_CAPTURED_BORROW_PARAM on
+  # `this.pred = pred`. cajeta-unit v0.3.0 carries the fix, so the ref moves to
+  # v0.3.0 in this same commit. The coupling runs one way only. v0.3.0 also
+  # builds clean on v0.26.0, measured, so the unit raise never needed the
+  # toolchain raise.
+  CAJETA_VERSION: v0.29.0
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
@@ -131,11 +155,18 @@ jobs:
       #
       # Raise this and CAJETA_VERSION together: this repo must build against a
       # toolchain that satisfies BOTH its own sources and this cajeta-unit tag.
+      #
+      # Raised to v0.3.0 by the CAJETA_VERSION v0.29.0 raise above, which is
+      # what forced it. v0.2.4 no longer compiles on v0.29.0, because its
+      # Matcher keeps a plain parameter in a field and the new captured-borrow
+      # check rejects that. v0.3.0 spells the argThat predicate owned, and it
+      # needs nothing from this repo in return: no source here calls argThat,
+      # and the suite passes on v0.3.0 with no test change.
       - name: Checkout cajeta-unit (test framework dependency)
         uses: actions/checkout@v4
         with:
           repository: jklappenbach/cajeta-unit
-          ref: v0.2.4
+          ref: v0.3.0
           path: cajeta-unit-dep
 
       - name: Install cajeta toolchain (${{ env.CAJETA_VERSION }})
