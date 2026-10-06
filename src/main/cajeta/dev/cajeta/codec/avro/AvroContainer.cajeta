@@ -77,7 +77,7 @@ public final class AvroContainer {
                 }
             }
         }
-        this.codecName = codec;
+        this.codecName #= codec;
         this.dataStart = c.position() + (int64) 16;
         this.pos = this.dataStart;
         this.curCount = (int64) 0;

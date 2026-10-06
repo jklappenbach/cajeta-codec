@@ -105,7 +105,7 @@ public final class IonIndex {
                 int64 vEnd = vStart + vContent;
 
                 nsids[c] = sid;
-                nms[c] = table.resolve(sid);
+                nms[c] #= table.resolve(sid).clone();
                 tcs[c] = tc;
                 vtds[c] = vpos;
                 vss[c] = vStart;

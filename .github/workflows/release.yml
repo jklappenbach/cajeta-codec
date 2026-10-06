@@ -78,7 +78,9 @@ env:
   # v0.3.0 in this same commit. The coupling runs one way only. v0.3.0 also
   # builds clean on v0.26.0, measured, so the unit raise never needed the
   # toolchain raise.
-  CAJETA_VERSION: v0.29.0
+  #
+  # Raised to v0.35.0, which enforces the field-store rule, with cajeta-unit at v0.3.3.
+  CAJETA_VERSION: v0.35.0
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
@@ -166,7 +168,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jklappenbach/cajeta-unit
-          ref: v0.3.0
+          ref: v0.3.3
           path: cajeta-unit-dep
 
       - name: Install cajeta toolchain (${{ env.CAJETA_VERSION }})

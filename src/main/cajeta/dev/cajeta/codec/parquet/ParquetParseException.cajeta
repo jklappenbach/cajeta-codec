@@ -11,7 +11,7 @@ public class ParquetParseException extends RecoverableException {
     public int64 position;
 
     public ParquetParseException(String message, int64 position) {
-        this.message = message;
+        this.message #= message;
         this.cause = 0;
         this.position = position;
     }

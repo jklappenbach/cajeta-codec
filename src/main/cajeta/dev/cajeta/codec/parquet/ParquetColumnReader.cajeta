@@ -356,7 +356,7 @@ public final class ParquetColumnReader {
                     int32[] idx #= Rle.decode(page, idxStart, width, present);
                     valS = heap String[present];
                     int32 gg = 0;
-                    while (gg < present) { valS[gg] = dictS[idx[gg]]; gg = gg + 1; }
+                    while (gg < present) { valS[gg] #= dictS[idx[gg]].clone(); gg = gg + 1; }
                 } else {
                     throw heap ParquetParseException("unsupported value encoding (v1)", dataOff[g2]);
                 }
@@ -384,7 +384,7 @@ public final class ParquetColumnReader {
                 int64 outIdx = base + (int64) rrow;
                 if (isPresent) {
                     valid[outIdx] = true;
-                    if (isStr) { strs[outIdx] = valS[vp]; }
+                    if (isStr) { strs[outIdx] #= valS[vp]; }
                     else { bits[outIdx] = valL[vp]; }
                     vp = vp + 1;
                 } else {
@@ -445,7 +445,7 @@ public final class ParquetColumnReader {
         int64 m = c.rows;
         String[] out = heap String[m];
         int64 i = (int64) 0;
-        while (i < m) { out[i] = c.strs[i]; i = i + 1; }
+        while (i < m) { out[i] #= c.strs[i]; i = i + 1; }
         return #out;
     }
 
