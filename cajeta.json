@@ -22,7 +22,7 @@
 
     "details": {
         "name":               "dev.cajeta.codec",
-        "version":            "0.8.4",
+        "version":            "0.8.5",
         "description":        "cajeta-codec — standalone codec library (protobuf, ion, avro, parquet, orc)",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -76,9 +76,9 @@
         // old peg fails a v0.29.0 build with a diagnostic naming a symbol this
         // package does not contain. 0.3.0 is cut on v0.29.0 and needs no
         // change here, since no source in this repo calls argThat.
-        // Raised to 0.3.3 for cajeta v0.35.0 and its field-store rule.
+        // Raised to 0.3.4 for cajeta v0.36.0.
         "dev-dependencies": {
-            "dev.cajeta.unit": "0.3.3"
+            "dev.cajeta.unit": "0.3.4"
         },
 
         "repositories": [
