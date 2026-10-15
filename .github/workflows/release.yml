@@ -33,6 +33,7 @@ on:
 
 permissions:
   contents: write   # publish the Release on a tag / production run
+  id-token: write
 
 env:
   # Must match a release tag of jklappenbach/cajeta. Floors: v0.10.1 for the
@@ -317,6 +318,5 @@ jobs:
         with:
           cja-path: ${{ steps.build.outputs.artifact }}
           version: ${{ steps.build.outputs.version }}
-          token: ${{ secrets.OLLA_TOKEN }}
           signing-key-pem: ${{ secrets.OLLA_SIGNING_KEY_PEM }}
           signing-key-id: ${{ secrets.OLLA_SIGNING_KEY_ID }}
