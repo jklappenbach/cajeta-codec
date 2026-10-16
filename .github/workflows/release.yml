@@ -310,13 +310,10 @@ jobs:
             ${{ steps.build.outputs.artifact }}
             dist/libcajeta_zlib-*.a
 
-      # Signed publish to the Olla registry (olla.cajeta.dev). Requires the
-      # OLLA_* repo/org secrets; see cajeta/docs/olla-ci-publish.md.
+      # Publish to Olla with the job's GitHub identity; Olla signs the upload.
       - name: Publish to Olla
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'production')
         uses: jklappenbach/cajeta/.github/actions/olla-publish@main
         with:
           cja-path: ${{ steps.build.outputs.artifact }}
           version: ${{ steps.build.outputs.version }}
-          signing-key-pem: ${{ secrets.OLLA_SIGNING_KEY_PEM }}
-          signing-key-id: ${{ secrets.OLLA_SIGNING_KEY_ID }}
