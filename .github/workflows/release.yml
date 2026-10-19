@@ -81,7 +81,8 @@ env:
   # toolchain raise.
   #
   # Raised to v0.39.0 with cajeta-unit at v0.3.6.
-  CAJETA_VERSION: v0.39.0
+  # Raised to v0.44.0: 288 passed on it locally (cajeta-crypto plan Unit 8).
+  CAJETA_VERSION: v0.44.0
 
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
