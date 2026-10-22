@@ -23,7 +23,7 @@
     "details": {
         "name":               "dev.cajeta.codec",
         "version":            "0.8.7",
-        "description":        "cajeta-codec — standalone codec library (protobuf, ion, avro, parquet, orc)",
+        "description":        "cajeta-codec — standalone codec library (protobuf, ion, avro, parquet, orc, xml)",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
         "cajeta-lang-version": "1.0"

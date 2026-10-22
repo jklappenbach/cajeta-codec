@@ -1,0 +1,145 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.xml.XmlReader;
+import dev.cajeta.codec.xml.XmlEvent;
+import dev.cajeta.codec.xml.XmlSource;
+import cajeta.lang.String;
+
+/**
+ * Streaming (cajeta-cloud-adapters plan 1.1.4): a 64 MiB document generated on
+ * the fly reads through in fixed memory. The reader's buffer never grows past
+ * what one element needs, so its capacity stays at the initial size.
+ */
+public class XmlStreamTest {
+
+    public XmlStreamTest() {
+        return;
+    }
+
+    @Test
+    public void sixtyFourMebibytesStreamInFixedMemory() {
+        int64 total = (int64) 64 * (int64) 1024 * (int64) 1024;
+        GeneratedXml src = heap GeneratedXml(total);
+        XmlReader r = heap XmlReader(src, total + (int64) 64);
+        int64 starts = (int64) 0;
+        int64 texts = (int64) 0;
+        int32 ev = r.next();
+        while (ev != XmlEvent.END_DOCUMENT) {
+            if (ev == XmlEvent.START_ELEMENT) { starts = starts + 1; }
+            if (ev == XmlEvent.TEXT) { texts = texts + 1; }
+            ev = r.next();
+        }
+        // The root plus one <i> per item; every <i> carries text.
+        Assert.that(starts).isEqualTo(src.items + (int64) 1);
+        Assert.that(texts).isEqualTo(src.items);
+        Assert.isTrue(r.bufferCapacity() <= XmlReader.INITIAL_BUFFER);
+        Assert.isTrue(src.emitted >= total);
+        return;
+    }
+
+    @Test
+    public void elementLargerThanTheBufferGrowsIt() {
+        // One 100 KiB text node: the buffer must hold it whole.
+        int64 big = (int64) 100 * (int64) 1024;
+        OneBigText src = heap OneBigText(big);
+        XmlReader r = heap XmlReader(src, big + (int64) 64);
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.START_ELEMENT);
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.TEXT);
+        Assert.that(r.text().count()).isEqualTo(big);
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.END_ELEMENT);
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.END_DOCUMENT);
+        return;
+    }
+}
+
+/** `<r>` then `<i>0123456789</i>` repeated until `total` bytes, then `</r>`. */
+class GeneratedXml implements XmlSource {
+    int64 total;
+    int64 emitted;
+    int64 items;
+    int8[] pending;
+    int32 pendingLen;
+    int32 pendingPos;
+    int32 phase;      // 0 head, 1 items, 2 tail, 3 done
+
+    public GeneratedXml(int64 total) {
+        this.total = total;
+        this.emitted = (int64) 0;
+        this.items = (int64) 0;
+        int8[] p #= "<r>".toBytes();
+        this.pendingLen = (int32) p.count();
+        this.pending #= p;
+        this.pendingPos = 0;
+        this.phase = 0;
+    }
+
+    void refill() {
+        if (this.phase == 0 || this.phase == 1) {
+            if (this.emitted < this.total) {
+                int8[] p #= "<i>0123456789</i>".toBytes();
+                this.pendingLen = (int32) p.count();
+                this.pending #= p;
+                this.items = this.items + 1;
+                this.phase = 1;
+            } else {
+                int8[] p #= "</r>".toBytes();
+                this.pendingLen = (int32) p.count();
+                this.pending #= p;
+                this.phase = 2;
+            }
+        } else {
+            this.phase = 3;
+            this.pendingLen = 0;
+        }
+        this.pendingPos = 0;
+    }
+
+    public int32 read(int8[] dst, int32 off, int32 len) {
+        int32 n = 0;
+        while (n < len) {
+            if (this.pendingPos >= this.pendingLen) {
+                if (this.phase == 3) { return n; }
+                this.refill();
+                if (this.phase == 3) { return n; }
+            }
+            dst[off + n] = this.pending[this.pendingPos];
+            this.pendingPos = this.pendingPos + 1;
+            this.emitted = this.emitted + 1;
+            n = n + 1;
+        }
+        return n;
+    }
+}
+
+/** `<b>` + `size` bytes of 'x' + `</b>`, in small reads. */
+class OneBigText implements XmlSource {
+    int64 size;
+    int64 pos;     // position within the whole document
+
+    public OneBigText(int64 size) {
+        this.size = size;
+        this.pos = (int64) 0;
+    }
+
+    public int32 read(int8[] dst, int32 off, int32 len) {
+        int64 docLen = this.size + (int64) 7;
+        int32 n = 0;
+        int32 cap = len;
+        if (cap > 1000) { cap = 1000; }
+        while (n < cap && this.pos < docLen) {
+            int8 c = (int8) 0x78;
+            if (this.pos == (int64) 0) { c = (int8) 0x3C; }
+            else if (this.pos == (int64) 1) { c = (int8) 0x62; }
+            else if (this.pos == (int64) 2) { c = (int8) 0x3E; }
+            else if (this.pos == docLen - (int64) 4) { c = (int8) 0x3C; }
+            else if (this.pos == docLen - (int64) 3) { c = (int8) 0x2F; }
+            else if (this.pos == docLen - (int64) 2) { c = (int8) 0x62; }
+            else if (this.pos == docLen - (int64) 1) { c = (int8) 0x3E; }
+            dst[off + n] = c;
+            this.pos = this.pos + 1;
+            n = n + 1;
+        }
+        return n;
+    }
+}

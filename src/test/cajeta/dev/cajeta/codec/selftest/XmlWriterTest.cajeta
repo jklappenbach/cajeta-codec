@@ -1,0 +1,101 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.xml.XmlWriter;
+import dev.cajeta.codec.xml.XmlReader;
+import dev.cajeta.codec.xml.XmlEvent;
+import dev.cajeta.codec.xml.XmlWriteException;
+import cajeta.lang.String;
+
+/**
+ * The XML writer (cajeta-cloud-adapters plan 1.1.3): text and attribute values
+ * escape `<`, `&` and `"`, and the `CompleteMultipartUpload` body comes out in
+ * the form S3 accepts.
+ */
+public class XmlWriterTest {
+
+    public XmlWriterTest() {
+        return;
+    }
+
+    @Test
+    public void textAndAttributesEscape() {
+        XmlWriter w = heap XmlWriter();
+        w.start("a");
+        w.attribute("q", "x<y & \"z\"");
+        w.text("1 < 2 & \"3\" > 0");
+        w.end();
+        String got #= w.toString();
+        Assert.that(got).isEqualTo(
+            "<a q=\"x&lt;y &amp; &quot;z&quot;\">1 &lt; 2 &amp; &quot;3&quot; &gt; 0</a>");
+        return;
+    }
+
+    @Test
+    public void emptyElementSelfCloses() {
+        XmlWriter w = heap XmlWriter();
+        w.start("Delete");
+        w.start("Quiet");
+        w.end();
+        w.end();
+        String got #= w.toString();
+        Assert.that(got).isEqualTo("<Delete><Quiet/></Delete>");
+        return;
+    }
+
+    @Test
+    public void completeMultipartUploadBody() {
+        XmlWriter w = heap XmlWriter();
+        w.declaration();
+        w.start("CompleteMultipartUpload");
+        w.attribute("xmlns", "http://s3.amazonaws.com/doc/2006-03-01/");
+        w.start("Part");
+        w.element("ETag", "\"a54357aff0632cce46d942af68356b38\"");
+        w.element("PartNumber", "1");
+        w.end();
+        w.start("Part");
+        w.element("ETag", "\"0c78aef83f66abc1fa1e8477f296d394\"");
+        w.element("PartNumber", "2");
+        w.end();
+        w.end();
+        String got #= w.toString();
+        Assert.that(got).isEqualTo(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+            + "<Part><ETag>&quot;a54357aff0632cce46d942af68356b38&quot;</ETag>"
+            + "<PartNumber>1</PartNumber></Part>"
+            + "<Part><ETag>&quot;0c78aef83f66abc1fa1e8477f296d394&quot;</ETag>"
+            + "<PartNumber>2</PartNumber></Part>"
+            + "</CompleteMultipartUpload>");
+        return;
+    }
+
+    @Test
+    public void writerOutputReadsBack() {
+        XmlWriter w = heap XmlWriter();
+        w.start("k");
+        w.attribute("v", "<&\">");
+        w.text("a&b<c\"d");
+        w.end();
+        int8[] b #= w.toBytes();
+        XmlReader r = heap XmlReader(b, (int64) b.count());
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.START_ELEMENT);
+        Assert.that(r.attribute("v")).isEqualTo("<&\">");
+        String t #= r.readText();
+        Assert.that(t).isEqualTo("a&b<c\"d");
+        return;
+    }
+
+    @Test
+    public void endWithNothingOpenThrows() {
+        XmlWriter w = heap XmlWriter();
+        boolean caught = false;
+        try {
+            w.end();
+        } catch (XmlWriteException e) {
+            caught = true;
+        }
+        Assert.isTrue(caught);
+        return;
+    }
+}

@@ -1,0 +1,151 @@
+package dev.cajeta.codec.xml;
+
+import cajeta.lang.String;
+import cajeta.lang.StringBuilder;
+
+/**
+ * Builds a small XML document, the request bodies web APIs take
+ * (`CompleteMultipartUpload`, `Delete`). `start` opens an element, whose tag
+ * stays open for `attribute` calls until content or `end` follows; an element
+ * that gets no content closes as `<a/>`. Text and attribute values escape
+ * `&`, `<`, `>` and `"`; names are written as given.
+ *
+ * ```
+ * XmlWriter w = heap XmlWriter();
+ * w.start("Part");
+ * w.element("PartNumber", "1");
+ * w.end();
+ * String body #= w.toString();   // <Part><PartNumber>1</PartNumber></Part>
+ * ```
+ */
+public final class XmlWriter {
+    StringBuilder out;
+    String[] open;
+    int32 depth;
+    boolean tagOpen;    // "<name ..." written, '>' not yet
+
+    public XmlWriter() {
+        StringBuilder sb = heap StringBuilder();
+        this.out #= sb;
+        String[] o = heap String[16];
+        this.open #= o;
+        this.depth = 0;
+        this.tagOpen = false;
+    }
+
+    /** Write `<?xml version="1.0" encoding="UTF-8"?>`; first, if at all. */
+    public void declaration() {
+        if (this.out.count() != 0) {
+            throw heap XmlWriteException("the declaration must come first");
+        }
+        this.out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    }
+
+    void closeTag() {
+        if (this.tagOpen) {
+            this.out.append(">");
+            this.tagOpen = false;
+        }
+    }
+
+    /** Open element `name`. */
+    public void start(String name) {
+        this.closeTag();
+        if (this.depth == this.open.count()) {
+            String[] grown = heap String[this.open.count() * 2];
+            int32 g = 0;
+            while (g < this.depth) {
+                grown[g] #= this.open[g];
+                g = g + 1;
+            }
+            this.open #= grown;
+        }
+        this.open[this.depth] #= name.substring(0, name.byteLength());
+        this.depth = this.depth + 1;
+        this.out.append("<");
+        this.out.append(name);
+        this.tagOpen = true;
+    }
+
+    /** Add an attribute to the element just started. */
+    public void attribute(String name, String value) {
+        if (!this.tagOpen) {
+            throw heap XmlWriteException("attribute '" + name + "' follows content or no start");
+        }
+        this.out.append(" ");
+        this.out.append(name);
+        this.out.append("=\"");
+        this.escape(value);
+        this.out.append("\"");
+    }
+
+    /** Write escaped text inside the current element. */
+    public void text(String value) {
+        if (this.depth == 0) {
+            throw heap XmlWriteException("text outside an element");
+        }
+        this.closeTag();
+        this.escape(value);
+    }
+
+    /** Close the innermost open element. */
+    public void end() {
+        if (this.depth == 0) {
+            throw heap XmlWriteException("end with no element open");
+        }
+        this.depth = this.depth - 1;
+        if (this.tagOpen) {
+            this.out.append("/>");
+            this.tagOpen = false;
+            return;
+        }
+        this.out.append("</");
+        this.out.append(this.open[this.depth]);
+        this.out.append(">");
+    }
+
+    /** `<name>value</name>`, value escaped. */
+    public void element(String name, String value) {
+        this.start(name);
+        this.text(value);
+        this.end();
+    }
+
+    void escape(String s) {
+        int32 n = s.byteLength();
+        int32 i = 0;
+        while (i < n) {
+            int8 c = s.byteAt(i);
+            if (c == (int8) 0x26) { this.out.append("&amp;"); }
+            else if (c == (int8) 0x3C) { this.out.append("&lt;"); }
+            else if (c == (int8) 0x3E) { this.out.append("&gt;"); }
+            else if (c == (int8) 0x22) { this.out.append("&quot;"); }
+            else {
+                int32 run = i;
+                while (i < n) {
+                    int8 d = s.byteAt(i);
+                    if (d == (int8) 0x26 || d == (int8) 0x3C || d == (int8) 0x3E || d == (int8) 0x22) { break; }
+                    i = i + 1;
+                }
+                String part #= s.substring(run, i);
+                this.out.append(part);
+                continue;
+            }
+            i = i + 1;
+        }
+    }
+
+    /** The document so far; every element must be closed. */
+    public #String toString() {
+        if (this.depth != 0) {
+            throw heap XmlWriteException("element <" + this.open[this.depth - 1] + "> is not closed");
+        }
+        return this.out.toString();
+    }
+
+    /** The document as UTF-8 bytes; every element must be closed. */
+    public #int8[] toBytes() {
+        String s #= this.toString();
+        return s.toBytes();
+    }
+}

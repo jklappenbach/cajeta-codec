@@ -1,0 +1,14 @@
+package dev.cajeta.codec.xml;
+
+/**
+ * The events [`XmlReader.next`](XmlReader.cajeta) returns. A self-closing
+ * element (`<a/>`) is a START_ELEMENT followed by an END_ELEMENT. Comments,
+ * processing instructions and the XML declaration produce no event, and
+ * neither does whitespace-only text.
+ */
+public final class XmlEvent {
+    public static final int32 END_DOCUMENT = 0;
+    public static final int32 START_ELEMENT = 1;
+    public static final int32 END_ELEMENT = 2;
+    public static final int32 TEXT = 3;
+}

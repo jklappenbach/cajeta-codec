@@ -1,0 +1,238 @@
+package dev.cajeta.codec.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.codec.xml.XmlReader;
+import dev.cajeta.codec.xml.XmlEvent;
+import dev.cajeta.codec.xml.XmlParseException;
+import cajeta.lang.String;
+import cajeta.lang.StringBuilder;
+
+/**
+ * The XML pull reader (cajeta-cloud-adapters plan 1.1.1, 1.1.2). Documents are
+ * the shapes S3 returns and accepts. Each is driven to the end and its events
+ * rendered as a trace, one token per event separated by `|`:
+ * `S name @attr=value` for a start, `T text` for text, `E name` for an end.
+ * Whitespace-only text between elements is not an event.
+ */
+public class XmlReaderTest {
+
+    public XmlReaderTest() {
+        return;
+    }
+
+    static #String trace(String doc) {
+        int8[] b #= doc.toBytes();
+        XmlReader r = heap XmlReader(b, (int64) b.count());
+        StringBuilder sb = heap StringBuilder();
+        int32 ev = r.next();
+        boolean first = true;
+        while (ev != XmlEvent.END_DOCUMENT) {
+            if (!first) { sb.append("|"); }
+            first = false;
+            if (ev == XmlEvent.START_ELEMENT) {
+                sb.append("S ");
+                sb.append(r.name());
+                int32 i = 0;
+                while (i < r.attributeCount()) {
+                    sb.append(" @");
+                    sb.append(r.attributeName(i));
+                    sb.append("=");
+                    sb.append(r.attributeValue(i));
+                    i = i + 1;
+                }
+            } else if (ev == XmlEvent.END_ELEMENT) {
+                sb.append("E ");
+                sb.append(r.name());
+            } else {
+                sb.append("T ");
+                sb.append(r.text());
+            }
+            ev = r.next();
+        }
+        return sb.toString();
+    }
+
+    // Byte offset of the parse error `doc` raises, or -1 when none is raised.
+    static int64 errorOffset(String doc, int64 limit) {
+        int8[] b #= doc.toBytes();
+        XmlReader r = heap XmlReader(b, (int64) b.count(), limit);
+        int64 at = (int64) -1;
+        try {
+            int32 ev = r.next();
+            while (ev != XmlEvent.END_DOCUMENT) { ev = r.next(); }
+        } catch (XmlParseException e) {
+            at = e.position;
+        }
+        return at;
+    }
+
+    // --- 1.1.1: S3 documents, events in order, prefixes kept ---------------
+
+    @Test
+    public void listObjectsV2EventsInOrder() {
+        String doc = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            + "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\n"
+            + "  <Name>bucket</Name>\n"
+            + "  <Prefix>photos/</Prefix>\n"
+            + "  <KeyCount>1</KeyCount>\n"
+            + "  <IsTruncated>true</IsTruncated>\n"
+            + "  <NextContinuationToken>1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=</NextContinuationToken>\n"
+            + "  <Contents>\n"
+            + "    <Key>photos/a.jpg</Key>\n"
+            + "    <ETag>&quot;9b2cf535f27731c974343645a3985328&quot;</ETag>\n"
+            + "    <Size>434234</Size>\n"
+            + "  </Contents>\n"
+            + "  <CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>\n"
+            + "</ListBucketResult>\n";
+        String want = "S ListBucketResult @xmlns=http://s3.amazonaws.com/doc/2006-03-01/"
+            + "|S Name|T bucket|E Name"
+            + "|S Prefix|T photos/|E Prefix"
+            + "|S KeyCount|T 1|E KeyCount"
+            + "|S IsTruncated|T true|E IsTruncated"
+            + "|S NextContinuationToken|T 1ueGcxLPRx1Tr/XYExHnhbYLgveDs2J/wm36Hy4vbOwM=|E NextContinuationToken"
+            + "|S Contents"
+            + "|S Key|T photos/a.jpg|E Key"
+            + "|S ETag|T \"9b2cf535f27731c974343645a3985328\"|E ETag"
+            + "|S Size|T 434234|E Size"
+            + "|E Contents"
+            + "|S CommonPrefixes|S Prefix|T photos/2026/|E Prefix|E CommonPrefixes"
+            + "|E ListBucketResult";
+        String got #= XmlReaderTest.trace(doc);
+        Assert.that(got).isEqualTo(want);
+        return;
+    }
+
+    @Test
+    public void errorBodyWithPrefixesKept() {
+        String doc = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<s3:Error xmlns:s3=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+            + "<s3:Code>NoSuchKey</s3:Code>"
+            + "<s3:Message>The resource you requested does not exist</s3:Message>"
+            + "<s3:Resource>/mybucket/myfoto.jpg</s3:Resource>"
+            + "<s3:RequestId>4442587FB7D0A2F9</s3:RequestId>"
+            + "</s3:Error>";
+        String want = "S s3:Error @xmlns:s3=http://s3.amazonaws.com/doc/2006-03-01/"
+            + "|S s3:Code|T NoSuchKey|E s3:Code"
+            + "|S s3:Message|T The resource you requested does not exist|E s3:Message"
+            + "|S s3:Resource|T /mybucket/myfoto.jpg|E s3:Resource"
+            + "|S s3:RequestId|T 4442587FB7D0A2F9|E s3:RequestId"
+            + "|E s3:Error";
+        String got #= XmlReaderTest.trace(doc);
+        Assert.that(got).isEqualTo(want);
+        return;
+    }
+
+    @Test
+    public void completeMultipartUploadWithEmptyCommentAndCdata() {
+        String doc = "<CompleteMultipartUpload xmlns='http://s3.amazonaws.com/doc/2006-03-01/'>"
+            + "<!-- parts in order -->"
+            + "<Part><ETag><![CDATA[\"a54357aff0632cce46d942af68356b38\"]]></ETag>"
+            + "<PartNumber>1</PartNumber></Part>"
+            + "<Part><ETag>&quot;0c78aef83f66abc1fa1e8477f296d394&quot;</ETag>"
+            + "<PartNumber>2</PartNumber><ChecksumCRC32 /></Part>"
+            + "</CompleteMultipartUpload>";
+        String want = "S CompleteMultipartUpload @xmlns=http://s3.amazonaws.com/doc/2006-03-01/"
+            + "|S Part|S ETag|T \"a54357aff0632cce46d942af68356b38\"|E ETag"
+            + "|S PartNumber|T 1|E PartNumber|E Part"
+            + "|S Part|S ETag|T \"0c78aef83f66abc1fa1e8477f296d394\"|E ETag"
+            + "|S PartNumber|T 2|E PartNumber|S ChecksumCRC32|E ChecksumCRC32|E Part"
+            + "|E CompleteMultipartUpload";
+        String got #= XmlReaderTest.trace(doc);
+        Assert.that(got).isEqualTo(want);
+        return;
+    }
+
+    @Test
+    public void readTextAndSkipWalkAnElement() {
+        String doc = "<Error><Code>AccessDenied</Code><Detail><A>1</A><B/></Detail>"
+            + "<Message>Access Denied</Message></Error>";
+        int8[] b #= doc.toBytes();
+        XmlReader r = heap XmlReader(b, (int64) b.count());
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.START_ELEMENT);
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.START_ELEMENT);
+        String code #= r.readText();
+        Assert.that(code).isEqualTo("AccessDenied");
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.START_ELEMENT);
+        Assert.that(r.name()).isEqualTo("Detail");
+        r.skip();
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.START_ELEMENT);
+        Assert.that(r.name()).isEqualTo("Message");
+        String msg #= r.readText();
+        Assert.that(msg).isEqualTo("Access Denied");
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.END_ELEMENT);
+        Assert.that((int64) r.next()).isEqualTo((int64) XmlEvent.END_DOCUMENT);
+        return;
+    }
+
+    @Test
+    public void attributeLookupByName() {
+        String doc = "<a x=\"1\" y='two &amp; three'/>";
+        int8[] b #= doc.toBytes();
+        XmlReader r = heap XmlReader(b, (int64) b.count());
+        r.next();
+        Assert.that(r.attribute("y")).isEqualTo("two & three");
+        Assert.isTrue(r.attribute("z") == null);
+        return;
+    }
+
+    // --- 1.1.2: references decode; malformed documents name the offset -----
+
+    @Test
+    public void predefinedEntitiesAndNumericReferencesDecode() {
+        String got #= XmlReaderTest.trace(
+            "<t>&lt;&gt;&amp;&quot;&apos; &#65;&#x42;&#xe9;&#x20AC;&#128512;</t>");
+        Assert.that(got).isEqualTo("S t|T <>&\"' ABé€😀|E t");
+        return;
+    }
+
+    @Test
+    public void undefinedEntityNamesItsOffset() {
+        // "<t>ab" is 5 bytes; the '&' is at 5.
+        Assert.that(XmlReaderTest.errorOffset("<t>ab&nbsp;</t>", (int64) 1024))
+            .isEqualTo((int64) 5);
+        return;
+    }
+
+    @Test
+    public void unclosedElementNamesTheEnd() {
+        Assert.that(XmlReaderTest.errorOffset("<a><b>x</b>", (int64) 1024))
+            .isEqualTo((int64) 11);
+        return;
+    }
+
+    @Test
+    public void mismatchedEndTagNamesItsOffset() {
+        Assert.that(XmlReaderTest.errorOffset("<a><b>x</c></a>", (int64) 1024))
+            .isEqualTo((int64) 7);
+        return;
+    }
+
+    @Test
+    public void documentOverTheLimitNamesTheLimit() {
+        Assert.that(XmlReaderTest.errorOffset("<a>0123456789012345678901234567890</a>", (int64) 16))
+            .isEqualTo((int64) 16);
+        return;
+    }
+
+    @Test
+    public void doctypeIsRefused() {
+        Assert.that(XmlReaderTest.errorOffset(
+            "<!DOCTYPE a [<!ENTITY x \"y\">]><a>&x;</a>", (int64) 1024))
+            .isEqualTo((int64) 0);
+        return;
+    }
+
+    @Test
+    public void wellFormedDocumentRaisesNothing() {
+        Assert.that(XmlReaderTest.errorOffset("<a><b c=\"d\">x</b></a>", (int64) 1024))
+            .isEqualTo((int64) -1);
+        return;
+    }
+
+    @Test
+    public void textOutsideTheRootIsRefused() {
+        Assert.that(XmlReaderTest.errorOffset("<a/>junk", (int64) 1024))
+            .isEqualTo((int64) 4);
+        return;
+    }
+}

@@ -1,0 +1,19 @@
+package dev.cajeta.codec.xml;
+
+import cajeta.error.RecoverableException;
+
+/**
+ * Thrown when a document is not well-formed XML, or uses what the reader
+ * refuses (a DTD, an undefined entity), or passes the size limit. `position`
+ * is the 0-based byte offset where the problem was found, and the message
+ * names it too.
+ */
+public class XmlParseException extends RecoverableException {
+    public int64 position;
+
+    public XmlParseException(String what, int64 position) {
+        this.message #= what + " at byte " + position;
+        this.cause = 0;
+        this.position = position;
+    }
+}

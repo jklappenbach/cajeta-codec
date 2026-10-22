@@ -1,0 +1,607 @@
+package dev.cajeta.codec.xml;
+
+import cajeta.lang.String;
+import cajeta.lang.StringBuilder;
+
+/**
+ * A pull reader for the XML that web APIs speak (cajeta-cloud-adapters spec 3).
+ * `next()` returns the next [`XmlEvent`](XmlEvent.cajeta): a start element
+ * with its attributes, text, or an end element. Names and prefixes are kept as
+ * written (`s3:Key` stays `s3:Key`; `xmlns` declarations are ordinary
+ * attributes), so namespace handling is the caller's. The five predefined
+ * entities and decimal and hex character references decode in text and in
+ * attribute values. CDATA sections are text.
+ *
+ * Refused, with an [`XmlParseException`](XmlParseException.cajeta) naming the
+ * byte offset: a DOCTYPE (no DTD processing, so no external or custom
+ * entities), an undefined entity, an unclosed or mismatched element, text or a
+ * second element outside the root, and a document past the size limit.
+ *
+ * Two ways in. Over bytes already in memory, `XmlReader(doc, n)` reads the
+ * array in place without copying it. Over an [`XmlSource`](XmlSource.cajeta),
+ * the reader keeps a buffer of `INITIAL_BUFFER` bytes and grows it only when
+ * one tag or one text run is bigger, so a document of any size streams in the
+ * memory of its largest element.
+ *
+ * Accessors are views: `name()`, `text()`, `attributeName(i)` and
+ * `attributeValue(i)` return strings the reader owns, valid until the next
+ * call to `next()`. Copy one (or take `readText()`, which is owned) to keep it.
+ */
+public final class XmlReader {
+    /** The streaming buffer's starting size, in bytes. */
+    public static final int64 INITIAL_BUFFER = (int64) 16384;
+    /** The size limit when the caller names none: 16 MiB. */
+    public static final int64 DEFAULT_LIMIT = (int64) 16777216;
+
+    int8[] buf;
+    int64 start;        // first unconsumed byte in buf
+    int64 end;          // one past the last filled byte in buf
+    int64 base;         // document offset of buf[0]
+    boolean eof;
+    boolean overLimit;  // in-memory mode: the document runs past the limit
+    XmlSource src;      // null in in-memory mode
+    int64 limit;
+
+    String[] openNames;     // open element names; the slot just popped stays readable
+    int32 depth;
+    int32 nameSlot;
+    boolean rootSeen;
+    boolean pendingEnd; // the last start tag was self-closing
+
+    int32 kind;
+    int64 eventAt;
+    String textValue;
+    String[] attrNames;
+    String[] attrValues;
+    int32 attrCount;
+    int8[] scratch;     // UTF-8 bytes of one character reference
+
+    /** Read `n` bytes of `doc` in place, with the default size limit. */
+    public XmlReader(int8[] doc, int64 n) {
+        this.buf #= doc;
+        this.inMemory(n, XmlReader.DEFAULT_LIMIT);
+    }
+
+    /** Read `n` bytes of `doc` in place, refusing a document over `limit` bytes. */
+    public XmlReader(int8[] doc, int64 n, int64 limit) {
+        this.buf #= doc;
+        this.inMemory(n, limit);
+    }
+
+    /** Stream from `src`, refusing a document over `limit` bytes. */
+    public XmlReader(XmlSource src, int64 limit) {
+        this.src #= src;
+        int8[] b = heap int8[XmlReader.INITIAL_BUFFER];
+        this.buf #= b;
+        this.end = (int64) 0;
+        this.eof = false;
+        this.overLimit = false;
+        this.limit = limit;
+        this.setup();
+    }
+
+    void inMemory(int64 n, int64 limit) {
+        this.src = null;
+        this.limit = limit;
+        this.eof = true;
+        if (n > limit) {
+            this.end = limit;
+            this.overLimit = true;
+        } else {
+            this.end = n;
+            this.overLimit = false;
+        }
+        this.setup();
+    }
+
+    void setup() {
+        this.start = (int64) 0;
+        this.base = (int64) 0;
+        String[] s = heap String[16];
+        this.openNames #= s;
+        this.depth = 0;
+        this.nameSlot = 0;
+        this.rootSeen = false;
+        this.pendingEnd = false;
+        this.kind = -1;
+        this.eventAt = (int64) 0;
+        this.textValue = "";
+        String[] an = heap String[8];
+        this.attrNames #= an;
+        String[] av = heap String[8];
+        this.attrValues #= av;
+        this.attrCount = 0;
+        int8[] sc = heap int8[4];
+        this.scratch #= sc;
+    }
+
+    // --- the buffer ---------------------------------------------------------
+
+    // Pull more bytes in. False at the end of the document.
+    boolean fill() {
+        if (this.overLimit) {
+            throw heap XmlParseException("document exceeds the " + this.limit + "-byte limit", this.limit);
+        }
+        if (this.eof) { return false; }
+        if (this.start > (int64) 0) {
+            int64 live = this.end - this.start;
+            int64 i = (int64) 0;
+            while (i < live) {
+                this.buf[i] = this.buf[this.start + i];
+                i = i + 1;
+            }
+            this.base = this.base + this.start;
+            this.end = live;
+            this.start = (int64) 0;
+        }
+        int64 cap = (int64) this.buf.count();
+        if (this.end == cap) {
+            int8[] nb = heap int8[cap * (int64) 2];
+            int64 j = (int64) 0;
+            while (j < this.end) {
+                nb[j] = this.buf[j];
+                j = j + 1;
+            }
+            this.buf #= nb;
+            cap = cap * (int64) 2;
+        }
+        int32 want = (int32) (cap - this.end);
+        int32 got = this.src.read(this.buf, (int32) this.end, want);
+        if (got <= 0) {
+            this.eof = true;
+            return false;
+        }
+        this.end = this.end + (int64) got;
+        if (this.base + this.end > this.limit) {
+            throw heap XmlParseException("document exceeds the " + this.limit + "-byte limit", this.limit);
+        }
+        return true;
+    }
+
+    // The byte `rel` past the current position, or -1 at the end.
+    int32 peek(int64 rel) {
+        while (this.start + rel >= this.end) {
+            if (!this.fill()) { return -1; }
+        }
+        int8 c = this.buf[this.start + rel];
+        return ((int32) c) & 0xFF;
+    }
+
+    boolean lookingAt(String lit) {
+        int32 n = lit.byteLength();
+        int32 i = 0;
+        while (i < n) {
+            int8 want = lit.byteAt(i);
+            if (this.peek((int64) i) != (((int32) want) & 0xFF)) { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    // Offset past the first `lit` at or after `from`, relative to start; -1 at the end.
+    int64 findPast(String lit, int64 from) {
+        int64 k = from;
+        while (true) {
+            int32 c = this.peek(k);
+            if (c < 0) { return (int64) -1; }
+            int8 l0 = lit.byteAt(0);
+            if (c == (((int32) l0) & 0xFF)) {
+                int32 n = lit.byteLength();
+                int32 i = 1;
+                boolean ok = true;
+                while (ok && i < n) {
+                    int8 li = lit.byteAt(i);
+                    if (this.peek(k + (int64) i) != (((int32) li) & 0xFF)) { ok = false; }
+                    i = i + 1;
+                }
+                if (ok) { return k + (int64) n; }
+            }
+            k = k + 1;
+        }
+    }
+
+    // Length of the run before the next '<' (or the end), relative to start.
+    int64 runLength() {
+        int64 rel = (int64) 0;
+        while (true) {
+            int64 i = this.start + rel;
+            while (i < this.end) {
+                if (this.buf[i] == (int8) 0x3C) { return i - this.start; }
+                i = i + 1;
+            }
+            rel = i - this.start;
+            if (!this.fill()) { return rel; }
+        }
+    }
+
+    static boolean isSpace(int8 c) {
+        return c == (int8) 0x20 || c == (int8) 0x0A || c == (int8) 0x09 || c == (int8) 0x0D;
+    }
+
+    // --- events -------------------------------------------------------------
+
+    /** Advance to the next event and return its kind. */
+    public int32 next() {
+        if (this.pendingEnd) {
+            this.pendingEnd = false;
+            this.depth = this.depth - 1;
+            this.nameSlot = this.depth;
+            this.kind = XmlEvent.END_ELEMENT;
+            return this.kind;
+        }
+        while (true) {
+            this.eventAt = this.base + this.start;
+            int32 c = this.peek((int64) 0);
+            if (c < 0) {
+                if (this.depth > 0) {
+                    String open = this.openNames[this.depth - 1];
+                    throw heap XmlParseException("element <" + open + "> is not closed", this.eventAt);
+                }
+                if (!this.rootSeen) {
+                    throw heap XmlParseException("no root element", this.eventAt);
+                }
+                this.kind = XmlEvent.END_DOCUMENT;
+                return this.kind;
+            }
+            if (c == 0x3C) {
+                int32 c1 = this.peek((int64) 1);
+                if (c1 == 0x3F) {
+                    this.skipPast("?>", "processing instruction");
+                } else if (c1 == 0x21) {
+                    if (this.lookingAt("<!--")) {
+                        this.skipPast("-->", "comment");
+                    } else if (this.lookingAt("<![CDATA[")) {
+                        if (this.depth == 0) {
+                            throw heap XmlParseException("CDATA outside the root element", this.eventAt);
+                        }
+                        int64 past = this.findPast("]]>", (int64) 9);
+                        if (past < (int64) 0) {
+                            throw heap XmlParseException("CDATA section is not closed", this.eventAt);
+                        }
+                        this.textValue #= this.slice(this.start + 9, this.start + past - 3);
+                        this.start = this.start + past;
+                        this.kind = XmlEvent.TEXT;
+                        return this.kind;
+                    } else {
+                        throw heap XmlParseException("DOCTYPE and markup declarations are not supported", this.eventAt);
+                    }
+                } else if (c1 == 0x2F) {
+                    return this.endTag();
+                } else {
+                    return this.startTag();
+                }
+            } else {
+                int64 len = this.runLength();
+                int64 s = this.start;
+                int64 e = s + len;
+                boolean blank = true;
+                int64 i = s;
+                while (blank && i < e) {
+                    if (!XmlReader.isSpace(this.buf[i])) { blank = false; }
+                    i = i + 1;
+                }
+                if (blank) {
+                    this.start = e;
+                } else {
+                    if (this.depth == 0) {
+                        throw heap XmlParseException("text outside the root element", this.eventAt);
+                    }
+                    this.textValue #= this.decode(s, e);
+                    this.start = e;
+                    this.kind = XmlEvent.TEXT;
+                    return this.kind;
+                }
+            }
+        }
+    }
+
+    void skipPast(String close, String what) {
+        int64 past = this.findPast(close, (int64) 2);
+        if (past < (int64) 0) {
+            throw heap XmlParseException(what + " is not closed", this.eventAt);
+        }
+        this.start = this.start + past;
+    }
+
+    // Relative offset of the '>' closing the tag at start, honouring quotes.
+    int64 tagClose() {
+        int64 k = (int64) 1;
+        int32 quote = 0;
+        while (true) {
+            int32 c = this.peek(k);
+            if (c < 0) {
+                throw heap XmlParseException("tag is not closed", this.eventAt);
+            }
+            if (quote != 0) {
+                if (c == quote) { quote = 0; }
+            } else if (c == 0x22 || c == 0x27) {
+                quote = c;
+            } else if (c == 0x3E) {
+                return k;
+            } else if (c == 0x3C) {
+                throw heap XmlParseException("'<' inside a tag", this.base + this.start + k);
+            }
+            k = k + 1;
+        }
+    }
+
+    static boolean endsName(int8 c) {
+        return XmlReader.isSpace(c) || c == (int8) 0x2F || c == (int8) 0x3E
+            || c == (int8) 0x3D || c == (int8) 0x22 || c == (int8) 0x27;
+    }
+
+    int32 startTag() {
+        if (this.depth == 0 && this.rootSeen) {
+            throw heap XmlParseException("a second root element", this.eventAt);
+        }
+        int64 close = this.tagClose();
+        int64 p = this.start + 1;
+        int64 e = this.start + close;
+        boolean selfClosing = false;
+        if (this.buf[e - 1] == (int8) 0x2F) {
+            selfClosing = true;
+            e = e - 1;
+        }
+        int64 ns = p;
+        while (p < e && !XmlReader.endsName(this.buf[p])) { p = p + 1; }
+        if (p == ns) {
+            throw heap XmlParseException("element name expected", this.base + ns);
+        }
+        if (this.depth == this.openNames.count()) {
+            String[] grown = heap String[this.openNames.count() * 2];
+            int32 g = 0;
+            while (g < this.depth) {
+                grown[g] #= this.openNames[g];
+                g = g + 1;
+            }
+            this.openNames #= grown;
+        }
+        this.openNames[this.depth] #= this.slice(ns, p);
+        this.nameSlot = this.depth;
+        this.depth = this.depth + 1;
+        this.rootSeen = true;
+
+        this.attrCount = 0;
+        while (true) {
+            while (p < e && XmlReader.isSpace(this.buf[p])) { p = p + 1; }
+            if (p >= e) { break; }
+            int64 an = p;
+            while (p < e && !XmlReader.endsName(this.buf[p])) { p = p + 1; }
+            if (p == an) {
+                throw heap XmlParseException("attribute name expected", this.base + an);
+            }
+            int64 ae = p;
+            while (p < e && XmlReader.isSpace(this.buf[p])) { p = p + 1; }
+            if (p >= e || this.buf[p] != (int8) 0x3D) {
+                throw heap XmlParseException("'=' expected after an attribute name", this.base + p);
+            }
+            p = p + 1;
+            while (p < e && XmlReader.isSpace(this.buf[p])) { p = p + 1; }
+            if (p >= e || (this.buf[p] != (int8) 0x22 && this.buf[p] != (int8) 0x27)) {
+                throw heap XmlParseException("quoted attribute value expected", this.base + p);
+            }
+            int8 q = this.buf[p];
+            p = p + 1;
+            int64 vs = p;
+            while (p < e && this.buf[p] != q) { p = p + 1; }
+            if (p >= e) {
+                throw heap XmlParseException("attribute value is not closed", this.base + vs);
+            }
+            this.addAttribute(an, ae, vs, p);
+            p = p + 1;
+        }
+        this.start = this.start + close + 1;
+        this.pendingEnd = selfClosing;
+        this.kind = XmlEvent.START_ELEMENT;
+        return this.kind;
+    }
+
+    void addAttribute(int64 ns, int64 ne, int64 vs, int64 ve) {
+        if (this.attrCount == this.attrNames.count()) {
+            int32 cap = this.attrCount * 2;
+            String[] gn = heap String[cap];
+            String[] gv = heap String[cap];
+            int32 g = 0;
+            while (g < this.attrCount) {
+                gn[g] #= this.attrNames[g];
+                gv[g] #= this.attrValues[g];
+                g = g + 1;
+            }
+            this.attrNames #= gn;
+            this.attrValues #= gv;
+        }
+        this.attrNames[this.attrCount] #= this.slice(ns, ne);
+        this.attrValues[this.attrCount] #= this.decode(vs, ve);
+        this.attrCount = this.attrCount + 1;
+    }
+
+    int32 endTag() {
+        int64 close = this.tagClose();
+        int64 ns = this.start + 2;
+        int64 e = this.start + close;
+        while (e > ns && XmlReader.isSpace(this.buf[e - 1])) { e = e - 1; }
+        String nm #= this.slice(ns, e);
+        if (this.depth == 0) {
+            throw heap XmlParseException("end tag </" + nm + "> with no element open", this.eventAt);
+        }
+        String open = this.openNames[this.depth - 1];
+        if (!open.equals(nm)) {
+            throw heap XmlParseException("end tag </" + nm + "> does not match <" + open + ">", this.eventAt);
+        }
+        this.depth = this.depth - 1;
+        this.nameSlot = this.depth;
+        this.attrCount = 0;
+        this.start = this.start + close + 1;
+        this.kind = XmlEvent.END_ELEMENT;
+        return this.kind;
+    }
+
+    // --- text ---------------------------------------------------------------
+
+    #String slice(int64 s, int64 e) {
+        int32 n = (int32) (e - s);
+        int8[] out = heap int8[n];
+        int32 i = 0;
+        while (i < n) {
+            out[i] = this.buf[s + (int64) i];
+            i = i + 1;
+        }
+        return heap String(#out, n);
+    }
+
+    // The bytes [s, e) of buf with entity and character references decoded.
+    #String decode(int64 s, int64 e) {
+        int64 amp = s;
+        while (amp < e && this.buf[amp] != (int8) 0x26) { amp = amp + 1; }
+        if (amp == e) { return this.slice(s, e); }
+        StringBuilder sb = heap StringBuilder();
+        int64 p = s;
+        while (p < e) {
+            int64 run = p;
+            while (p < e && this.buf[p] != (int8) 0x26) { p = p + 1; }
+            if (p > run) { sb.appendBytes(this.buf, (int32) run, (int32) (p - run)); }
+            if (p >= e) { break; }
+            int64 semi = p + 1;
+            while (semi < e && semi - p <= (int64) 12 && this.buf[semi] != (int8) 0x3B) { semi = semi + 1; }
+            if (semi >= e || this.buf[semi] != (int8) 0x3B) {
+                throw heap XmlParseException("reference is not terminated by ';'", this.base + p);
+            }
+            this.reference(sb, p, semi);
+            p = semi + 1;
+        }
+        return sb.toString();
+    }
+
+    // Append the character the reference buf[amp .. semi] (both delimiters included) names.
+    void reference(StringBuilder sb, int64 amp, int64 semi) {
+        String body #= this.slice(amp + 1, semi);
+        if (body.equals("lt")) { sb.append("<"); return; }
+        if (body.equals("gt")) { sb.append(">"); return; }
+        if (body.equals("amp")) { sb.append("&"); return; }
+        if (body.equals("quot")) { sb.append("\""); return; }
+        if (body.equals("apos")) { sb.append("'"); return; }
+        if (semi - amp < (int64) 3 || this.buf[amp + 1] != (int8) 0x23) {
+            throw heap XmlParseException("undefined entity &" + body + ";", this.base + amp);
+        }
+        int64 p = amp + 2;
+        int64 radix = (int64) 10;
+        if (this.buf[p] == (int8) 0x78) {
+            radix = (int64) 16;
+            p = p + 1;
+        }
+        if (p >= semi) {
+            throw heap XmlParseException("empty character reference", this.base + amp);
+        }
+        int64 cp = (int64) 0;
+        while (p < semi) {
+            int32 c = ((int32) this.buf[p]) & 0xFF;
+            int64 d = (int64) -1;
+            if (c >= 0x30 && c <= 0x39) { d = (int64) (c - 0x30); }
+            else if (radix == (int64) 16 && c >= 0x61 && c <= 0x66) { d = (int64) (c - 0x61 + 10); }
+            else if (radix == (int64) 16 && c >= 0x41 && c <= 0x46) { d = (int64) (c - 0x41 + 10); }
+            if (d < (int64) 0) {
+                throw heap XmlParseException("bad digit in a character reference", this.base + p);
+            }
+            cp = cp * radix + d;
+            if (cp > (int64) 0x10FFFF) {
+                throw heap XmlParseException("character reference out of range", this.base + amp);
+            }
+            p = p + 1;
+        }
+        if (cp == (int64) 0 || (cp >= (int64) 0xD800 && cp <= (int64) 0xDFFF)) {
+            throw heap XmlParseException("character reference names no character", this.base + amp);
+        }
+        int32 v = (int32) cp;
+        int32 n = 0;
+        if (v < 0x80) {
+            this.scratch[0] = (int8) v;
+            n = 1;
+        } else if (v < 0x800) {
+            this.scratch[0] = (int8) (0xC0 | (v >> 6));
+            this.scratch[1] = (int8) (0x80 | (v & 0x3F));
+            n = 2;
+        } else if (v < 0x10000) {
+            this.scratch[0] = (int8) (0xE0 | (v >> 12));
+            this.scratch[1] = (int8) (0x80 | ((v >> 6) & 0x3F));
+            this.scratch[2] = (int8) (0x80 | (v & 0x3F));
+            n = 3;
+        } else {
+            this.scratch[0] = (int8) (0xF0 | (v >> 18));
+            this.scratch[1] = (int8) (0x80 | ((v >> 12) & 0x3F));
+            this.scratch[2] = (int8) (0x80 | ((v >> 6) & 0x3F));
+            this.scratch[3] = (int8) (0x80 | (v & 0x3F));
+            n = 4;
+        }
+        sb.appendBytes(this.scratch, 0, n);
+    }
+
+    // --- accessors ----------------------------------------------------------
+
+    /** The kind of the current event. */
+    public int32 kind() { return this.kind; }
+
+    /** Byte offset where the current event starts. */
+    public int64 offset() { return this.eventAt; }
+
+    /** The current element's name, prefix kept, for a start or end event. */
+    public String name() { return this.openNames[this.nameSlot]; }
+
+    /** The current text event's decoded text. */
+    public String text() { return this.textValue; }
+
+    /** How many attributes the current start element carries. */
+    public int32 attributeCount() { return this.attrCount; }
+
+    public String attributeName(int32 i) { return this.attrNames[i]; }
+
+    public String attributeValue(int32 i) { return this.attrValues[i]; }
+
+    /** The value of the attribute named `name` as written, or null. */
+    public String attribute(String name) {
+        int32 i = 0;
+        while (i < this.attrCount) {
+            if (this.attrNames[i].equals(name)) { return this.attrValues[i]; }
+            i = i + 1;
+        }
+        return null;
+    }
+
+    /** Current element nesting depth; 0 outside the root. */
+    public int32 depth() { return this.depth; }
+
+    /** Bytes the streaming buffer holds now; the memory bound of a stream. */
+    public int64 bufferCapacity() { return (int64) this.buf.count(); }
+
+    /**
+     * On a start element, read through its end and return its text; an
+     * element holding another element is refused. `<a/>` is "".
+     */
+    public #String readText() {
+        if (this.kind != XmlEvent.START_ELEMENT) {
+            throw heap XmlParseException("readText needs a start element", this.eventAt);
+        }
+        StringBuilder sb = heap StringBuilder();
+        int32 ev = this.next();
+        while (ev != XmlEvent.END_ELEMENT) {
+            if (ev == XmlEvent.START_ELEMENT) {
+                throw heap XmlParseException("readText found a child element <" + this.name() + ">", this.eventAt);
+            }
+            sb.append(this.textValue);
+            ev = this.next();
+        }
+        return sb.toString();
+    }
+
+    /** On a start element, skip through its matching end. */
+    public void skip() {
+        if (this.kind != XmlEvent.START_ELEMENT) {
+            throw heap XmlParseException("skip needs a start element", this.eventAt);
+        }
+        int32 level = 1;
+        while (level > 0) {
+            int32 ev = this.next();
+            if (ev == XmlEvent.START_ELEMENT) { level = level + 1; }
+            if (ev == XmlEvent.END_ELEMENT) { level = level - 1; }
+        }
+    }
+}

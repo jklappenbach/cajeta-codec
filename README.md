@@ -14,6 +14,7 @@ linking):
 | `dev.cajeta.codec.avro`     | Apache Avro      | reader + writer + typed facade, OCF containers |
 | `dev.cajeta.codec.parquet`  | Apache Parquet   | reader + writer, dictionary/nullable/multi-row-group |
 | `dev.cajeta.codec.orc`      | Apache ORC       | reader + writer, RLE v2, column stats |
+| `dev.cajeta.codec.xml`      | XML              | streaming pull reader + writer; no DTDs, size-limited |
 
 Every format above ships both directions with `@Test` coverage in the suite.
 "Status" here means *implemented and tested*, not *complete against the format

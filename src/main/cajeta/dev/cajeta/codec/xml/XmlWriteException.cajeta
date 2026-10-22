@@ -1,0 +1,11 @@
+package dev.cajeta.codec.xml;
+
+import cajeta.error.RecoverableException;
+
+/** Thrown when an [`XmlWriter`](XmlWriter.cajeta) call would write malformed XML. */
+public class XmlWriteException extends RecoverableException {
+    public XmlWriteException(String message) {
+        this.message #= message;
+        this.cause = 0;
+    }
+}

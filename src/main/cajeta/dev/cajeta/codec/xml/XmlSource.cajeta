@@ -1,0 +1,11 @@
+package dev.cajeta.codec.xml;
+
+/**
+ * Where a streaming [`XmlReader`](XmlReader.cajeta) pulls its bytes from.
+ * `read` fills up to `len` bytes of `dst` from `off` and returns how many it
+ * wrote; `0` is the end of the document. An HTTP response body, a file, or a
+ * generator all fit behind it.
+ */
+public interface XmlSource {
+    int32 read(int8[] dst, int32 off, int32 len);
+}
