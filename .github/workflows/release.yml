@@ -12,6 +12,13 @@
 #   - workflow_dispatch        → dry-run (build+test) or production (also tags +
 #                                publishes)
 #
+# Releases ship from the `release` branch, never from main (the cajeta
+# convention: main is the conduit, `release` is the train). The guard job below
+# refuses a `v*` tag whose commit is not on `release`, and a production dispatch
+# launched from any other branch. To release:
+#   git checkout release && git merge --ff-only main && git push origin release
+#   git tag v<version> && git push origin v<version>
+#
 # No `pull_request:` trigger by design — this project lands changes by pushing
 # straight to main, so a PR trigger would never fire and main-push CI is the
 # only thing standing between a bad commit and a tag.
@@ -87,8 +94,60 @@ env:
 jobs:
   # Build the native zlib archives for every target so the .cja packaging step
   # bakes native/<platform>/libcajeta_zlib.a into the published archive (Unit 7).
+  # Releases are cut from `release` only. A dry-run dispatch publishes nothing,
+  # so it may run from anywhere; a tag or a production dispatch must be on
+  # `release`. Same check as the cajeta compiler's release workflow.
+  guard:
+    name: release branch guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tag must be on the release branch
+        env:
+          EVENT: ${{ github.event_name }}
+          MODE: ${{ github.event.inputs.mode }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BRANCH=release
+          if [ "$EVENT" = "push" ] && [ "${REF#refs/tags/}" = "$REF" ]; then
+            echo "::notice::branch push '$REF_NAME' — build and test only, guard not applied"
+            exit 0
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$MODE" != "production" ]; then
+            echo "::notice::dry-run dispatch from '$REF_NAME' — publishes nothing, guard not applied"
+            exit 0
+          fi
+          if ! git fetch --no-tags origin \
+                 "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null; then
+            echo "::error::there is no '$BRANCH' branch on origin. Releases are cut" \
+                 "from it and only from it."
+            exit 1
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$REF_NAME" != "$BRANCH" ]; then
+              echo "::error::a production release must be launched from '$BRANCH', not '$REF_NAME'."
+              exit 1
+            fi
+            echo "::notice::production dispatch from '$BRANCH' — guard satisfied"
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor "$SHA" "origin/$BRANCH"; then
+            echo "::error::tag '$REF_NAME' points at $SHA, which is NOT on '$BRANCH'." \
+                 "Nothing ships from a tag that is only on main. Fast-forward" \
+                 "'$BRANCH' to the commit you mean to release, push it, then move the tag."
+            exit 1
+          fi
+          echo "::notice::tag '$REF_NAME' is on '$BRANCH' — guard satisfied"
+
   native-linux:
     name: native archives (linux x3 + windows)
+    needs: [guard]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,6 +169,7 @@ jobs:
 
   native-macos:
     name: native archives (macos arm64 + x64)
+    needs: [guard]
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4

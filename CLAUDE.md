@@ -15,6 +15,13 @@ suites under `src/test/cajeta/dev/cajeta/codec/selftest/`.
 `run-tests.sh` expects a `cajeta-unit` checkout beside this repo (`UNIT_REPO=`
 overrides) and builds the native zlib backend, exporting `CAJETA_NATIVE_PATH`.
 
+## Releasing
+
+Releases ship from the `release` branch, never from main. Fast-forward it to
+the commit to ship (`git merge --ff-only main` on `release`), push it, then tag
+`v<version>` there; the workflow's guard job refuses a tag that is not on
+`release`. Tags before v0.9.0 were cut on main.
+
 ## Toolchain coupling
 
 The typed facades (`Protobuf.parse<T>` / `toBytes<T>`, and the Ion/Avro twins)
