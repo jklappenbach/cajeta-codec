@@ -320,12 +320,26 @@ jobs:
           fi
           echo "version from cajeta.json: $VERSION"
           out="$(mktemp -d)"
-          cajeta --emit=cja -o "$out/dev.cajeta.codec-${VERSION}.cja" \
+          # --skill-root=. packs the project's skills/: the bare compiler looks
+          # under the source root otherwise, and 0.9.0 shipped without its skill.
+          cajeta --emit=cja --skill-root=. -o "$out/dev.cajeta.codec-${VERSION}.cja" \
             dev.cajeta.codec.protobuf.Protobuf.run src/main/cajeta "$out"
           mkdir -p dist
           cp "$out/dev.cajeta.codec-${VERSION}.cja" dist/
           echo "artifact=dist/dev.cajeta.codec-${VERSION}.cja" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the skills are packed
+        run: |
+          set -euo pipefail
+          cja="${{ steps.build.outputs.artifact }}"
+          if ls skills/*.md >/dev/null 2>&1; then
+            if cajeta archive list "$cja" | grep -q "skills/index.json"; then
+              echo "skills packed: $(ls skills/*.md | wc -l) source(s)"
+            else
+              echo "::error::skills/ has skills but the .cja carries no skills/index.json"; exit 1
+            fi
+          fi
 
       - name: Verify host artifact baked + stage per-platform assets
         run: |
