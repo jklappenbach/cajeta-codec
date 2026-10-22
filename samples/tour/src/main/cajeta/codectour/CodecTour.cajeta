@@ -47,6 +47,9 @@ public final class CodecTour {
         OrcDemo orc = heap OrcDemo();
         orc.execute();
 
+        XmlDemo xml = heap XmlDemo();
+        xml.execute();
+
         System.stdout.println("");
         System.stdout.println("=== " + DemoClass.checks + " checks, "
             + DemoClass.failures + " failures ===");

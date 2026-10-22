@@ -1,0 +1,155 @@
+package codectour;
+
+import cajeta.lang.String;
+import dev.cajeta.codec.xml.XmlReader;
+import dev.cajeta.codec.xml.XmlEvent;
+import dev.cajeta.codec.xml.XmlSource;
+import dev.cajeta.codec.xml.XmlWriter;
+import dev.cajeta.codec.xml.XmlParseException;
+import dev.cajeta.codec.xml.XmlWriteException;
+
+// dev.cajeta.codec.xml — the XML web APIs speak, read as a stream of events
+// and written as small request bodies. No DOM, no DTDs, a size limit.
+//
+//   XmlReader     pull reader: next() -> START_ELEMENT / TEXT / END_ELEMENT /
+//                 END_DOCUMENT; name(), text(), attribute(); readText(), skip()
+//   XmlEvent      the event kinds
+//   XmlSource     where a streaming reader pulls bytes from (a response body)
+//   XmlWriter     start / attribute / text / end / element, escaped
+//
+// Malformed input raises XmlParseException with the byte offset; a writer
+// call that would produce malformed XML raises XmlWriteException.
+//
+// The scenario: an object-store client listing a bucket and deleting what it
+// found.
+
+// support: the listing as a stream, handed over in 7-byte reads, the way a
+// response body arrives in pieces.
+public class TrickleSource implements XmlSource {
+    int8[] doc;
+    int32 pos;
+
+    public TrickleSource(String text) {
+        int8[] b #= text.toBytes();
+        this.doc #= b;
+        this.pos = 0;
+    }
+
+    public int32 read(int8[] dst, int32 off, int32 len) {
+        int32 n = 0;
+        int32 total = (int32) this.doc.count();
+        while (n < len && n < 7 && this.pos < total) {
+            dst[off + n] = this.doc[this.pos];
+            this.pos = this.pos + 1;
+            n = n + 1;
+        }
+        return n;
+    }
+}
+
+public class XmlDemo extends DemoClass {
+
+    static String listing() {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            + "<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+            + "<Name>photos</Name><IsTruncated>false</IsTruncated>"
+            + "<Contents><Key>2026/a.jpg</Key><ETag>&quot;9b2c&quot;</ETag><Size>434234</Size></Contents>"
+            + "<Contents><Key>2026/b&amp;c.jpg</Key><ETag>&quot;0c78&quot;</ETag><Size>1024</Size></Contents>"
+            + "</ListBucketResult>";
+    }
+
+    static int64 digits(String s) {
+        int64 v = (int64) 0;
+        int32 i = 0;
+        while (i < s.byteLength()) {
+            v = v * (int64) 10 + (int64) (((int32) s.byteAt(i)) - 0x30);
+            i = i + 1;
+        }
+        return v;
+    }
+
+    public void execute() {
+        System.stdout.println("");
+        System.stdout.println("-- dev.cajeta.codec.xml: pull reader, writer, streaming, refusals --");
+
+        // 1. The pull loop over bytes in memory (read in place, not copied).
+        //    readText() takes an element's whole text, owned; skip() passes
+        //    a subtree. Entities decode: b&amp;c reads back as b&c.
+        int8[] body #= XmlDemo.listing().toBytes();
+        XmlReader r = heap XmlReader(body, (int64) body.count());
+        int32 keys = 0;
+        int64 bytes = (int64) 0;
+        String second #= "";
+        int32 ev = r.next();
+        this.check(ev == XmlEvent.START_ELEMENT && r.name().equals("ListBucketResult"),
+            "root element first");
+        this.check(r.attribute("xmlns").equals("http://s3.amazonaws.com/doc/2006-03-01/"),
+            "the namespace declaration is an ordinary attribute");
+        while (ev != XmlEvent.END_DOCUMENT) {
+            if (ev == XmlEvent.START_ELEMENT && r.name().equals("Key")) {
+                String k #= r.readText();
+                keys = keys + 1;
+                if (keys == 2) { second #= k; }
+            } else if (ev == XmlEvent.START_ELEMENT && r.name().equals("Size")) {
+                String sz #= r.readText();
+                bytes = bytes + XmlDemo.digits(sz);
+            } else if (ev == XmlEvent.START_ELEMENT && r.name().equals("ETag")) {
+                r.skip();
+            }
+            ev = r.next();
+        }
+        System.stdout.println("  listing: " + keys + " keys, " + bytes + " bytes, second key " + second);
+        this.check(keys == 2 && bytes == (int64) 435258, "two keys, sizes summed");
+        this.check(second.equals("2026/b&c.jpg"), "&amp; decoded in text");
+
+        // 2. Writing a request body. An element with no content closes as
+        //    <Quiet/>; text escapes & < > ". It reads back as written.
+        XmlWriter w = heap XmlWriter();
+        w.start("Delete");
+        w.start("Object");
+        w.element("Key", "2026/b&c.jpg");
+        w.end();
+        w.start("Quiet");
+        w.end();
+        w.end();
+        String req #= w.toString();
+        System.stdout.println("  delete body: " + req);
+        this.check(req.equals("<Delete><Object><Key>2026/b&amp;c.jpg</Key></Object><Quiet/></Delete>"),
+            "writer output");
+        boolean writeRefused = false;
+        try {
+            w.end();
+        } catch (XmlWriteException e) {
+            writeRefused = true;
+        }
+        this.check(writeRefused, "end() with nothing open is refused");
+
+        // 3. Streaming: the same listing through an XmlSource in 7-byte
+        //    reads. The buffer stays at its initial size, so memory follows
+        //    the largest element, not the document.
+        TrickleSource src = heap TrickleSource(XmlDemo.listing());
+        XmlReader s = heap XmlReader(src, XmlReader.DEFAULT_LIMIT);
+        int32 starts = 0;
+        int32 e2 = s.next();
+        while (e2 != XmlEvent.END_DOCUMENT) {
+            if (e2 == XmlEvent.START_ELEMENT) { starts = starts + 1; }
+            e2 = s.next();
+        }
+        this.check(starts == 11, "streamed: 11 elements");
+        this.check(s.bufferCapacity() == XmlReader.INITIAL_BUFFER, "streamed in the initial buffer");
+
+        // 4. Refusals carry the byte offset: no DTDs (so no entity
+        //    expansion), no undefined entities, no mismatched tags.
+        int64 at = (int64) -1;
+        int8[] bad #= "<a><b>x</c></a>".toBytes();
+        XmlReader m = heap XmlReader(bad, (int64) bad.count());
+        try {
+            int32 e3 = m.next();
+            while (e3 != XmlEvent.END_DOCUMENT) { e3 = m.next(); }
+        } catch (XmlParseException e) {
+            at = e.position;
+        }
+        System.stdout.println("  mismatched end tag refused at byte " + at);
+        this.check(at == (int64) 7, "mismatch names its offset");
+    }
+}
